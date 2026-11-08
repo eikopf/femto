@@ -136,6 +136,7 @@ mod tests {
                         key,
                         addresses: vec![address],
                         expires_ms: 10000,
+                        jailed: false,
                     }],
                     &[],
                     br#"{"PacketFilter":[]}"#,

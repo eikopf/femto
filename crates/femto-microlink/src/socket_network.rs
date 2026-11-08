@@ -296,6 +296,7 @@ mod tests {
                     key: local_key,
                     addresses: vec!["100.64.0.1".parse().unwrap()],
                     expires_ms: 10000,
+                    jailed: false,
                 }],
                 &[],
                 br#"{"PacketFilter":[]}"#,

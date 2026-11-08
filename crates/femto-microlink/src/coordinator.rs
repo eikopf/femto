@@ -50,6 +50,8 @@ struct WireNode {
     expired: bool,
     #[serde(default)]
     machine_authorized: bool,
+    #[serde(default)]
+    is_jailed: bool,
     #[serde(rename = "UnsignedPeerAPIOnly", default)]
     unsigned_peer_api_only: bool,
     #[serde(default)]
@@ -431,7 +433,7 @@ impl Coordinator {
         let local_deadline = match map.node {
             Some(node) => {
                 let record = record(node, clock)?;
-                if record.peer.key != self.local_key || !record.permitted {
+                if record.peer.key != self.local_key || !record.permitted || record.peer.jailed {
                     return Err(MapError::Node);
                 }
                 if initial && self.discover_address {
@@ -641,6 +643,7 @@ fn record(node: WireNode, clock: Clock) -> Result<Record, MapError> {
             key: node.key,
             addresses,
             expires_ms,
+            jailed: node.is_jailed,
         },
         permitted: node.machine_authorized && !node.unsigned_peer_api_only && !node.expired,
     })
@@ -744,6 +747,29 @@ mod tests {
     }
     fn authorized(c: &mut Coordinator, n: u8, now: u64) -> bool {
         c.data_plane().begin_handshake(key(n), now).is_ok()
+    }
+
+    #[test]
+    fn jailed_peer_cannot_initiate_tcp_despite_allow_filter() {
+        let mut c = coordinator();
+        let mut map = full();
+        map["Peers"][0]["IsJailed"] = json!(true);
+        map["PacketFilter"] = json!([{"SrcIPs":["100.64.0.2"],
+            "DstPorts":[{"IP":"100.64.0.1","Ports":{"First":1234,"Last":1234}}],"IPProto":[6]}]);
+        apply(&mut c, map, 0).unwrap();
+        assert!(authorized(&mut c, 2, 1));
+        let mut remote = crate::tcp::Stream::connect(
+            "100.64.0.2:49152".parse().unwrap(),
+            "100.64.0.1:1234".parse().unwrap(),
+            1,
+        )
+        .unwrap();
+        remote.poll(0).unwrap();
+        let syn = remote.take_packet().unwrap();
+        assert!(matches!(
+            c.data_plane().authenticated_packet(key(2), syn, 1),
+            Err(PlaneError::Unauthorized)
+        ));
     }
 
     #[test]
@@ -1083,6 +1109,63 @@ mod tests {
         wire.extend(bytes);
         c.read_stream(&mut std::io::Cursor::new(wire), || false, || clock(0))
             .unwrap();
+        assert!(!authorized(&mut c, 2, 0));
+    }
+    #[test]
+    fn jail_updates_revoke_pending_packets_and_malformed_flags_fail_closed() {
+        for value in [json!(null), json!("true"), json!(1)] {
+            let mut c = coordinator();
+            apply(&mut c, full(), 0).unwrap();
+            let mut changed = node(2, 2);
+            changed["IsJailed"] = value;
+            assert!(apply(&mut c, json!({"PeersChanged":[changed]}), 1).is_err());
+            assert!(!authorized(&mut c, 2, 1));
+        }
+        for full_update in [false, true] {
+            let mut c = coordinator();
+            let mut map = full();
+            map["PacketFilter"] = json!([{"SrcIPs":["100.64.0.2"],"DstPorts":[{"IP":"100.64.0.1","Ports":{"First":1234,"Last":1234}}],"IPProto":[17]}]);
+            apply(&mut c, map, 0).unwrap();
+            let bytes = crate::udp::encode(
+                "100.64.0.2:9000".parse().unwrap(),
+                "100.64.0.1:1234".parse().unwrap(),
+                b"incoming",
+            )
+            .unwrap();
+            let pending = c
+                .data_plane()
+                .authenticated_packet(key(2), bytes.clone(), 1)
+                .unwrap()
+                .unwrap();
+            let mut peer = node(2, 2);
+            peer["IsJailed"] = json!(true);
+            let update = if full_update {
+                let mut replacement = full();
+                replacement["Peers"] = json!([peer]);
+                replacement["PacketFilter"] = json!([{"SrcIPs":["100.64.0.2"],"DstPorts":[{"IP":"100.64.0.1","Ports":{"First":1234,"Last":1234}}],"IPProto":[17]}]);
+                replacement
+            } else {
+                json!({"PeersChanged":[peer]})
+            };
+            apply(&mut c, update, 2).unwrap();
+            assert!(authorized(&mut c, 2, 2));
+            assert!(c.data_plane().release(pending, 2).is_err());
+            assert!(
+                c.data_plane()
+                    .authenticated_packet(key(2), bytes.clone(), 2)
+                    .is_err()
+            );
+            apply(&mut c, json!({"PeersChanged":[node(2, 2)]}), 3).unwrap();
+            assert!(
+                c.data_plane()
+                    .authenticated_packet(key(2), bytes, 3)
+                    .is_ok()
+            );
+        }
+        let mut c = coordinator();
+        let mut map = full();
+        map["Node"]["IsJailed"] = json!(true);
+        assert!(apply(&mut c, map, 0).is_err());
         assert!(!authorized(&mut c, 2, 0));
     }
 }

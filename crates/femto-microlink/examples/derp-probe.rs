@@ -32,6 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 key,
                 addresses: vec![remote],
                 expires_ms: 120_000,
+                jailed: false,
             }],
             &[],
             &policy,

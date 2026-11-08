@@ -826,6 +826,7 @@ impl<S: EpochStore> Network<S> {
     }
     pub fn close_udp(&mut self, socket: crate::udp::Socket) -> Result<(), Error> {
         let port = self.udp_bindings.close(socket)?;
+        self.coordinator.data_plane().revoke_udp_replies(socket);
         self.incoming
             .retain(|(_, _, destination)| *destination != Some(port));
         self.outgoing
@@ -851,8 +852,19 @@ impl<S: EpochStore> Network<S> {
             destination,
             payload,
         )?;
+        let reply = self.coordinator.data_plane().prepare_udp_reply(
+            peer,
+            socket,
+            std::net::SocketAddrV4::new(address, port),
+            destination,
+            now_ms,
+        )?;
         self.send_ip(peer, &packet, now_ms)?;
         self.outgoing.back_mut().ok_or(Error::Packet)?.udp_socket = Some(socket);
+        if let Err(error) = self.coordinator.data_plane().commit_udp_reply(reply) {
+            self.outgoing.pop_back();
+            return Err(error.into());
+        }
         Ok(())
     }
     pub fn receive_udp(
@@ -904,8 +916,19 @@ impl<S: EpochStore> Network<S> {
         if !self.ensure_session(peer, now_ms)? {
             return Ok(false);
         }
+        let reply = self.coordinator.data_plane().prepare_udp_reply(
+            peer,
+            socket,
+            std::net::SocketAddrV4::new(address, port),
+            destination,
+            now_ms,
+        )?;
         self.send_ip(peer, &packet, now_ms)?;
         self.outgoing.back_mut().ok_or(Error::Packet)?.udp_socket = Some(socket);
+        if let Err(error) = self.coordinator.data_plane().commit_udp_reply(reply) {
+            self.outgoing.pop_back();
+            return Err(error.into());
+        }
         Ok(true)
     }
     pub fn probe(&mut self, peer: Key, now_ms: u64) -> Result<bool, Error> {
@@ -1216,6 +1239,12 @@ mod tests {
             .apply_map(&serde_json::to_vec(&map).unwrap(), clock(0))
             .unwrap();
         network
+    }
+    fn jail_remote(network: &mut Network<Store>, remote: &DeviceIdentity) {
+        let update = json!({"PeersChanged":[{"ID":2,"Key":remote.node_key().public().to_string(),"DiscoKey":remote.disco_key().public().to_string(),"Addresses":["100.64.0.2/32"],"Endpoints":["192.0.2.2:1234"],"HomeDERP":7,"MachineAuthorized":true,"IsJailed":true}]});
+        network
+            .apply_map(&serde_json::to_vec(&update).unwrap(), clock(0))
+            .unwrap();
     }
     fn deliver(
         from: &mut Network<Store>,
@@ -2198,6 +2227,82 @@ mod tests {
         assert_eq!(echo.poll(&mut nb, 8).unwrap().queued, 0);
     }
     #[test]
+    fn jailed_peer_udp_requests_round_trip_but_unsolicited_and_closed_socket_replies_fail() {
+        fn rejected(
+            from: &mut Network<Store>,
+            to: &mut Network<Store>,
+            source: SocketAddr,
+            now: u64,
+        ) {
+            let mut packet = None;
+            assert!(
+                from.flush_one(now, |_, _, bytes| {
+                    packet = Some(bytes.to_vec());
+                    Ok(())
+                })
+                .unwrap()
+            );
+            let result = to.receive(Source::Udp(source), &packet.unwrap(), now);
+            assert!(
+                matches!(
+                    result,
+                    Err(Error::Handshake(crate::handshake::Error::Plane(
+                        PlaneError::Unauthorized
+                    )))
+                ),
+                "unexpected receive result: {result:?}"
+            );
+        }
+        for port in [1234, 49152] {
+            let a = DeviceIdentity::generate().unwrap();
+            let b = DeviceIdentity::generate().unwrap();
+            let ak = a.node_key().public();
+            let bk = b.node_key().public();
+            let ea = "192.0.2.1:1234".parse().unwrap();
+            let eb = "192.0.2.2:1234".parse().unwrap();
+            let mut na = network(&a, &b, 1, 2);
+            let mut nb = network(&b, &a, 2, 1);
+            jail_remote(&mut na, &b);
+            let sa = na.bind_udp(port, 0).unwrap();
+            let sb = nb.bind_udp(1234, 0).unwrap();
+            let da = std::net::SocketAddrV4::new("100.64.0.1".parse().unwrap(), port);
+            let db = "100.64.0.2:1234".parse().unwrap();
+            na.initiate(bk, 1).unwrap();
+            deliver(&mut na, &mut nb, ak, ea, 1);
+            deliver(&mut nb, &mut na, bk, eb, 2);
+            deliver(&mut na, &mut nb, ak, ea, 3);
+            nb.send_udp(sb, ak, da, b"unsolicited", 4).unwrap();
+            rejected(&mut nb, &mut na, eb, 4);
+            na.send_udp(sa, bk, db, b"request", 5).unwrap();
+            deliver(&mut na, &mut nb, ak, ea, 5);
+            assert_eq!(nb.receive_udp(sb, 5).unwrap().unwrap().payload, b"request");
+            na.apply_map(b"{}", clock(6)).unwrap();
+            nb.send_udp(sb, ak, da, b"reply", 6).unwrap();
+            deliver(&mut nb, &mut na, bk, eb, 6);
+            assert_eq!(na.receive_udp(sa, 6).unwrap().unwrap().payload, b"reply");
+            nb.send_udp(sb, ak, da, b"queued reply", 7).unwrap();
+            deliver(&mut nb, &mut na, bk, eb, 7);
+            na.close_udp(sa).unwrap();
+            let reopened = na.bind_udp(port, 7).unwrap();
+            assert!(na.receive_udp(reopened, 7).unwrap().is_none());
+            nb.send_udp(sb, ak, da, b"late reply", 8).unwrap();
+            rejected(&mut nb, &mut na, eb, 8);
+            for _ in 0..OUTGOING {
+                na.send_udp(reopened, bk, db, b"fill", 9).unwrap();
+            }
+            let fresh = "100.64.0.2:9000".parse().unwrap();
+            assert!(na.send_udp(reopened, bk, fresh, b"not queued", 9).is_err());
+            let unsolicited = crate::udp::encode(fresh, da, b"not a reply").unwrap();
+            assert!(
+                na.coordinator
+                    .data_plane()
+                    .authenticated_packet(bk, unsolicited, 9)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
     fn application_udp_round_trip_close_and_policy_revocation() {
         let a = DeviceIdentity::generate().unwrap();
         let b = DeviceIdentity::generate().unwrap();
@@ -2594,111 +2699,116 @@ mod tests {
     }
     #[test]
     fn tcp_owner_encrypted_transfer_and_revocation() {
-        let a = DeviceIdentity::generate().unwrap();
-        let b = DeviceIdentity::generate().unwrap();
-        let ak = a.node_key().public();
-        let bk = b.node_key().public();
-        let ea = "192.0.2.1:1234".parse().unwrap();
-        let eb = "192.0.2.2:1234".parse().unwrap();
-        let mut na = network(&a, &b, 1, 2);
-        let mut nb = network(&b, &a, 2, 1);
-        let allow = br#"{"PacketFilter":[{"SrcIPs":["*"],"DstPorts":[{"IP":"*","Ports":{"First":80,"Last":80}}],"IPProto":[6]}]}"#;
-        na.apply_map(br#"{"PacketFilter":[]}"#, clock(0)).unwrap();
-        nb.apply_map(allow, clock(0)).unwrap();
-        let target = "100.64.0.2:80".parse().unwrap();
-        let socket = na.connect_tcp(bk, target, 0).unwrap();
-        let local = na.tcp_local_address(&socket, 0).unwrap();
-        let mut server = crate::tcp::Stream::new(target, local, 99, true).unwrap();
-        // poll_tcp initiates the authenticated WireGuard session itself.
-        na.poll_tcp(&socket, 0).unwrap();
-        deliver(&mut na, &mut nb, ak, ea, 1);
-        deliver(&mut nb, &mut na, bk, eb, 2);
-        deliver(&mut na, &mut nb, ak, ea, 3);
-        for now in 4..20 {
-            na.poll_tcp(&socket, now).unwrap();
-            while !na.outgoing.is_empty() {
-                deliver(&mut na, &mut nb, ak, ea, now);
+        for jailed in [false, true] {
+            let a = DeviceIdentity::generate().unwrap();
+            let b = DeviceIdentity::generate().unwrap();
+            let ak = a.node_key().public();
+            let bk = b.node_key().public();
+            let ea = "192.0.2.1:1234".parse().unwrap();
+            let eb = "192.0.2.2:1234".parse().unwrap();
+            let mut na = network(&a, &b, 1, 2);
+            let mut nb = network(&b, &a, 2, 1);
+            if jailed {
+                jail_remote(&mut na, &b);
             }
-            while let Some((key, bytes)) = nb.receive_ip(now).unwrap() {
-                assert_eq!(key, ak);
-                server.ingest(&bytes).unwrap();
+            let allow = br#"{"PacketFilter":[{"SrcIPs":["*"],"DstPorts":[{"IP":"*","Ports":{"First":80,"Last":80}}],"IPProto":[6]}]}"#;
+            na.apply_map(br#"{"PacketFilter":[]}"#, clock(0)).unwrap();
+            nb.apply_map(allow, clock(0)).unwrap();
+            let target = "100.64.0.2:80".parse().unwrap();
+            let socket = na.connect_tcp(bk, target, 0).unwrap();
+            let local = na.tcp_local_address(&socket, 0).unwrap();
+            let mut server = crate::tcp::Stream::new(target, local, 99, true).unwrap();
+            // poll_tcp initiates the authenticated WireGuard session itself.
+            na.poll_tcp(&socket, 0).unwrap();
+            deliver(&mut na, &mut nb, ak, ea, 1);
+            deliver(&mut nb, &mut na, bk, eb, 2);
+            deliver(&mut na, &mut nb, ak, ea, 3);
+            for now in 4..20 {
+                na.poll_tcp(&socket, now).unwrap();
+                while !na.outgoing.is_empty() {
+                    deliver(&mut na, &mut nb, ak, ea, now);
+                }
+                while let Some((key, bytes)) = nb.receive_ip(now).unwrap() {
+                    assert_eq!(key, ak);
+                    server.ingest(&bytes).unwrap();
+                }
+                server.poll(now).unwrap();
+                while let Some(bytes) = server.take_packet() {
+                    nb.send_ip(ak, &bytes, now).unwrap();
+                }
+                while !nb.outgoing.is_empty() {
+                    deliver(&mut nb, &mut na, bk, eb, now);
+                }
             }
-            server.poll(now).unwrap();
-            while let Some(bytes) = server.take_packet() {
-                nb.send_ip(ak, &bytes, now).unwrap();
-            }
-            while !nb.outgoing.is_empty() {
-                deliver(&mut nb, &mut na, bk, eb, now);
-            }
-        }
-        assert_eq!(
-            na.tcp_state(&socket, 20).unwrap(),
-            smoltcp::socket::tcp::State::Established
-        );
-        assert_eq!(na.write_tcp(&socket, b"request", 20).unwrap(), 7);
-        na.poll_tcp(&socket, 20).unwrap();
-        while !na.outgoing.is_empty() {
-            deliver(&mut na, &mut nb, ak, ea, 20);
-        }
-        while let Some((_, bytes)) = nb.receive_ip(20).unwrap() {
-            server.ingest(&bytes).unwrap();
-        }
-        server.poll(20).unwrap();
-        let mut data = [0; 32];
-        assert_eq!(server.read(&mut data).unwrap(), 7);
-        assert_eq!(&data[..7], b"request");
-        server.write(b"response").unwrap();
-        server.poll(21).unwrap();
-        while let Some(bytes) = server.take_packet() {
-            nb.send_ip(ak, &bytes, 21).unwrap();
-        }
-        while !nb.outgoing.is_empty() {
-            deliver(&mut nb, &mut na, bk, eb, 21);
-        }
-        na.poll_tcp(&socket, 21).unwrap();
-        assert_eq!(na.read_tcp(&socket, &mut data[..3], 21).unwrap(), 3);
-        assert_eq!(&data[..3], b"res");
-        let old_plan = na.relay_plan(bk, 21).unwrap().unwrap();
-        for update in [
-            br#"{"KeepAlive":true}"#.as_slice(),
-            br#"{"PacketFilter":[]}"#,
-            br#"{"PeersChangedPatch":[{"NodeID":2,"Endpoints":["192.0.2.99:1234"]}]}"#,
-        ] {
-            na.apply_map(update, clock(21)).unwrap();
             assert_eq!(
-                na.tcp_state(&socket, 21).unwrap(),
+                na.tcp_state(&socket, 20).unwrap(),
                 smoltcp::socket::tcp::State::Established
             );
+            assert_eq!(na.write_tcp(&socket, b"request", 20).unwrap(), 7);
+            na.poll_tcp(&socket, 20).unwrap();
+            while !na.outgoing.is_empty() {
+                deliver(&mut na, &mut nb, ak, ea, 20);
+            }
+            while let Some((_, bytes)) = nb.receive_ip(20).unwrap() {
+                server.ingest(&bytes).unwrap();
+            }
+            server.poll(20).unwrap();
+            let mut data = [0; 32];
+            assert_eq!(server.read(&mut data).unwrap(), 7);
+            assert_eq!(&data[..7], b"request");
+            server.write(b"response").unwrap();
+            server.poll(21).unwrap();
+            while let Some(bytes) = server.take_packet() {
+                nb.send_ip(ak, &bytes, 21).unwrap();
+            }
+            while !nb.outgoing.is_empty() {
+                deliver(&mut nb, &mut na, bk, eb, 21);
+            }
+            na.poll_tcp(&socket, 21).unwrap();
+            assert_eq!(na.read_tcp(&socket, &mut data[..3], 21).unwrap(), 3);
+            assert_eq!(&data[..3], b"res");
+            let old_plan = na.relay_plan(bk, 21).unwrap().unwrap();
+            for update in [
+                br#"{"KeepAlive":true}"#.as_slice(),
+                br#"{"PacketFilter":[]}"#,
+                br#"{"PeersChangedPatch":[{"NodeID":2,"Endpoints":["192.0.2.99:1234"]}]}"#,
+            ] {
+                na.apply_map(update, clock(21)).unwrap();
+                assert_eq!(
+                    na.tcp_state(&socket, 21).unwrap(),
+                    smoltcp::socket::tcp::State::Established
+                );
+            }
+            assert!(na.validate_relay_plan(&old_plan, 21).unwrap());
+            assert_eq!(na.read_tcp(&socket, &mut data[..1], 21).unwrap(), 1);
+            assert_eq!(&data[..1], b"p");
+            server.write(b"more").unwrap();
+            server.poll(21).unwrap();
+            while let Some(bytes) = server.take_packet() {
+                nb.send_ip(ak, &bytes, 21).unwrap();
+            }
+            while !nb.outgoing.is_empty() {
+                deliver(&mut nb, &mut na, bk, eb, 21);
+            }
+            na.poll_tcp(&socket, 21).unwrap();
+            na.write_tcp(&socket, b"queued", 21).unwrap();
+            na.poll_tcp(&socket, 21).unwrap();
+            let permit = retain_delivery(&mut na, 21);
+            assert!(na.validate_delivery(&permit, 21).unwrap());
+            na.apply_map(allow, clock(22)).unwrap();
+            assert!(na.read_tcp(&socket, &mut data, 22).is_err());
+            assert!(na.write_tcp(&socket, b"late", 22).is_err());
+            assert!(!na.validate_delivery(&permit, 22).unwrap());
+            assert!(na.outgoing.is_empty());
+            na.apply_map(allow, clock(23)).unwrap();
+            let fresh = na.connect_tcp(bk, target, 23).unwrap();
+            na.poll_tcp(&fresh, 23).unwrap();
+            let pending = retain_delivery(&mut na, 23);
+            assert!(na.validate_delivery(&pending, 23).unwrap());
+            na.abort_tcp(&fresh).unwrap();
+            assert!(!na.validate_delivery(&pending, 23).unwrap());
+            assert!(na.outgoing.is_empty());
         }
-        assert!(na.validate_relay_plan(&old_plan, 21).unwrap());
-        assert_eq!(na.read_tcp(&socket, &mut data[..1], 21).unwrap(), 1);
-        assert_eq!(&data[..1], b"p");
-        server.write(b"more").unwrap();
-        server.poll(21).unwrap();
-        while let Some(bytes) = server.take_packet() {
-            nb.send_ip(ak, &bytes, 21).unwrap();
-        }
-        while !nb.outgoing.is_empty() {
-            deliver(&mut nb, &mut na, bk, eb, 21);
-        }
-        na.poll_tcp(&socket, 21).unwrap();
-        na.write_tcp(&socket, b"queued", 21).unwrap();
-        na.poll_tcp(&socket, 21).unwrap();
-        let permit = retain_delivery(&mut na, 21);
-        assert!(na.validate_delivery(&permit, 21).unwrap());
-        na.apply_map(allow, clock(22)).unwrap();
-        assert!(na.read_tcp(&socket, &mut data, 22).is_err());
-        assert!(na.write_tcp(&socket, b"late", 22).is_err());
-        assert!(!na.validate_delivery(&permit, 22).unwrap());
-        assert!(na.outgoing.is_empty());
-        na.apply_map(allow, clock(23)).unwrap();
-        let fresh = na.connect_tcp(bk, target, 23).unwrap();
-        na.poll_tcp(&fresh, 23).unwrap();
-        let pending = retain_delivery(&mut na, 23);
-        assert!(na.validate_delivery(&pending, 23).unwrap());
-        na.abort_tcp(&fresh).unwrap();
-        assert!(!na.validate_delivery(&pending, 23).unwrap());
-        assert!(na.outgoing.is_empty());
     }
     #[test]
     fn tcp_connection_survives_renewal_and_retransmits_lost_old_key_data() {

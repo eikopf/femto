@@ -13,6 +13,8 @@ use std::{
 };
 
 type Key = PublicKey<Node>;
+const MAX_UDP_REPLIES: usize = 32;
+const UDP_REPLY_LIFETIME_MS: u64 = 30_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Peer {
@@ -20,6 +22,8 @@ pub struct Peer {
     pub addresses: Vec<Ipv4Addr>,
     /// Monotonic deadline translated by the authenticated control adapter.
     pub expires_ms: u64,
+    /// This peer may reply to managed outgoing flows but cannot initiate inbound traffic.
+    pub jailed: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -82,6 +86,14 @@ struct TcpReply {
     remote: std::net::SocketAddrV4,
     lease: std::sync::Weak<()>,
 }
+pub(crate) struct UdpReply {
+    peer: Key,
+    socket: crate::udp::Socket,
+    local: std::net::SocketAddrV4,
+    remote: std::net::SocketAddrV4,
+    deadline: u64,
+}
+
 pub struct DataPlane {
     local: Ipv4Addr,
     max_peers: usize,
@@ -93,6 +105,7 @@ pub struct DataPlane {
     last_ms: u64,
     synchronized: bool,
     tcp_replies: Vec<TcpReply>,
+    udp_replies: Vec<UdpReply>,
 }
 
 impl DataPlane {
@@ -124,6 +137,7 @@ impl DataPlane {
             last_ms: now_ms,
             synchronized: false,
             tcp_replies: Vec::new(),
+            udp_replies: Vec::new(),
         })
     }
 
@@ -131,6 +145,7 @@ impl DataPlane {
     pub fn disconnect(&mut self) {
         self.authorization = std::sync::Arc::new(());
         self.tcp_replies.clear();
+        self.udp_replies.clear();
         self.generation = std::sync::Arc::new(());
         self.peers.clear();
         self.policy.reset();
@@ -176,6 +191,7 @@ impl DataPlane {
             }
         };
         if !self.synchronized || peers != self.peers || !policy.same_rules(&self.policy) {
+            self.udp_replies.clear();
             self.authorization = std::sync::Arc::new(());
         }
         self.sessions.retain_authorized(|key| {
@@ -446,6 +462,73 @@ impl DataPlane {
         });
         Ok(())
     }
+    /// Prepare before queuing outbound ciphertext; commit only after queue acceptance.
+    pub(crate) fn prepare_udp_reply(
+        &mut self,
+        peer: Key,
+        socket: crate::udp::Socket,
+        local: std::net::SocketAddrV4,
+        remote: std::net::SocketAddrV4,
+        now_ms: u64,
+    ) -> Result<UdpReply, PlaneError> {
+        self.validate_remote_address(peer, *remote.ip(), now_ms)?;
+        if *local.ip() != self.local || local.port() == 0 || remote.port() == 0 {
+            return Err(PlaneError::Unauthorized);
+        }
+        let deadline = now_ms
+            .checked_add(UDP_REPLY_LIFETIME_MS)
+            .ok_or(PlaneError::Clock)?;
+        self.udp_replies.retain(|flow| flow.deadline > now_ms);
+        if self.udp_replies.len() >= MAX_UDP_REPLIES
+            && !self.udp_replies.iter().any(|flow| {
+                flow.peer == peer
+                    && flow.socket == socket
+                    && flow.local == local
+                    && flow.remote == remote
+            })
+        {
+            return Err(PlaneError::Directory);
+        }
+        Ok(UdpReply {
+            peer,
+            socket,
+            local,
+            remote,
+            deadline,
+        })
+    }
+    pub(crate) fn commit_udp_reply(&mut self, reply: UdpReply) -> Result<(), PlaneError> {
+        if let Some(flow) = self.udp_replies.iter_mut().find(|flow| {
+            flow.peer == reply.peer
+                && flow.socket == reply.socket
+                && flow.local == reply.local
+                && flow.remote == reply.remote
+        }) {
+            *flow = reply;
+        } else {
+            // The single network owner does not prepare another flow between
+            // reservation and commit; send_ip cannot add UDP return permissions.
+            if self.udp_replies.len() >= MAX_UDP_REPLIES {
+                return Err(PlaneError::Directory);
+            }
+            self.udp_replies.push(reply);
+        }
+        Ok(())
+    }
+    pub(crate) fn revoke_udp_replies(&mut self, socket: crate::udp::Socket) {
+        self.udp_replies.retain(|flow| flow.socket != socket);
+    }
+    fn allows_udp_reply(&self, peer: Key, bytes: &[u8], now_ms: u64) -> bool {
+        let Ok(packet) = crate::udp::decode(bytes) else {
+            return false;
+        };
+        self.udp_replies.iter().any(|flow| {
+            flow.peer == peer
+                && flow.deadline > now_ms
+                && flow.local == packet.destination
+                && flow.remote == packet.source
+        })
+    }
     fn allows_tcp_reply(&self, peer: Key, bytes: &[u8]) -> bool {
         use smoltcp::wire::{Ipv4Packet, TcpPacket};
         let Ok(ip) = Ipv4Packet::new_checked(bytes) else {
@@ -514,8 +597,9 @@ impl DataPlane {
         let (source, destination, protocol, port) = packet_tuple(bytes)?;
         if !owner.addresses.contains(&source)
             || destination != self.local
-            || (!self.policy.allows(source, destination, protocol, port)
-                && !self.allows_tcp_reply(*peer, bytes))
+            || ((owner.jailed || !self.policy.allows(source, destination, protocol, port))
+                && !self.allows_tcp_reply(*peer, bytes)
+                && !self.allows_udp_reply(*peer, bytes, now_ms))
         {
             return Err(PlaneError::Unauthorized);
         }
@@ -583,6 +667,7 @@ mod tests {
             key,
             addresses: vec![Ipv4Addr::new(100, 64, 0, 2)],
             expires_ms: 10_000,
+            jailed: false,
         }
     }
     fn plane() -> DataPlane {
@@ -943,5 +1028,142 @@ mod tests {
             &authorization,
             &plane.authorization_identity()
         ));
+    }
+    fn jailed_plane() -> (DataPlane, Key, Peer) {
+        let key = Key::from_bytes([2; 32]);
+        let mut owner = peer(key);
+        owner.jailed = true;
+        owner.expires_ms = u64::MAX;
+        let mut plane = DataPlane::new("100.64.0.1".parse().unwrap(), 4, 2, 0).unwrap();
+        plane
+            .apply_update(true, &[owner.clone()], &[], JAILED_ALLOW, 0)
+            .unwrap();
+        (plane, key, owner)
+    }
+    const JAILED_ALLOW: &[u8] = br#"{"PacketFilter":[{"SrcIPs":["100.64.0.2"],"DstPorts":[{"IP":"100.64.0.1","Ports":{"First":1,"Last":65535}}],"IPProto":[6,17]}]}"#;
+
+    #[test]
+    fn jailed_tcp_allows_only_leased_outbound_replies() {
+        let (mut plane, key, _) = jailed_plane();
+        let (local, remote, reply) = syn_ack();
+        assert!(plane.authenticated_packet(key, reply.clone(), 1).is_err());
+        let permit = plane.begin_handshake(key, 1).unwrap();
+        let lease = std::sync::Arc::new(());
+        plane
+            .allow_tcp_reply(&permit, local, remote, &lease, 1)
+            .unwrap();
+        let pending = plane
+            .authenticated_packet(key, reply.clone(), 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(plane.release(pending, 1).unwrap(), reply);
+        let mut inbound = crate::tcp::Stream::connect(remote, local, 1).unwrap();
+        inbound.poll(0).unwrap();
+        assert!(
+            plane
+                .authenticated_packet(key, inbound.take_packet().unwrap(), 2)
+                .is_err()
+        );
+        let pending = plane.authenticated_packet(key, reply, 2).unwrap().unwrap();
+        drop(lease);
+        assert!(plane.release(pending, 2).is_err());
+    }
+
+    #[test]
+    fn jailed_udp_permissions_require_commit_exact_tuple_and_live_deadline() {
+        let (mut plane, key, _) = jailed_plane();
+        let local = "100.64.0.1:1234".parse().unwrap();
+        let remote = "100.64.0.2:9000".parse().unwrap();
+        let mut bindings = crate::udp::Bindings::default();
+        let socket = bindings.bind(1234).unwrap();
+        let bytes = crate::udp::encode(remote, local, b"reply").unwrap();
+        let permit = plane
+            .prepare_udp_reply(key, socket, local, remote, 1)
+            .unwrap();
+        assert!(plane.authenticated_packet(key, bytes.clone(), 1).is_err());
+        plane.commit_udp_reply(permit).unwrap();
+        assert!(plane.authenticated_packet(key, bytes.clone(), 1).is_ok());
+        for (from, to) in [
+            ("100.64.0.2:9001", "100.64.0.1:1234"),
+            ("100.64.0.2:9000", "100.64.0.1:1235"),
+        ] {
+            let wrong =
+                crate::udp::encode(from.parse().unwrap(), to.parse().unwrap(), b"unsolicited")
+                    .unwrap();
+            assert!(plane.authenticated_packet(key, wrong, 2).is_err());
+        }
+        let mut corrupt = bytes.clone();
+        corrupt[26] ^= 1;
+        assert!(plane.authenticated_packet(key, corrupt, 3).is_err());
+        let pending = plane
+            .authenticated_packet(key, bytes.clone(), 30_000)
+            .unwrap()
+            .unwrap();
+        assert!(plane.release(pending, 30_001).is_err());
+        assert!(plane.authenticated_packet(key, bytes, 30_001).is_err());
+    }
+
+    #[test]
+    fn udp_reply_permissions_are_bounded_and_revoked_on_close_and_policy_change() {
+        let (mut plane, key, owner) = jailed_plane();
+        let local = "100.64.0.1:1234".parse().unwrap();
+        let mut bindings = crate::udp::Bindings::default();
+        let socket = bindings.bind(1234).unwrap();
+        for port in 9000..9032 {
+            let remote = std::net::SocketAddrV4::new("100.64.0.2".parse().unwrap(), port);
+            let permit = plane
+                .prepare_udp_reply(key, socket, local, remote, 1)
+                .unwrap();
+            plane.commit_udp_reply(permit).unwrap();
+        }
+        let remote = "100.64.0.2:9000".parse().unwrap();
+        let extra = "100.64.0.2:9032".parse().unwrap();
+        assert!(
+            plane
+                .prepare_udp_reply(key, socket, local, extra, 2)
+                .is_err()
+        );
+        let refresh = plane
+            .prepare_udp_reply(key, socket, local, remote, 2)
+            .unwrap();
+        plane.commit_udp_reply(refresh).unwrap();
+        assert_eq!(plane.udp_replies.len(), 32);
+        plane.apply_update(false, &[], &[], b"{}", 3).unwrap();
+        let reply = crate::udp::encode(remote, local, b"reply").unwrap();
+        let pending = plane
+            .authenticated_packet(key, reply.clone(), 3)
+            .unwrap()
+            .unwrap();
+        plane.revoke_udp_replies(socket);
+        assert!(plane.release(pending, 3).is_err());
+        let permit = plane
+            .prepare_udp_reply(key, socket, local, remote, 4)
+            .unwrap();
+        plane.commit_udp_reply(permit).unwrap();
+        let pending = plane
+            .authenticated_packet(key, reply.clone(), 4)
+            .unwrap()
+            .unwrap();
+        plane
+            .apply_update(false, &[owner], &[], br#"{"PacketFilter":[]}"#, 5)
+            .unwrap();
+        assert!(plane.release(pending, 5).is_err());
+        assert!(plane.authenticated_packet(key, reply, 5).is_err());
+        assert!(plane.udp_replies.is_empty());
+        for port in 9000..9032 {
+            let destination = std::net::SocketAddrV4::new(*remote.ip(), port);
+            let permit = plane
+                .prepare_udp_reply(key, socket, local, destination, 6)
+                .unwrap();
+            plane.commit_udp_reply(permit).unwrap();
+        }
+        let permit = plane
+            .prepare_udp_reply(key, socket, local, extra, 30_006)
+            .unwrap();
+        plane.commit_udp_reply(permit).unwrap();
+        let old_reply = crate::udp::encode(remote, local, b"expired").unwrap();
+        assert!(plane.authenticated_packet(key, old_reply, 30_006).is_err());
+        let new_reply = crate::udp::encode(extra, local, b"new flow").unwrap();
+        assert!(plane.authenticated_packet(key, new_reply, 30_006).is_ok());
     }
 }

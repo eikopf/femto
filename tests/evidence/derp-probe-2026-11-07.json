@@ -1,0 +1,1 @@
+{"address":"185.40.234.219:443","elapsed_ms":118,"packets":"bidirectional IPv4/UDP through receive policy","relay":"derp4f.tailscale.com","result":"passed","tailnet_enrolled":false,"transport":"verified TLS + DERP","unix_seconds":1794056182,"wireguard_handshake":"Rust pair over DERP"}

@@ -1,0 +1,13 @@
+# FreeInk reference
+
+Picco identification, SSD1677/SSD2677 register sequences, board pins, and the DEPG0397 and SE0400NQW47 full-refresh waveforms follow FreeInk SDK revision `567f448959c4379ecf7025b6abb00d8dbc70abec`. Reference files are `libs/display/FreeInkDisplay/src/driver/Ssd1677Driver.cpp`, `libs/display/FreeInkDisplay/src/driver/Ssd2677Driver.cpp`, `libs/display/FreeInkDisplay/src/lut/Ssd1677Luts.h`, `libs/display/FreeInkDisplay/src/lut/Ssd2677Luts.h`, and `libs/hardware/BoardConfig/include/BoardConfig.h` in https://github.com/Free-Ink/freeink-sdk.
+
+The full, fast, and absolute grayscale waveforms are copied from the MIT-licensed reference, including the shared YRD0426/OPM040B3 fast table, SSD1677 factory-quality table, and SE0400NQW47 image table. The Rust drivers and firmware adapter translate the relevant command and pin behavior. The FreeInk copyright and license are retained in [LICENSE-FreeInk](LICENSE-FreeInk).
+
+TMA525C initialization, PIP report fields, and coordinate conventions follow `libs/hardware/InputManager/src/InputManager.cpp` in the same source revision. The Rust implementation adds bounded gesture cancellation and an independent input task; physical behavior has not been qualified.
+
+The frontlight register sequence and discrete dual-channel level table follow `libs/hardware/FrontlightManager/src/FrontlightManager.cpp` in the same revision. `src/frontlight/table.rs` copies the MIT-licensed table. Brightness selects ten exact table columns plus off; warmth selects ten rows. The reference's percentage interpolation is not implemented. Physical brightness, color temperature, and power use remain unqualified.
+
+Picco battery pin/divider selection, SGM41562 status decoding, and the charging/discharging voltage tables follow `libs/hardware/BoardConfig/include/BoardConfig.h` and `libs/hardware/BatteryMonitor/src/BatteryMonitor.cpp` at the same revision. The tables in `src/battery.rs` retain the reference's duplicate-anchor interpolation. Femto does not copy the charger configuration or ship-mode writes. Voltage estimates and status bits require physical qualification.
+
+Display deep-sleep commands and power-down ordering follow the same SSD1677/SSD2677 driver files. Firmware GPIO2 RTC wake setup, SD bus parking, shared-rail shutdown, and GPIO hold behavior follow `libs/hardware/PowerManager/src/PowerManager.cpp` and the board configuration at the pinned revision. The firmware adds journal-save gating and a bounded release wait. Physical sleep/wake behavior has not been qualified.

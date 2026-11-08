@@ -1,0 +1,52 @@
+{
+  "feature": "Cooperative reader startup and cancellable native simulator loading",
+  "workspace_rust_tests_passed": 851,
+  "workspace_rust_test_batches": 65,
+  "firmware_python_tests_passed": 7,
+  "workspace_check_passed": true,
+  "final_workspace_clippy_passed": true,
+  "native_x11_smoke_passed": true,
+  "picco_firmware_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Startup hashes at most one 8192-byte chunk or indexes one page per step",
+    "Restored source position, bookmarks, page count, and rendered pixels match synchronous construction",
+    "Incomplete startup jobs reject finish",
+    "Document parse errors are deferred until hashing finishes",
+    "Native Escape event cancels hashing even when the press is shorter than a frame",
+    "Cancellation preserves saved state byte-for-byte and reopening succeeds",
+    "Existing native navigation, typography, library, links, and previews still pass"
+  ],
+  "limitations": [
+    "Picco startup remains synchronous",
+    "Metadata/chapter parsing, font loading, state loading, and library scanning remain synchronous",
+    "A page step is not a wall-clock latency bound",
+    "The final simulator key-event fix received separate native and Clippy validation after the workspace run began; shared controller source was unchanged during that run"
+  ],
+  "logs": {
+    "workspace": {
+      "path": "output/verification/cooperative-startup-workspace.log",
+      "sha256": "fbe4f98158774fa8a5d591a0b6c4e6853c94d8b6245137ee5286945432f258ca"
+    },
+    "final_clippy": {
+      "path": "output/verification/cooperative-startup-final_clippy.log",
+      "sha256": "8cb294f2de249c7e24b04f2afecfa19f6c894b5f31caca628e21bcfe4ea06eeb"
+    },
+    "native_x11": {
+      "path": "output/verification/cooperative-startup-native_x11.log",
+      "sha256": "27002a74a50747f924d252a994f28f1e56df05b81c3e6ae1667d6d1056138dea"
+    },
+    "firmware": {
+      "path": "output/verification/cooperative-startup-firmware.log",
+      "sha256": "0448507cfeab8d92e19d6416933b36708c90247d4d25b412119da1055907bae5"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/controller.rs": "7fc62b9d6efcb88f4e11ec068c185c8d89917fac27f237e499a8301999ed4c7f",
+    "crates/femto-reader/tests/controller.rs": "8f0d79b6ad690124963bd725bf4b2dd82240461ad194b6f328c95526534df9f7",
+    "crates/femto/src/simulator.rs": "c75860190d55201d3acc7a9c64e713741adb5ca2d6712ddcf7a456c9b9a7031c",
+    "scripts/simulator-smoke.py": "3851235f26493814aaa0d15a16fa2ff41ff1dc020e26c627a3d99f6ca6371e37",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "7bb52d1cc6e195f719bf1746cd5c2307e48dd1ff021b8d703c655730837f9470"
+  }
+}

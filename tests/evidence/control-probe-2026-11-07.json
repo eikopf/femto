@@ -1,0 +1,1 @@
+{"address":"192.200.0.101:443","capability_version":142,"elapsed_ms":46,"host":"controlplane.tailscale.com","result":"passed","tailnet_enrolled":false,"unix_seconds":1794056470,"verified":"TLS, Noise IK, EarlyNoise challenge, HTTP2 settings"}

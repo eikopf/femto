@@ -1,0 +1,53 @@
+{
+  "feature": "Multi-word selection by repeated source-range extension",
+  "ui_tests_passed": 44,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "checks": [
+    "Forward and reverse endpoint taps yield the same range across paragraphs",
+    "Interior-word extension retains the outer endpoints",
+    "Preview and extension do not mutate saved state",
+    "Save retains exact source endpoints and paragraph-separated quote bytes without moving reading position",
+    "Cancel during extension discards pending range; a fresh selection starts with one word",
+    "Existing single-word, panning, clipping and shared UI regressions pass"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --test ui && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco"
+  ],
+  "input_sha256": {
+    "crates/femto-reader/src/ui.rs": "d3f70508db20c8fb5d8b791a57b6dbfd23e34f293eb03642ff8936b1f30b91b1",
+    "crates/femto-reader/tests/ui.rs": "6dbd6dfa197ec540782fd7971d87439ab1bdb4cf531cad65872b9c24a6689c70",
+    "crates/femto-reader/src/clipping.rs": "f346bcdd414932b81e93777c7b5def0dc5be148e9228f82b1f8b417cad3cc71a",
+    "crates/femto-reader/src/selection.rs": "f6befe5739313379530150e96f91db95135687bf672e5807243dfbeafa1fd7aa",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54"
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/range-selection-tests.log",
+      "sha256": "bf2f41abb95082aa79fe39bac7e0c135139b4d7b69f4b000092a6792e0ff8f4b"
+    },
+    "picco": {
+      "path": "output/verification/range-selection-picco.log",
+      "sha256": "d5a5f699aa8bd40d61620edf529960f4d187d2162033c015f804b9a6356f8aa2"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "b173b4029aa3f5696030839328af78e602de65b2e0e8226a429ef086844cf219",
+    "bytes": 5173328,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Extension uses endpoint words on the current reading page, including its panned view; cross-page extension and draggable/shrinkable handles remain unfinished.",
+    "Source extraction and verification remain synchronous.",
+    "Native multi-word input, physical touch, highlight painting, grayscale firmware and full workspace checks were not run in this checkpoint."
+  ]
+}

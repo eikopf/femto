@@ -1,0 +1,65 @@
+{
+  "feature": "Persistent bounded remote-button mappings",
+  "commands": [
+    {
+      "command": "cargo test --locked -p femto-reader --test remote",
+      "exit_code": 0,
+      "passed": 9
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet --locked -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "rust_passed": 1055,
+      "rust_batches": 81,
+      "rust_ignored": 1,
+      "python_passed": 7
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "crates/femto-reader/src/remote.rs": "de8ab667807fce308eb9a957c721e878f5236353a8f353119deae1d1ea8ae402",
+    "crates/femto-reader/src/remote/settings.rs": "cda111a3e2aad7ae2fcce8af076a21b2bee745b6e2fc66233f70e1517393728c",
+    "crates/femto-reader/src/state.rs": "d460fe0d991acb033d89b0bd509a41d95f844a0ea80ea7261ea5c49745cb6405",
+    "crates/femto-reader/tests/remote.rs": "ed617fe7a8a46454a7a2a5bfd1fcd8f0c21d7edd904719df0050465e9755197e",
+    "Cargo.lock": "444efe35c3058a3342bcdace09a9d3785eee9905386ea2a2c04aaa1bf67be53e",
+    "firmware/picco/Cargo.lock": "e1dc1064ec9c76145634eeaa94ccc4106b5b3c219a6d2988e91d9ab611cbdcb9"
+  },
+  "snapshot_at_completion": true,
+  "logs_sha256": {
+    "output/verification/remote-settings.log": "f2c27d106bb6e3cf3a0a67e911be0450f445d38b94456aa93134ef9fd475bcc6",
+    "output/verification/remote-settings-workspace.log": "a0ca684600ae03f7229108c795201b701fe5f8392ee086fdb2d4e872119e0b15",
+    "output/verification/remote-settings-firmware.log": "67a4a7bc5a9cfc5b48330dd6ad0f4c445ddf066b069a3c3e75e886e06569265e"
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "31698bda6c6ccf5ab9b8ae249ec18a4e8190adfddf762e2d642ed96acb0a555b",
+    "bytes": 5238048,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "checks": [
+    "Custom PageDown-to-Previous mapping survives host JSON and device journal reopen and drives a fresh reader",
+    "Missing field preserves defaults; serialized empty list disables remote turns",
+    "Changing map while held does not replay a press; release/repress applies the new configuration",
+    "Fixed-array deserializer accepts 16 mappings and rejects the seventeenth",
+    "Duplicate, reserved, unsupported, negative usage values, unknown actions and unknown entry fields fail state loading",
+    "SavedBindings constructor validates private entries before exposing an immutable map"
+  ],
+  "limits": [
+    "No bindings-menu editor or live Bluetooth input",
+    "Host journal tests do not establish physical SD behavior",
+    "No grayscale or clean reproducibility rerun after settings changes",
+    "One optional upstream dictionary corpus test remains ignored by the routine gate"
+  ]
+}

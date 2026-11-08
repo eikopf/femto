@@ -1,0 +1,83 @@
+{
+  "feature": "Native simulator catalog and progress through official Tailscale peer",
+  "targeted_tests_passed": 58,
+  "test_suites": {
+    "catalog": 40,
+    "simulator": 18
+  },
+  "workspace_clippy_passed": true,
+  "monochrome_picco_build_passed": true,
+  "independent_command": "FEMTO_HEADSCALE_SIMULATOR_ONLY=1 ./scripts/check-headscale",
+  "independent_passed": true,
+  "independent_report": {
+    "native_enrollment": true,
+    "untrusted_coordinator_rejected": true,
+    "streaming_node_online": true,
+    "explicit_disconnect": true,
+    "existing_identity_reconnect": true,
+    "node_key_renewed": true,
+    "coordinator_node_continuity": true,
+    "rotation_committed": true,
+    "quit_releases_identity_lock": true,
+    "native_tailnet_catalog": true,
+    "native_tailnet_epub_exact": true,
+    "native_tailnet_progress_create": true,
+    "native_tailnet_progress_download": true,
+    "native_tailnet_progress_reopen": true,
+    "service_authentication": true,
+    "service_counts": {
+      "feed": 1,
+      "book": 1,
+      "gets": 2,
+      "puts": 1
+    },
+    "official_peer": "1.104.5",
+    "coordinator": "headscale version 0.29.7\ncommit: v0.29.7\nbuild time: unknown\nbuilt with: go1.27.3 linux/amd64",
+    "hardware_verified": false
+  },
+  "initial_failure": "Host femto-catalog worker stack overflowed at 64 KiB before feed delivery",
+  "fix": "Host workers request 2 MiB; ESP-IDF retains 64 KiB",
+  "checks": [
+    "Authenticated catalog via coordinator-resolved peer name and exact-origin tailnet routing",
+    "Exact EPUB publication and staged-file cleanup",
+    "Tailnet progress create-only upload",
+    "Remote-only progress download with checkpoint commit and no extra upload",
+    "Position and checkpoint preserved after reopen without unsolicited exchange",
+    "Official userspace Tailscale peer with destination-only TCP policy",
+    "Native catalog and sync screenshots inspected at original resolution"
+  ],
+  "limitations": [
+    "Native HTTP service runs over WireGuard; no new application HTTPS or relay-only service qualification",
+    "No injected packet loss or browser approval in this run",
+    "Device peak stack/heap remain unmeasured",
+    "No physical Picco qualification"
+  ],
+  "native_run_preceded_rustfmt_only_change_to_worker": true,
+  "logs": {
+    "tests": {
+      "path": "output/verification/simulator-services-tests.log",
+      "sha256": "dd5e61a804634a595d3731f971c65df7023372070605db1a9174bdfa9c5fed02"
+    },
+    "independent": {
+      "path": "output/verification/simulator-services-independent.log",
+      "sha256": "c4d9a7e587aabe9d9dda6f6cbbb8b690a2ae0a6d1951729f396fc572bb4b5280"
+    },
+    "firmware": {
+      "path": "output/verification/simulator-services-firmware.log",
+      "sha256": "988ef68cf46e02932bcb41d046bb6e888a32de99c4c415371dfdadaeac04b64b"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-catalog/src/worker.rs": "3e3bc4b27ea90a92f00bb8bf6fed35881582895c26509a3d3b8e097c1f96958e",
+    "scripts/simulator_services.py": "d666166f60f3dd54b17867b91c707c4bbc8fec2e1dbfd74784687f1ba75ee4fb",
+    "scripts/simulator-headscale.py": "7b9b4da0f740980eade29ca5c96d01f3653f960e71b08a2c0649c5a14ce892f1",
+    "scripts/check-headscale": "a20356a7ecdee9f40afc4b2d24915fd93df04edf5e50d7071c130a61f223370c",
+    "scripts/check-headscale.py": "e60153c36fc3d8bdec0d1d3eac78583b746ded48db5f470a5e7d0a4efe84d2f9",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199"
+  },
+  "simulator_binary_sha256": "2caeb15e62bda140d4da2733f2fbb7c6f21217b9d66e9cb5debd68def1978a7f",
+  "screenshots": {
+    "output/simulator-headscale/catalog.png": "65eac826ce8c99dd48efb21ad5f93cce6b83b514d8df4c586ef1d6419e60ae8e",
+    "output/simulator-headscale/sync.png": "bac18fa53764a8c04d27af363f4dfea42b52a927973025b00996c698d4b61945"
+  }
+}

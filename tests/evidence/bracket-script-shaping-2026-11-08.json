@@ -1,0 +1,45 @@
+{
+  "feature": "Bounded matched-bracket script context within directional/style spans",
+  "reader_tests_passed": 160,
+  "final_script_tests_passed": 7,
+  "final_clippy_passed": true,
+  "picco_build_passed": true,
+  "max_open_brackets": 64,
+  "overflow": "Disable pairing for the remainder of the span; preserve ordinary script segmentation and graphemes.",
+  "host_images_inspected": [
+    "output/brackets-mono/page-0000.png",
+    "output/brackets/page-0000.png"
+  ],
+  "hardware_verified": false,
+  "limitations": [
+    "No bracket context across separate directional/style spans or shaping buffers",
+    "No language-dependent quotation pairing",
+    "No physical panel legibility or memory qualification"
+  ],
+  "validation_scope": "The full reader suite passed before a formatting-only let-chain refactor and an added combining-mark assertion. Final focused tests, Clippy, both renders, and the Picco build passed after those edits. The initial suite log retains its subsequently corrected Clippy diagnostics.",
+  "logs": {
+    "reader_suite": {
+      "path": "output/verification/brackets-reader_suite.log",
+      "sha256": "0b1816541caafe811f429e222ad89a0aea474793c62ac172aa74c87ea906a55e"
+    },
+    "final_checks": {
+      "path": "output/verification/brackets-final_checks.log",
+      "sha256": "a10ebd248a24e664d20381d882402963ff4641849f5b0621006508db93c7ec5f"
+    },
+    "firmware": {
+      "path": "output/verification/brackets-firmware.log",
+      "sha256": "739b4090999cd1f624d222e567cfa1cf50dfbb219ffea2dcc68581dab15d4d59"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/scripts.rs": "d455fe7f7d7358c48cb0ebf80e9c185dab41b3cdf666e555f957fd49e7559a29",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "tests/fixtures/brackets.txt": "5380987a30fa739a0e264b21aacd40410f7a0309364c498f01972e6494c317e2",
+    "tests/fixtures/DejaVuSerif.ttf": "47d363d2d6235e8177f6077035a3079034c9b01236ed5fa844285130b56315a3",
+    "tests/fixtures/DejaVuSans.ttf": "58568c88a01b80dfc056daca3eeafd434a0380df1a48dda53f0de0d716109bbd"
+  },
+  "image_sha256": {
+    "output/brackets-mono/page-0000.png": "ef546cfc55981b976adcb9f2d427365d762d84d83ee95a1d03c11f6acbf6d48e",
+    "output/brackets/page-0000.png": "d4d1ce99048e284d5217877ff2893324c1d14dbbb4781ebbf5ec49308467f66b"
+  }
+}

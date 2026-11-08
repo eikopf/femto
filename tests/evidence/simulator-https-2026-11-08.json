@@ -1,0 +1,158 @@
+{
+  "feature": "Native tailnet HTTPS service trust and certificate rejection",
+  "targeted_unique_tests_passed": 303,
+  "test_suites": {
+    "microlink": 211,
+    "catalog": 40,
+    "simulator": 18,
+    "reader_ui": 34
+  },
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "commands": {
+    "normal": "FEMTO_HEADSCALE_SIMULATOR_ONLY=1 FEMTO_SIMULATOR_HTTPS=1 ./scripts/check-headscale",
+    "relay": "FEMTO_HEADSCALE_SIMULATOR_ONLY=1 FEMTO_SIMULATOR_HTTPS=1 FEMTO_SIMULATOR_RELAY_ONLY=1 ./scripts/check-headscale"
+  },
+  "reports": {
+    "normal": {
+      "native_enrollment": true,
+      "untrusted_coordinator_rejected": true,
+      "streaming_node_online": true,
+      "explicit_disconnect": true,
+      "existing_identity_reconnect": true,
+      "node_key_renewed": true,
+      "coordinator_node_continuity": true,
+      "rotation_committed": true,
+      "quit_releases_identity_lock": true,
+      "native_tailnet_catalog": true,
+      "native_tailnet_epub_exact": true,
+      "native_tailnet_progress_create": true,
+      "native_tailnet_progress_download": true,
+      "native_tailnet_progress_reopen": true,
+      "service_authentication": true,
+      "service_counts": {
+        "feed": 1,
+        "book": 1,
+        "gets": 2,
+        "puts": 1
+      },
+      "official_peer": "1.104.5",
+      "relay_only": false,
+      "https": true,
+      "tls_rejections": {
+        "wrong-name": 1,
+        "untrusted": 1
+      },
+      "tls_failures": [
+        {
+          "mode": "wrong-name",
+          "reason": "TimeoutError"
+        },
+        {
+          "mode": "untrusted",
+          "reason": "TimeoutError"
+        }
+      ],
+      "coordinator": "headscale version 0.29.7\ncommit: v0.29.7\nbuild time: unknown\nbuilt with: go1.27.3 linux/amd64",
+      "hardware_verified": false
+    },
+    "relay": {
+      "native_enrollment": true,
+      "untrusted_coordinator_rejected": true,
+      "streaming_node_online": true,
+      "explicit_disconnect": true,
+      "existing_identity_reconnect": true,
+      "node_key_renewed": true,
+      "coordinator_node_continuity": true,
+      "rotation_committed": true,
+      "quit_releases_identity_lock": true,
+      "native_tailnet_catalog": true,
+      "native_tailnet_epub_exact": true,
+      "native_tailnet_progress_create": true,
+      "native_tailnet_progress_download": true,
+      "native_tailnet_progress_reopen": true,
+      "service_authentication": true,
+      "service_counts": {
+        "feed": 1,
+        "book": 1,
+        "gets": 2,
+        "puts": 1
+      },
+      "official_peer": "1.104.5",
+      "relay_only": true,
+      "https": true,
+      "tls_rejections": {
+        "wrong-name": 1,
+        "untrusted": 1
+      },
+      "tls_failures": [
+        {
+          "mode": "wrong-name",
+          "reason": "TimeoutError"
+        },
+        {
+          "mode": "untrusted",
+          "reason": "TimeoutError"
+        }
+      ],
+      "coordinator": "headscale version 0.29.7\ncommit: v0.29.7\nbuild time: unknown\nbuilt with: go1.27.3 linux/amd64",
+      "hardware_verified": false
+    }
+  },
+  "assertions": [
+    "Application trust configured separately from coordinator and relay trust",
+    "Valid HTTPS catalog acquisition matches EPUB bytes",
+    "HTTPS progress create/download/reopen preserves checkpoint with exact server request counts",
+    "Wrong-name rejection requires client certificate-name error",
+    "Untrusted rejection requires client UnknownIssuer error",
+    "Neither rejected certificate permits an HTTP request",
+    "HTTP/1.1 ALPN required by service"
+  ],
+  "limitations": [
+    "Both negative TLS handshakes ended in server TimeoutError after client rejection; TLS alert delivery is not established",
+    "Normal mode does not assert which data path was used",
+    "Relay-only exclusion follows absent UDP transport in packet pump; no direct-packet counter asserted",
+    "No new full native LAN fault suite, broad transport-loss suite, relay migration/failover, or physical-device qualification",
+    "Incremental monochrome firmware build is not a new clean reproducibility check"
+  ],
+  "fixture_notes": [
+    "Initial negative checks waited only for server TLS errors and timed out despite reader certificate rejection",
+    "Server timeout recording was added; client-specific error and unchanged HTTP counts are separately required",
+    "Shared UI errors now appear in the simulator window title; no OCR-based rejection assertion"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/simulator-https-tests.log",
+      "sha256": "a0728bddd74fb1d637cf84497b6eee9d7c1a442c8376f5e42c847221b4d57794"
+    },
+    "ui": {
+      "path": "output/verification/simulator-https-ui.log",
+      "sha256": "525a4dfe07b9ef973b57f326105150924052c38b89da4b1016f313afbc58762f"
+    },
+    "normal": {
+      "path": "output/verification/simulator-https-normal.log",
+      "sha256": "304cf335f4c4d54a2de310a565074c381cbeb072b079d5df428bffa5aa09a208"
+    },
+    "picco": {
+      "path": "output/verification/simulator-https-picco.log",
+      "sha256": "4c5b9d14f1e313e37d6352dc61848f9e6a15f8f36ed1473aa6829c47e2abeed6"
+    },
+    "relay": {
+      "path": "output/verification/simulator-https-relay.log",
+      "sha256": "74cda545ec116c811f0616b1047ab2e2c69c351098543b34891efc4bdb75aa39"
+    }
+  },
+  "input_sha256": {
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "crates/femto-microlink/src/host_tcp_tls.rs": "fd97d40febb4cfb2ba8360cdf4096207818001cbe959ea3d5a111ecf4f2501b4",
+    "crates/femto-catalog/src/tailnet.rs": "bb832b985eb45dc94ff4d5d6784ef58703c972efe5ff1bd787feedc8eb452f5a",
+    "crates/femto/src/simulator_tailnet.rs": "db1773d639b4fa329966ad537efc46fc5ab15ead8abb08c8a6ef3a2377326d17",
+    "crates/femto/src/simulator.rs": "68792f0495b9ef9d9aebdaaac9fc1424a0ec0013a2ff20408bb0fd91e3580f8c",
+    "crates/femto-reader/src/ui.rs": "ca113307cef82fbd1cce1af137dd46ed63b06fbdb5e4e4f2493fb4405406bbc8",
+    "scripts/simulator-headscale.py": "4411b7f41c6a0423eb59124960a6b4827f0e916232752d23ba46312225c70128",
+    "scripts/simulator_services.py": "93dd9b0216a1950fd8797410ddd8b61719901877040e75396a6d285acb8bfbaa"
+  },
+  "simulator_binary_sha256": "3255433bc623055fe71fc38c1c770a7dbf3c81cad67a951036fecc7bd7ca27ca",
+  "hardware_verified": false
+}

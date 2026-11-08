@@ -1,0 +1,58 @@
+{
+  "feature": "Expiry of queued Picco frontlight commands",
+  "board_tests_passed": 41,
+  "test_batches": 10,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "implementation": "A one-second monotonic deadline starts at request creation. The caller waits only for the remaining duration. The input worker rejects requests at or after the same deadline before invoking the driver.",
+  "assertions": [
+    "No driver call at or after deadline",
+    "Live requests preserve brightness, warmth, success and driver errors",
+    "A caller that times out while the request remains queued cannot cause that expired request to invoke the driver later"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-picco-board && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco",
+    "nix-shell --run 'cargo fmt --all --check && rustfmt --edition 2024 --check firmware/picco/src/input.rs firmware/picco/src/light_command.rs'"
+  ],
+  "input_sha256": {
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54",
+    "firmware/picco/src/main.rs": "9db57fa2e5174c83a62bf2ef1737ebfe410cf71b5e092cfb19b174ccbd86067f",
+    "firmware/picco/src/input.rs": "a8cceda3e31905d99dbcb38d506db618aa2e1b51945dadfdbec14a4a55381833",
+    "firmware/picco/src/light_command.rs": "aff6993bcdab4b190215ce705bc20b0c5431f02ca8980ee3a20c655e94bc5111",
+    "crates/femto-picco/tests/light_command.rs": "2de61dda216ab0034633f1aa080132f032387321a2e98363eb52cb0075bab1d3",
+    "crates/femto-picco/src/frontlight.rs": "b3163449d5ce9f885e958ec51e6839b779250576e47803cb00fbdbb19c34aa90"
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/frontlight-expiry-tests.log",
+      "sha256": "1b3da6464e1b5a8c032b1690cbe326c87b30850b66d2b317fe0370106fc922d6"
+    },
+    "picco": {
+      "path": "output/verification/frontlight-expiry-picco.log",
+      "sha256": "ffbe6a36dfbb52822c9894d288d0a822c1363af21af78aa98d89afbd361cacae"
+    },
+    "format": {
+      "path": "output/verification/frontlight-expiry-format.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "ea37eca4ca2e324f36e2308326a8485b97277ba8a5f37e31e117d6a9f93ca521",
+    "bytes": 5150864,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Expiry does not cancel a driver operation already started; a caller timeout can still leave physical state unknown.",
+    "Host tests execute the actual firmware command module with an injected monotonic sample; physical I2C and scheduler behavior remain unqualified.",
+    "No full workspace test, native simulator, grayscale firmware or independent network rerun in this checkpoint."
+  ]
+}

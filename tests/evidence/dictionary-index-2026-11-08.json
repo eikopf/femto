@@ -1,0 +1,111 @@
+{
+  "feature": "Incremental dictionary index validation and failure-state retention",
+  "commands": [
+    {
+      "command": "cargo test -p femto-reader --test dictionary",
+      "exit_code": 0,
+      "passed": 12
+    },
+    {
+      "command": "cargo test --locked --manifest-path vendor/quireink-stardict/Cargo.toml --config 'patch.crates-io.miniz_oxide.path=\"vendor/miniz_oxide\"'",
+      "exit_code": 0,
+      "passed": 6,
+      "ignored": 1
+    },
+    {
+      "command": "python scripts/check-dictionary-corpus.py output/dictionary-corpus",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "Unsorted headwords and synonyms rejected",
+    "Empty, oversized and invalid UTF-8 headwords rejected",
+    "Invalid UTF-8 synonym words rejected",
+    "Synonym target numbers must refer to a declared headword",
+    "Previous-word ordering check persists across preparation calls",
+    "Failed preparation cannot resume and dictionary lookup remains unavailable",
+    "Published WikDict sample remains compatible in plain and derived compressed forms"
+  ],
+  "corpus_report": {
+    "source": "https://download.wikdict.com/dictionaries/stardict/wikdict-en-de.zip",
+    "date": "2026-06-23",
+    "entries": 72413,
+    "synonyms": 57492,
+    "sample_queries": 4675,
+    "reports": {
+      "published_plain": {
+        "definitions": 5483,
+        "lookup_ms": 632,
+        "name": "English-Deutsch FreeDict+WikDict dictionary (en-de)",
+        "prepare_ms": 50,
+        "prepare_steps": 294,
+        "queries": 4675
+      },
+      "derived_dictzip": {
+        "definitions": 5483,
+        "lookup_ms": 2915,
+        "name": "English-Deutsch FreeDict+WikDict dictionary (en-de)",
+        "prepare_ms": 50,
+        "prepare_steps": 294,
+        "queries": 4675
+      }
+    },
+    "sha256": {
+      "wikdict-en-de.zip": "c1d141f39b08893d8e1fdce6e06b6acdaa91b343b4982623de9867a855b4db79",
+      "stardict.ifo": "ab0d3f46a059b8789d57d491fa34478f06ff8f4ec57bcba009c90a9b92ecdb4e",
+      "stardict.idx": "e3d9f7279b3877d3465455cec352439a771a0c2af14c96c24dbc5a8addcaa27d",
+      "stardict.dict": "35404844c12f292acf2e3b424559d9a7f4a84750d8a706cbd8188c1882eb805a",
+      "stardict.syn": "d06acb5e89386722a2cd9cbd2a8468eaa61b8d1666afcc21e3cc1e898e116ca4",
+      "cases.jsonl": "3a0e06dfbe46de7297fdd0a61cd549bd0f30e5aba9db12c3b30e2210afc3e60d",
+      "stardict.dict.dz": "089a6c5358142fb8b97c110d64e3125fd9c32f9725db7cf2e25c7c45b0534408"
+    }
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/dictionary-index-tests.log",
+      "sha256": "775b0a8c0fe7f3132a5f85878af92ccf8792640657fd03c1b7199fa397b225cd"
+    },
+    "upstream-corpus": {
+      "path": "output/verification/dictionary-index-upstream-corpus.log",
+      "sha256": "1581e97b021bd7a658ec1073081dfa51ac7385413f0a23efd7c9c7c200cf42cd"
+    },
+    "firmware": {
+      "path": "output/verification/dictionary-index-firmware.log",
+      "sha256": "b9993527184aaf53babe390cf4f25d1cab9cb04c74d6623838dea175c03a750a"
+    }
+  },
+  "tested_files_sha256": {
+    "vendor/quireink-stardict/src/lib.rs": "f6ec56486d8d38ae2b400dcda559dbdb8e9fa48e392343e6e8339d06e5a12580",
+    "vendor/quireink-stardict/src/index.rs": "4e287b4e09e6835c11553a9f7f8b3575567684232e8da4340ae9a393a1c4eb53",
+    "crates/femto-reader/src/dictionary.rs": "f9773b0a46872e356c5d94657c20b927f51f21a0adc9c15139273427437a5450",
+    "crates/femto-reader/tests/dictionary.rs": "7377dffcf41c67a5d50bd04fbde272cb96087dd5b006fc9033978215665432a5",
+    "Cargo.lock": "7040c9e05954fc95624ad2f6715bc6c2b9d18f6ae33cc634c65d3d67f7e355bb",
+    "firmware/picco/Cargo.lock": "dcab9958734dfecf18f142c9b159b9465e6d6736dc930d4cfb0b42d65f6299ca"
+  },
+  "snapshot_at_completion": true,
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "1d100459f5a9c5cb2a9090f6d38f39610351b91a99c0fd7c8c9776ace6c7b8c7",
+    "bytes": 5218736,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Private-cache Femto path only; preexisting upstream caches can bypass building.",
+    "Dictionary source files must remain immutable while open.",
+    "Typed-field payload validity and complete gzip CRC validation remain outstanding.",
+    "No physical device, native UI, full workspace, grayscale or clean reproducibility rerun in this checkpoint."
+  ]
+}

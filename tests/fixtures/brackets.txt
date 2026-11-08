@@ -1,0 +1,9 @@
+Bracket script context
+
+Latin (Ελληνικά) Latin.
+Greek α [Latin (Кириллица) Latin] α.
+Leading brackets: ((α б)б)
+Unicode brackets: Latin ⟦Кириллица⟧ Latin.
+Combining marks: a (ά)́ a.
+שלום (سلام) שלום
+Malformed pairs: Latin (Ελληνικά [Кириллица) б]

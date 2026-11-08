@@ -1,0 +1,57 @@
+{
+  "feature": "Streaming script context across wrapped lines, directional runs, styles, and resumed pages within a text block",
+  "passed_reader_tests": 164,
+  "test_batches": 25,
+  "clippy_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "line_window_bytes": 4096,
+  "maximum_cached_run_descriptors": 4097,
+  "maximum_open_brackets": 64,
+  "retains_whole_paragraph_script_table": false,
+  "context_resume": "Reconstruct by a forward prefix scan while discarding old runs. Long homogeneous runs may require scanning to the end of the block. Bidi analysis still retains paragraph-sized data.",
+  "oversized_marker_rejected": true,
+  "pagination_geometry_eager_indexed_and_resumed_equal": true,
+  "host_specimen_width": 360,
+  "host_specimen_height": 320,
+  "host_images_inspected": [
+    "output/wrapped-brackets/page-0000.png",
+    "output/wrapped-brackets/page-0001.png",
+    "output/wrapped-brackets/page-0002.png"
+  ],
+  "limitations": [
+    "No language-dependent quotation pairing",
+    "No physical display or peak device heap qualification",
+    "Imported text retains the existing chapter limit; this change does not replace paragraph-sized bidi analysis"
+  ],
+  "logs": {
+    "reader_and_clippy": {
+      "path": "output/verification/paragraph-script-reader_and_clippy.log",
+      "sha256": "cf80c2f08161c42d8d303fd1c2ad55941a61c6e99c1ae50bf54a53840d54165e"
+    },
+    "render": {
+      "path": "output/verification/paragraph-script-render.log",
+      "sha256": "3dc5663bff03589de724c8d81add7c57acd08ef881a2710cdfe1f68c6da7a533"
+    },
+    "firmware": {
+      "path": "output/verification/paragraph-script-firmware.log",
+      "sha256": "4913f343e724a447be5343c1721120ee7f9fee287658fc7d8105a72f14b842ba"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/scripts.rs": "e7d6dcd3a7fb2668adf0fca662d9d047ddfb3ae76dd3fc9e0a8966b9a25a2966",
+    "crates/femto-reader/src/layout.rs": "e898806862bed3a244b9567c5c4424c4270b614582147027c5f18ab99eb10484",
+    "crates/femto-reader/tests/lists.rs": "81194850b2ce4ece3374848c69d65fbce4028bb42dbe8e3c9c1b5248e6f8e21e",
+    "crates/femto-reader/tests/pagination_cache.rs": "0de7a005fb9004a917bcd442ebe3f34273cdf7e6086bd433d7cb1c89367d20d0",
+    "tests/fixtures/wrapped-brackets.txt": "0a28bb27b54a39bd6786fa8e2cee9b1815a40bd45f682824fdd12df2a0a46cfc",
+    "tests/fixtures/styled-brackets.epub": "5f8568f562fd42e0ecc18da0825cfa2272e34c18325810d027e4badf96a2ed0b",
+    "tests/fixtures/DejaVuSerif.ttf": "47d363d2d6235e8177f6077035a3079034c9b01236ed5fa844285130b56315a3",
+    "tests/fixtures/DejaVuSans.ttf": "58568c88a01b80dfc056daca3eeafd434a0380df1a48dda53f0de0d716109bbd",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199"
+  },
+  "image_sha256": {
+    "output/wrapped-brackets/page-0000.png": "20ab26ba8712cda60a7a031af2cfc408b36fa9a02efbb0bed688a0203ce70042",
+    "output/wrapped-brackets/page-0001.png": "d63ad151d5071fbebdd3cd01a904290303a03670fc20f6b9e394214289409f86",
+    "output/wrapped-brackets/page-0002.png": "18b2d0968ed8c979ab8c6a6c33c56aa3f45392094b5a3fb7ac1d611edc27176f"
+  }
+}

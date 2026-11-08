@@ -1,0 +1,38 @@
+{
+  "feature": "Native X11 clipping capture/reopen/source-navigation/confirmed-deletion workflow",
+  "command": "./scripts/check-simulator",
+  "exit_code": 0,
+  "checks": [
+    "Real xdotool key events capture nonempty ordered source ranges",
+    "Repeated capture retains exact saved record",
+    "Quit and reopen preserve clipping records",
+    "Go to source reaches saved range start and Back restores departure position",
+    "Keep preserves the quote; explicit Delete removes it from saved JSON",
+    "Reading position and bookmarks survive the workflow",
+    "Existing reader, typography, library, catalog, sync and tailnet lifecycle smoke checks pass"
+  ],
+  "input_manifest": {
+    "path": "output/verification/native-clippings-inputs.json",
+    "sha256": "4fa54697060236174801f173bfbd164388e16afdb7175490a24e32dbe8c3f63b",
+    "files": 390,
+    "unchanged_at_completion": true
+  },
+  "log": {
+    "path": "output/verification/native-clippings-tests.log",
+    "sha256": "44bc410091bbeb733ad2add5fd10779825764bc12a1ee0aa0f7ac6818289eb8d"
+  },
+  "screenshot": {
+    "path": "output/verification/native-clippings-delete.png",
+    "sha256": "deab032c63840bed212713360e0eb0c2c7122adf06cfbb1afceda9ab31e44cd2",
+    "inspected_at_original_resolution": true
+  },
+  "visual_findings": [
+    "Delete confirmation shows Keep selected by default, separate Delete action and excerpt rows",
+    "Fixed 32-grapheme rows split words; word-aware excerpt presentation remains a follow-up"
+  ],
+  "limits": [
+    "Xvfb/X11 host execution does not qualify Wayland, physical Picco input, refresh or SD durability.",
+    "This run does not test clipping-specific pointer input, forged-record UI errors or deletion during pending source navigation.",
+    "No firmware build or independent network interoperability rerun in this checkpoint."
+  ]
+}

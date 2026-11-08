@@ -1,0 +1,67 @@
+{
+  "feature": "Bounded reader-state JSON encoding and journal writes without a second payload copy",
+  "targeted_tests_passed": 52,
+  "suites": {
+    "reader_unit": 26,
+    "book_typography": 4,
+    "journal": 9,
+    "sync": 13
+  },
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "assertions": [
+    "JSON output at the exact limit succeeds and one-byte-short limits fail without retaining excess bytes",
+    "Limits count encoded UTF-8 and JSON escapes",
+    "Compact and pretty state output matches previous serialization bytes",
+    "Journal frames match the existing header/generation/JSON/checksum format across three generations",
+    "A one-MiB NUL bookmark label exceeds the encoded limit and is rejected before file mutation",
+    "Host state and both journal slots remain byte-identical after rejection with no temporary file",
+    "A subsequent valid save and reopen succeeds without reopening the journal",
+    "Existing torn-slot, settings, checkpoint, and progress-sync tests pass"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --lib --test journal --test book_typography && cargo test --locked -p femto-sync && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco"
+  ],
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "2aba8999f6cf741b1ecb620d28597aa603df5f5043af2be8621da74b40682b1c",
+    "bytes": 5138864,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "build_retry": "The first build of the final journal change terminated with exit 143 during compilation and no compiler diagnostic. No remaining build process was found. A subsequent build of unchanged sources passed. The cause of termination is not established.",
+  "input_sha256": {
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "crates/femto-reader/src/state.rs": "2a4b5cff59012b75b252e7264ff9bdd4436c5755b9e6fedcb27559af6a850ed2",
+    "crates/femto-reader/src/journal.rs": "b65511e86279199b0e6fa72528e3a2d7a684ef1d6098a6937edebd546fd96d9e",
+    "crates/femto-reader/tests/journal.rs": "3f8ccb059c64de585057995d1870d2da5ed4f3777ea390cc5464d7298cbee927",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54"
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/state-encoding-tests.log",
+      "sha256": "e13e39a6dc22d7c2ce057c8fe309183313facafb8c566da580dbf6fd5eaffeca"
+    },
+    "picco": {
+      "path": "output/verification/state-encoding-picco.log",
+      "sha256": "ff5b27c8bdcb5445941c23fb13d3ca12439f1ec34a70f93364a4e626d726fbd4"
+    },
+    "interrupted_build": {
+      "path": "output/verification/state-encoding-picco-interrupted.log",
+      "sha256": "34beb6829bed1e62276bc32493cba371ae2dce12f6eb482bd2da1568a572d33a",
+      "exit_code": 143
+    }
+  },
+  "limitations": [
+    "Bounded retained encoded bytes do not establish allocator capacity or peak device heap",
+    "No physical interrupted-write or SD-card-removal qualification",
+    "No new full workspace/native/independent-peer suite or grayscale build in this change"
+  ],
+  "hardware_verified": false
+}

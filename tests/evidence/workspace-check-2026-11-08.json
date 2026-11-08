@@ -1,0 +1,31 @@
+{
+  "verified_at": "2026-11-08T01:17:24.107488+00:00",
+  "commands": [
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "log": "output/verification/femto-workspace-check.log",
+      "log_sha256": "61cde020eb6cb664e76170422fbd082d501107faf346e174bac98f98d6071a10"
+    },
+    {
+      "command": "./scripts/check-simulator",
+      "exit_code": 0,
+      "log": "output/verification/femto-workspace-simulator.log",
+      "log_sha256": "cb7d30a0e44fba567122c9ce1d0706403cc21f8a44bc22a991d75a61033dabef"
+    }
+  ],
+  "rust_test_batches": 64,
+  "rust_tests_and_doctests_passed": 807,
+  "rust_tests_failed": 0,
+  "rust_tests_ignored": 0,
+  "python_firmware_tests_passed": 7,
+  "format_check": true,
+  "workspace_check": true,
+  "workspace_clippy": true,
+  "native_x11_smoke": true,
+  "hardware_verified": false,
+  "wayland_runtime_verified": false,
+  "independent_network_fixture_rerun": false,
+  "cargo_lock_sha256": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+  "scope": "Host workspace and vendored parser/inflater suites, firmware planner tests, and private Xvfb simulator smoke. Firmware builds and independent network fixture evidence are separate."
+}

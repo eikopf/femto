@@ -1,0 +1,38 @@
+{
+  "feature": "Reusable reconnecting host application runtime",
+  "targeted_tests_passed": 223,
+  "test_suites": {
+    "microlink": 208,
+    "cli_unit": 15
+  },
+  "workspace_clippy_passed": true,
+  "checks": [
+    "CLI catalog/progress runtime uses library driver",
+    "Generic clock permits Send ownership without a non-Send trait object",
+    "Thread-shared runtime rejects access and pump after explicit close",
+    "Explicit close cancels control and does not call reconnect setup",
+    "Identity store remains locked while application worker retains the runtime",
+    "Identity lock is released after the final worker owner drops"
+  ],
+  "limitations": [
+    "Simulator enrollment and transport wiring remain unfinished",
+    "No new independent-peer or native simulator run for this extraction",
+    "Host-only change; no new Picco build or hardware qualification"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/host-runtime-tests.log",
+      "sha256": "9d1928388349c31fd1099c99d35a0afc7cb59094800b632fde00777066b522ff"
+    },
+    "clippy": {
+      "path": "output/verification/host-runtime-clippy.log",
+      "sha256": "8ac1008397edf181a71b8b942b1da5a86293f053458d5db8ef737d908c795272"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/host_runtime.rs": "d0603537561b3bbcdb770f85a24ff828b0111b13514100f1625a80fd0ad4d103",
+    "crates/femto-microlink/src/lib.rs": "d9d38f1d559635243fc5075efe5e2dcd6cce814e04c7830dda898735dbd87847",
+    "crates/femto/src/tailnet_catalog.rs": "03ad82f2f8f4aa5aa20e1f4f4e5392e379edb8203e12f42a043bd00c4d648eda",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199"
+  }
+}

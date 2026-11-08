@@ -1,0 +1,57 @@
+{
+  "feature": "Saved e-ink raster settings reproduce logical pixels after reopening",
+  "runtime_changes": false,
+  "tests_passed": 40,
+  "test_batches": 2,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "matrix": {
+    "orientations": [
+      "portrait",
+      "clockwise",
+      "inverted",
+      "counterclockwise"
+    ],
+    "storage": [
+      "host JSON",
+      "device alternating journal"
+    ],
+    "display_levels": [
+      2,
+      4
+    ],
+    "raster": {
+      "hinting": false,
+      "stroke": 0.2,
+      "coverage_gamma": 0.7,
+      "fractional": true
+    }
+  },
+  "assertions": [
+    "Tuned output differs from neutral output in both display modes",
+    "Pixels use only the permitted two/four-level palette; four-level output includes intermediate values",
+    "Raster-only changes retain source anchor, page index and page count",
+    "After clearing active raster settings, saved book preferences restore all tuned controls",
+    "Cooperative startup reproduces exact pixels for each storage/orientation/display combination"
+  ],
+  "command": "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --test book_typography --test ui && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+  "input_sha256": {
+    "crates/femto-reader/tests/book_typography.rs": "5b26a761f36917535223af655176cf4964d345527df66f26f0a8f95236847684",
+    "crates/femto-reader/src/controller.rs": "507fd0bf336a19512a556cafc993b35b14a9916e2f0c6109e0bd4f6d7a330811",
+    "crates/femto-reader/src/state.rs": "aa1f3b93d4cf67e6ce1fedef0b8d93445ac8914dcbd205cf6dddf60f0ad56de9",
+    "crates/femto-reader/src/journal.rs": "ae803f5185c069de8abb2958b927db11af37085a2894366cdef2e8b90f3dbaba",
+    "crates/femto-reader/src/display.rs": "44ae40bd74529bcb08f0e2ebcfb71510d5e76e52bf9cdf0483f25f94cdb7eadd",
+    "crates/femto-reader/src/layout.rs": "ebbe322c4dcf7d1ba65523fa7ec1e4f31c9daae0bd1a236924217254b1c9651a",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "tests/fixtures/DejaVuSerif.ttf": "47d363d2d6235e8177f6077035a3079034c9b01236ed5fa844285130b56315a3"
+  },
+  "log": {
+    "path": "output/verification/raster-persistence-tests.log",
+    "sha256": "56056c7f8741791799fd48cdb860863b9c9da8dc08c4b97478e4a88f6adf3a28"
+  },
+  "limits": [
+    "This fixture covers one font and one combined nondefault raster configuration. Existing cache tests cover individual raster controls.",
+    "Rotation changes logical viewports; no physical panel packing, waveforms, reflectance, ghosting or readability qualification is claimed.",
+    "No runtime code changed; no firmware build, native simulator or independent network rerun in this checkpoint."
+  ]
+}

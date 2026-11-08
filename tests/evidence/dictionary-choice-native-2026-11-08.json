@@ -1,0 +1,28 @@
+{
+  "feature": "Native dictionary choice and reopen",
+  "command": "./scripts/check-simulator",
+  "exit_code": 0,
+  "checks": {
+    "dictionary_name_after_reopen": "b.ifo",
+    "chosen_result_pixels_identical_after_reopen": true,
+    "reading_pixels_clippings_position_bookmarks_unchanged": true
+  },
+  "recorded_inputs_unchanged": 416,
+  "input_snapshot_timing": "During simulator build/run, before chooser checks; verified unchanged at completion",
+  "visual_inspection": [
+    "Chooser marks b.ifo active",
+    "Reopened lookup displays Dictionary B and complete font definition"
+  ],
+  "artifacts": {
+    "output/verification/dictionary-choice-native-inputs.json": "3ea8667f26edb87de10b4a27cecfd90411e3bf03cfb9f1890dedda381d57857e",
+    "output/verification/dictionary-choice-native.log": "5590c5455a391628ecd0c7351fd30f2993437b1e29db2933b20d5d323f7367df",
+    "output/simulator-smoke/dictionary-choice.json": "4c375df09f99ec3fa5a7a0a21006a86cc457c2d02429845d913dd7efc88ae71e",
+    "output/simulator-smoke/dictionary-chooser.png": "d15631d1d45f7b52f201a899a47c385a5f0b9ef387fee902c93c320fdd99d438",
+    "output/simulator-smoke/dictionary-choice-reopened.png": "1cf5ac21fd090cc0aa94fa5105a87330893a4cc4fc6824a9196db8bc94039f38"
+  },
+  "limits": [
+    "X11 portrait Latin fixture only",
+    "Same definition with distinct dictionary names; shared UI tests cover changed definition content",
+    "No physical Picco SD, input, display or latency qualification"
+  ]
+}

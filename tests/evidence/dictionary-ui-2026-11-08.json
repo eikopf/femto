@@ -1,0 +1,95 @@
+{
+  "feature": "Selection dictionary lookup with incremental preparation and return to selection",
+  "commands": [
+    {
+      "command": "cargo test -p femto-reader --test ui",
+      "exit_code": 0,
+      "passed": 51
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo fmt --all",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/check-simulator",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "attempt": 1,
+      "exit_code": 143,
+      "remaining_compiler_or_linker_processes": false,
+      "cause": "Unresolved",
+      "log": "output/verification/dictionary-ui-firmware-interrupted.log",
+      "log_sha256": "44447cd8c538504950aa7b35783f18bc8f5ddde3a54e9760df1ab23e50def9f5"
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "attempt": 2,
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "Lookup, synonym and missing-word flows return to the same selection and allow saving its original source word",
+    "Cancellation before preparation and configuration changes drop the pending job",
+    "Changed selection context rejects preparation without adding an excerpt",
+    "Native keyboard selection of font renders the fixture definition",
+    "Native Back restores exact selection pixels and cancel restores exact reading pixels",
+    "Native excerpts, reading anchor and bookmark remain unchanged",
+    "Full native reader/catalog/sync fault/tailnet lifecycle suite passes"
+  ],
+  "visual_findings": [
+    "Original-resolution result screenshot shows the dictionary name, headword font, complete two-row definition, and Back to selection control"
+  ],
+  "input_manifest": {
+    "path": "output/verification/dictionary-ui-inputs.json",
+    "sha256": "f804beca3d92f4fb0bf62fcad2426df8585663c3f8eb8ca4f7e3e7db3d963eb3",
+    "files": 409,
+    "unchanged_at_completion": true
+  },
+  "artifacts": {
+    "ui": {
+      "path": "output/verification/dictionary-ui-ui.log",
+      "sha256": "25a1a2a5e69cfd01e8d711321b24ae598ba871a128f765c6b1dbd6ead6b15bc3"
+    },
+    "native": {
+      "path": "output/verification/dictionary-ui-native.log",
+      "sha256": "f70ca618967860498b1bfe2e922224c2c45c1c6b1d64b57aeabdedc941d97fa3"
+    },
+    "firmware": {
+      "path": "output/verification/dictionary-ui-firmware.log",
+      "sha256": "26807690ce7ec964c3078ed29b6e3b8144359f677c01871caf348ca6286ff8bc"
+    },
+    "result": {
+      "path": "output/verification/dictionary-ui-result.png",
+      "sha256": "cda7ff0d2df07e1d8ca4e2a4fff68c039b005175cff06aa205fdafab5f196ae3"
+    },
+    "state": {
+      "path": "output/verification/dictionary-ui-state.json",
+      "sha256": "0d556c3e4c0769afc14b52e5489278784a905a294d687f5b8d96461eba67557e"
+    }
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "af282c079cec61f0f16bf80c1cae81ea49c459fcf7357674bc1eb3d4d4da4047",
+    "bytes": 5214576,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "No physical Picco lookup, sleep, SD performance or heap qualification.",
+    "Native checks cover one portrait Latin headword on X11; no rotated or RTL dictionary result qualification.",
+    "Metadata opening, final lookup and rendering remain synchronous; incremental preparation does not bound their latency.",
+    "No dictionary chooser, persistent index cache, language matching or independent real-dictionary corpus qualification.",
+    "The first firmware build termination cause remains unresolved; retry success does not establish its cause.",
+    "Grayscale and clean reproducibility were not rerun in this checkpoint."
+  ]
+}

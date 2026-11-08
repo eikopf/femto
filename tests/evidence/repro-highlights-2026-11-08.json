@@ -1,0 +1,91 @@
+{
+  "feature": "Current monochrome firmware reproducibility across relocated sources and clean targets",
+  "platform": "x86_64-linux",
+  "display_levels": 2,
+  "profile": "release",
+  "builds": [
+    {
+      "name": "a",
+      "source": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/source-a",
+      "target": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/target-a",
+      "artifacts": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/artifacts-a",
+      "target_absent_before_build": true,
+      "status": "finished",
+      "started_at": 1794141249.7821345,
+      "exit_code": 0,
+      "finished_at": 1794141359.1375163
+    },
+    {
+      "name": "b",
+      "source": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/source-b",
+      "target": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/target-b",
+      "artifacts": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/artifacts-b",
+      "target_absent_before_build": true,
+      "status": "finished",
+      "started_at": 1794141359.1379807,
+      "exit_code": 0,
+      "finished_at": 1794141467.2079344
+    }
+  ],
+  "command_template": "CARGO_TARGET_DIR=<fresh target> FEMTO_PICCO_OUTPUT=<artifact directory> FEMTO_PICCO_GRAYSCALE=0 ./scripts/build-picco",
+  "artifacts": {
+    "femto-picco.elf": {
+      "sha256": "b531d9c663b9e107bcbe78acfb3b95b7f26cea2ff3939077a5130337be0ec967",
+      "bytes": 5286808,
+      "equal": true,
+      "matches_incremental": true
+    },
+    "femto-picco.bin": {
+      "sha256": "403e3ffd22df41d3cb769666d251c788f212fd404e5cb4c408840cb67ecc045c",
+      "bytes": 5179616,
+      "equal": true,
+      "matches_incremental": true
+    },
+    "femto-picco.json": {
+      "sha256": "8c5ac529ce763273d714582875d39d6713049af4f9662ed1fadbff74839e97ca",
+      "bytes": 414,
+      "equal": true,
+      "matches_incremental": true
+    },
+    "femto-picco.debug.elf": {
+      "sha256": "1c3cf37c209f2fcf4280418916036c815e525af4d656e411dd1350c85f487d46",
+      "bytes": 39756656,
+      "equal": true,
+      "matches_incremental": true
+    }
+  },
+  "input_manifest": {
+    "path": "output/verification/repro-highlights-inputs.json",
+    "sha256": "286dd3e54fb0b4ca75f6977636e0d5ceb0b23ac569b8b2def709bcbed31b611c",
+    "files": 391,
+    "live_and_both_copies_unchanged_at_completion": true
+  },
+  "logs": {
+    "a": {
+      "path": "output/repro-highlights-hybwic0m/build-a.log",
+      "sha256": "699fb99fe123df2ad494bb6be68846606c652284878a834898532a8440f89204"
+    },
+    "b": {
+      "path": "output/repro-highlights-hybwic0m/build-b.log",
+      "sha256": "8190059f94825802f7bce3fe4abddc4e06f16dc4331d795a71ad3f9fa6837db4"
+    }
+  },
+  "source_copy_exclusions": [
+    ".git",
+    "target",
+    "output",
+    ".embuild",
+    "__pycache__",
+    "sdkconfig",
+    "sdkconfig.old"
+  ],
+  "namespace_source": "/tmp/femto-source",
+  "namespace_target": "/tmp/femto-target",
+  "rust_remapped_source": "/femto",
+  "limits": [
+    "Both builds use the same pinned x86_64 Linux host toolchain and dependency stores; this does not qualify different hosts or toolchain versions.",
+    "Current grayscale clean-build reproducibility is not rerun in this checkpoint.",
+    "Structural image validation and identical bytes do not establish Picco boot, display, recovery or physical resource behavior.",
+    "No flashing or hardware writes were performed."
+  ]
+}

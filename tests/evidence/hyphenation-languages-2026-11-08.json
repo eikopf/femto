@@ -1,0 +1,88 @@
+{
+  "feature": "Static Spanish, Italian, Dutch, and Portuguese hyphenation",
+  "crate": "hypher 0.1.8",
+  "languages": [
+    "en",
+    "de",
+    "fr",
+    "es",
+    "it",
+    "nl",
+    "pt"
+  ],
+  "reader_tests_passed": 177,
+  "reader_test_batches": 26,
+  "workspace_clippy_passed": true,
+  "monochrome_build_passed": true,
+  "grayscale_build_passed": true,
+  "hardware_verified": false,
+  "pattern_bytes": {
+    "en": 26947,
+    "de": 206263,
+    "fr": 6988,
+    "es": 13649,
+    "it": 1555,
+    "nl": 64293,
+    "pt": 1065
+  },
+  "firmware_bytes": {
+    "mono": {
+      "before": 4895760,
+      "after": 4976400,
+      "increase": 80640
+    },
+    "gray": {
+      "before": 4896016,
+      "after": 4976672,
+      "increase": 80656
+    }
+  },
+  "checks": [
+    "Regional and case-varied language tags select enabled patterns",
+    "New-language breaks fit measured line widths",
+    "Source bytes and glyph clusters remain stable across reflow",
+    "XHTML Spanish inheritance now produces dictionary breaks",
+    "Unknown and cleared languages retain ordinary breaking",
+    "All reader regressions pass"
+  ],
+  "limitations": [
+    "Regional variants share one pattern set",
+    "No UI language override",
+    "Language-specific spelling transformations and corpus validation remain unfinished",
+    "Automatic hyphens remain limited to eligible alphabetic words and LTR candidate lines",
+    "Physical readability and memory timing remain unqualified"
+  ],
+  "logs": {
+    "reader": {
+      "path": "output/verification/hyphenation-languages-reader.log",
+      "sha256": "dfbf3cdef59bafe5dc8e8c413cd88a7518cfe0427e127b186846011e481ddd1c"
+    },
+    "clippy": {
+      "path": "output/verification/hyphenation-languages-clippy.log",
+      "sha256": "891cae3a3512313c569ccd39f11167826f8bd380d8affd161ab0406caa692fb5"
+    },
+    "monochrome": {
+      "path": "output/verification/hyphenation-languages-monochrome.log",
+      "sha256": "d91ec0ff695c42b2540e4d64fa97bc9ecb24c931bdb213defae93c4034667252"
+    },
+    "grayscale": {
+      "path": "output/verification/hyphenation-languages-grayscale.log",
+      "sha256": "2cab9dd467ba92249c9c1d51e51d0b2c4654140c65364f66af79a879812f0e83"
+    }
+  },
+  "input_sha256": {
+    "Cargo.toml": "bf362ad60f1c27d0097a48988cf3968ffe2509bb74cd240938e89417440b4dc2",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "crates/femto-reader/src/layout.rs": "b7979dc7925807e2f49311bc8c3f5d1b92ba4750c6241411cd161ae477d88ae7",
+    "crates/femto-reader/tests/hyphenation.rs": "2ad41b821b869dc855f12f7304a1aa5056b367838d5e1e3f81e813b7da7b75c6",
+    "crates/femto-reader/tests/language.rs": "14cf1f60d75965cfedcd89f4cc5aa767a96e23fb241b7634982316d9ea7a20dc",
+    "output/picco/femto-picco.bin": "110b17f576b1648613506cfba9f4d379820aa18565ab752c1e527b09d5987118",
+    "output/picco-grayscale/femto-picco.bin": "85643be0cc1afee834f04363cff6fd7833d2be1d5c89a42df4509d4ccae5591e",
+    "docs/licenses/hypher-es.txt": "642ef60eb4de16dcd3d175013498fc4e6fe14b67e05d0c31a95bbe2e9d231f02",
+    "docs/licenses/hypher-it.txt": "c2c0e339fe850e190d1077a472f447b8e1f3e36557768aaee82b8e07fa73fd8a",
+    "docs/licenses/hypher-nl.txt": "ee9643b31661f2ebcb4dc98514d62fd529803430415ac76ecccd19ad67afbeb7",
+    "docs/licenses/hypher-pt.txt": "a30318bcaa8bf0a5aef2639fde87157ca9082ffe293df25ae2bb65c7eb8c141d",
+    "docs/licenses/hypher-nl-source.tex": "c3749c79c435edc8273b701148462dc3751f38f4d4e4381f7850ae4432a0a5f4",
+    "docs/licenses/LPPL-1.3c.txt": "c1ae6e179a6d28bbd5c483fbacc744acc75e922d598281dc3390aab26126e163"
+  }
+}

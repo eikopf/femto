@@ -1,0 +1,47 @@
+{
+  "feature": "Native simulator tailnet enrollment controls and transport integration",
+  "targeted_tests_passed": 228,
+  "test_suites": {
+    "microlink": 211,
+    "simulator": 17
+  },
+  "workspace_clippy_passed": true,
+  "native_simulator_smoke_passed": true,
+  "checks": [
+    "Optional paired tailnet directory and numeric endpoint arguments",
+    "Private bounded config and explicit identity creation without replacement",
+    "Single background setup worker, nonblocking cancellation and discarded late approval",
+    "Manager destruction cancels and joins setup worker",
+    "Generation capture for catalog and sync job transports",
+    "Public runtime stop reason supports terminal versus retryable status",
+    "Native stalled loopback TLS setup cancelled by Disconnect",
+    "Native existing-identity retry after cancellation",
+    "Native quit cancels setup before server response and releases identity lock",
+    "Full reader/catalog/progress/storage-fault native regression"
+  ],
+  "limitations": [
+    "Successful simulator TLS registration, approval, renewal, peer-map receipt and tailnet service access remain unqualified",
+    "Approval URLs are displayed; simulator retry uses a new registration without retaining follow-up tokens",
+    "Application transports can retain the closed identity-store lock until worker cleanup finishes",
+    "No new independent-peer, Picco build, or physical hardware qualification"
+  ],
+  "logs": {
+    "final": {
+      "path": "output/verification/simulator-tailnet-final.log",
+      "sha256": "2443ca10bd8690fa8b266fc5b2c76ea10380cc54bb039a5cd2c5a2c9bbfeb981"
+    }
+  },
+  "screenshot": {
+    "path": "output/simulator-smoke/tailnet-connecting.png",
+    "sha256": "a241a564e4d33c0f0b546f0a863c7f968218525cf1975aaf1a476624eaf23fb6"
+  },
+  "input_sha256": {
+    "crates/femto/src/simulator_tailnet.rs": "aa72983e62fab696225239eb55ce08398c16e07efc9c475681e6cf5a27d2899e",
+    "crates/femto/src/simulator.rs": "9112fbbfcd6e3ae05a8eba6daaaf7f6fc9168da00439b3d57f35007ad5f8d57e",
+    "crates/femto/src/simulator_sync.rs": "ef79c4e82a65bc237d9ebe7e3f97b5eee7c78ed577ebbb0b8a1d42df55551c5d",
+    "crates/femto-microlink/src/host_runtime.rs": "92ed266ae798ab1857699d491207ace395d23fb87e1e593ad8b59f697ce62201",
+    "crates/femto-microlink/src/host_registration.rs": "8b95f072a6293eefb3485d3250b8cc5a7535f0eeee010f813aa7a2a10f6446af",
+    "scripts/simulator-smoke.py": "293fc8670d171ac416ccc11f7f4d03240535d88db00e92f8ccd6c76d7f6a9ab8",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199"
+  }
+}

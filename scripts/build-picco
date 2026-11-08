@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+if [[ "${FEMTO_IDF_SHELL:-}" != 1 ]]; then
+  exec nix-shell nix/firmware.nix --run './scripts/build-picco'
+fi
+femto_root="$(pwd -P)"
+case "${FEMTO_PICCO_GRAYSCALE:-0}" in
+  0) femto_features=(); femto_output="$femto_root/output/picco"; femto_levels=2 ;;
+  1) femto_features=(--features grayscale); femto_output="$femto_root/output/picco-grayscale"; femto_levels=4 ;;
+  *) echo 'FEMTO_PICCO_GRAYSCALE must be 0 or 1' >&2; exit 2 ;;
+esac
+case "${FEMTO_PICCO_BLUETOOTH:-0}" in
+  0) ;;
+  1)
+    femto_features+=(--features bluetooth)
+    femto_output="$femto_output-bluetooth"
+    export ESP_IDF_SDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.bluetooth'
+    export ESP_IDF_SDKCONFIG='sdkconfig.bluetooth.generated'
+    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$femto_root/firmware/picco/target-bluetooth}"
+    ;;
+  *) echo 'FEMTO_PICCO_BLUETOOTH must be 0 or 1' >&2; exit 2 ;;
+esac
+if [[ -n "${FEMTO_PICCO_OUTPUT:-}" ]]; then
+  case "$FEMTO_PICCO_OUTPUT" in
+    /*) femto_output="$FEMTO_PICCO_OUTPUT" ;;
+    *) femto_output="$femto_root/$FEMTO_PICCO_OUTPUT" ;;
+  esac
+fi
+cd firmware/picco
+femto_target="$(cargo metadata --locked --no-deps --format-version 1 | python -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
+if [[ "${FEMTO_PICCO_BUILD_NAMESPACE:-}" != 1 ]]; then
+  mkdir -p "$femto_target" "$femto_output"
+  exec bwrap --bind / / --dev-bind /dev /dev --tmpfs /tmp \
+    --bind "$femto_root" /tmp/femto-source \
+    --bind "$femto_target" /tmp/femto-target \
+    --bind "$femto_output" /tmp/femto-artifacts \
+    --chdir /tmp/femto-source \
+    --setenv FEMTO_PICCO_BUILD_NAMESPACE 1 \
+    --setenv CARGO_TARGET_DIR /tmp/femto-target \
+    --setenv FEMTO_PICCO_OUTPUT /tmp/femto-artifacts \
+    --setenv TMPDIR /tmp \
+    /tmp/femto-source/scripts/build-picco
+fi
+export CARGO_ENCODED_RUSTFLAGS="$(python - "$femto_root" <<'PY'
+import os
+import sys
+import tomllib
+
+if "CARGO_ENCODED_RUSTFLAGS" in os.environ:
+    flags = os.environ["CARGO_ENCODED_RUSTFLAGS"].split("\x1f") if os.environ["CARGO_ENCODED_RUSTFLAGS"] else []
+elif "RUSTFLAGS" in os.environ:
+    flags = os.environ["RUSTFLAGS"].split()
+elif "CARGO_TARGET_XTENSA_ESP32S3_ESPIDF_RUSTFLAGS" in os.environ:
+    flags = os.environ["CARGO_TARGET_XTENSA_ESP32S3_ESPIDF_RUSTFLAGS"].split()
+else:
+    with open(".cargo/config.toml", "rb") as source:
+        flags = tomllib.load(source)["target"]["xtensa-esp32s3-espidf"]["rustflags"]
+flags.append("--remap-path-prefix=" + sys.argv[1] + "=/femto")
+print("\x1f".join(flags))
+PY
+)"
+cargo build --release --locked "${femto_features[@]}"
+mkdir -p "$femto_output"
+cp "$femto_target/xtensa-esp32s3-espidf/release/femto-picco" "$femto_output/femto-picco.debug.elf"
+xtensa-esp-elf-objcopy --strip-all "$femto_output/femto-picco.debug.elf" "$femto_output/femto-picco.elf"
+esptool.py --chip esp32s3 elf2image --flash_mode dio --flash_freq 80m --flash_size 16MB \
+  -o "$femto_output/femto-picco.bin" "$femto_output/femto-picco.elf"
+cd "$femto_root"
+python scripts/picco-image-manifest.py "$femto_output/femto-picco.bin" "$femto_levels"

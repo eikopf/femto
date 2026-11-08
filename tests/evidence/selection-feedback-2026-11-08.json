@@ -1,0 +1,81 @@
+{
+  "feature": "Inverted pending-selection feedback on the reading page",
+  "commands": [
+    {
+      "command": "cargo test -p femto-reader --test ui",
+      "exit_code": 0,
+      "passed": 45
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/build-picco",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/check-simulator",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "Exact glyph-box inversion and unchanged surrounding pixels for office, combining-mark naïve, and Hebrew שלום",
+    "Monochrome and four-level palette preservation",
+    "Panning moves the inverted region with page pixels",
+    "Cancellation restores ordinary page pixels; reading state remains unchanged",
+    "Native X11 pending-word feedback, range extension, save and reopen, plus existing full smoke workflows"
+  ],
+  "input_manifest": {
+    "path": "output/verification/selection-feedback-inputs.json",
+    "sha256": "04d564d56d4aa9fe4e12483ffa9b894b424327867085d655953b56e086c60711",
+    "files": 390,
+    "unchanged_at_completion": true
+  },
+  "artifacts": {
+    "tests": {
+      "path": "output/verification/selection-feedback-tests.log",
+      "sha256": "06ed6d172ae6541305114c39952c6361045b3352f58b1a2c764c1b745401e18f"
+    },
+    "picco": {
+      "path": "output/verification/selection-feedback-picco.log",
+      "sha256": "2b7c45f413857de678435d10dce3db3b9efca861480a9ad7c699a558977e92a8"
+    },
+    "native": {
+      "path": "output/verification/selection-feedback-native.log",
+      "sha256": "41a535777958004c1727660b9a0f61006084063e45c78ca4a0530fcb0ee9f8de"
+    },
+    "preview": {
+      "path": "output/verification/selection-feedback-preview.png",
+      "sha256": "f9ab95c2ef67b645560a13d0346e73308826cb33e74d898343d96e7b3b12fdfa"
+    },
+    "firmware": {
+      "path": "output/verification/selection-feedback-firmware.json",
+      "sha256": "9f1dad908018c8a9bdc5847082f72cfc07922410619c6a6218039c8f6da9a780"
+    }
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "90e693ffc4aae21f08655bc2ae4e4bf839306d96a4e780f75715b97936756282",
+    "bytes": 5178400,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "visual_findings": [
+    "Original-resolution native screenshot shows white when on black; surrounding page text and selection footer remain intact."
+  ],
+  "limits": [
+    "Feedback only while extending a pending selection; saved clippings are not painted as persistent highlights.",
+    "Glyph advance boxes do not trace outlines or cover every overhang; generated markers and hyphens are excluded.",
+    "Physical Picco readability, touch, refresh artifacts and rotated feedback remain unqualified.",
+    "No independent network interoperability rerun, grayscale firmware build or clean reproducibility pair in this checkpoint."
+  ]
+}

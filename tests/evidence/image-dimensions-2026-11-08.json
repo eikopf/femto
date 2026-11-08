@@ -1,0 +1,60 @@
+{
+  "feature": "CSS image width and height in paged reader",
+  "reader_suite_tests_passed": 201,
+  "vendored_parser_tests_passed": 278,
+  "final_targeted_image_tests_passed": 5,
+  "workspace_clippy_passed": true,
+  "monochrome_picco_build_passed": true,
+  "assertions": [
+    "Non-inherited CSS pixel/percentage dimensions and auto/initial/unset resets",
+    "Absent HTML hints remain absent for CSS-sized images",
+    "Automatic-axis intrinsic proportions and two-axis authored proportions",
+    "Explicit enlargement, author maxima, page fit and one-megapixel output cap",
+    "Zero-size missing images produce neither placement nor placeholder",
+    "Invalid finite-range input rejected before conversion",
+    "Two-viewport raster output and source-anchor page reconstruction equality"
+  ],
+  "verification_order": [
+    "Full reader suite passed before the final resize-buffer area cap was added",
+    "Final targeted image tests include the new 2048px viewport area cap",
+    "Clippy and monochrome firmware passed with the final area cap",
+    "Parser comments were clarified after its suite; executable parser behavior did not change"
+  ],
+  "limitations": [
+    "No min-width/min-height, explicit inherit, font-relative units, calc, or nested containing-block layout",
+    "Percentage height uses fixed page content height",
+    "Absent CSS width/height retains legacy HTML hint fitting",
+    "No physical image quality, device heap/latency, or fresh clean reproducibility qualification"
+  ],
+  "logs": {
+    "reader": {
+      "path": "output/verification/image-dimensions-reader.log",
+      "sha256": "bd67ddb1b81db82bd22612a813e9e7772be6bf8dabd66f44ed55f79ff5b46bde"
+    },
+    "parser_and_images": {
+      "path": "output/verification/image-dimensions-parser_and_images.log",
+      "sha256": "579d7830bdc559847e7abe6ff6b1720df60503bc4a26fe5510553a387114e497"
+    },
+    "final_image_checks": {
+      "path": "output/verification/image-dimensions-final_image_checks.log",
+      "sha256": "cf7fd235cc54cd8f20b5c505d638c632b4f7150b991bb9c7e2a17e966e895637"
+    },
+    "firmware": {
+      "path": "output/verification/image-dimensions-firmware.log",
+      "sha256": "61dfdad15e5a8e5dc9ef3b344a0a01c80a9fefe5cd35aff19dc1d600c6be98e9"
+    }
+  },
+  "input_sha256": {
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54",
+    "vendor/epub-stream/src/css.rs": "d0bcae311ebb6f7081844f0a4105b333e5f249bedab64b7b411be8dccb0139a0",
+    "vendor/epub-stream/src/render_prep.rs": "ca9876aea6e49a566d0cc361933e89748a4d61568d932f26c68270ec1b6ffad9",
+    "crates/femto-reader/src/document.rs": "0f2c89286b732cc418e17e0a3f97d63f784f16bc70cde62369bf954eb9bfe313",
+    "crates/femto-reader/src/layout.rs": "2ab26e18d42cf10bd7a4ebc8492ab65dc74af730344e73d1e00d8dd33f58a312",
+    "crates/femto-reader/tests/image_limits.rs": "ae48864652bcf40c186266375b89dcb76b51a46e790a2c4ea4bcc53ea87f3376",
+    "scripts/make-fixtures.py": "37a4873e08db79ef155d94c65b87381bdf5359cb48e210610a3fd16587b11149",
+    "tests/fixtures/image-dimensions.epub": "78956f3b939ed9bcd9f92f515b33a64a14c8fb331c64d0a094052ccbc7d2d627"
+  },
+  "firmware_sha256": "8333a1b2afe68cb8838d7f1a0099a2ba47c03b04dd0bb93337d1d0ee70b0ae30",
+  "hardware_verified": false
+}

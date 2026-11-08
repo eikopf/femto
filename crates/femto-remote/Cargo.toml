@@ -1,0 +1,9 @@
+[package]
+name = "femto-remote"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+hidreport.workspace = true

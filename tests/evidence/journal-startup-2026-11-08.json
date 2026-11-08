@@ -1,0 +1,61 @@
+{
+  "feature": "Journal startup without retaining two decoded reader states",
+  "targeted_tests_passed": 52,
+  "suites": {
+    "reader_unit": 29,
+    "journal": 10,
+    "sync": 13
+  },
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "implementation": "Validate and drop each decoded slot, retain generation/slot/checksum descriptors, then reload and compare the selected slot before publication.",
+  "assertions": [
+    "Only the selected slot is reloaded after inspection",
+    "Changed checksum or generation, disappearance and read failure reject opening",
+    "Equal valid generations remain ambiguous",
+    "A newer checksummed unsupported state version falls back to the older valid slot",
+    "Saving after fallback overwrites the invalid slot and reopens successfully",
+    "Existing torn-slot, output-limit, frame-format, settings and progress-journal tests pass"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --lib --test journal && cargo test --locked -p femto-sync && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco"
+  ],
+  "input_sha256": {
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "crates/femto-reader/src/journal.rs": "ae803f5185c069de8abb2958b927db11af37085a2894366cdef2e8b90f3dbaba",
+    "crates/femto-reader/tests/journal.rs": "80179d648bb5677f22d42766d0866f1d7f6bd07efa6d86c07dcdca8e7aa19045",
+    "crates/femto-reader/src/state.rs": "2a4b5cff59012b75b252e7264ff9bdd4436c5755b9e6fedcb27559af6a850ed2",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54"
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/journal-startup-tests.log",
+      "sha256": "2e0597a1c8dd1cbe8b4a2ccbaf73a534555652952b1ee7460ffb4e9f60c37f88"
+    },
+    "picco": {
+      "path": "output/verification/journal-startup-picco.log",
+      "sha256": "8566c552e3da8a39baf73f5eda8be8f630b85fea13755702d4198cee045fdb27"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "a059586bd7d99ed09099bf32cfcc1db0b0e7ee2d685314f4eb2af49e107a2498",
+    "bytes": 5139200,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "tradeoff": "One additional read and JSON decode of the selected slot in exchange for avoiding simultaneous retention of both decoded states.",
+  "limitations": [
+    "Memory lifetime follows the implementation; no allocator instrumentation or physical heap measurement",
+    "Reload-change tests inject slot-read results, not physical concurrent SD writes",
+    "Single-owner contract remains; no filesystem locking added",
+    "No new full workspace, native simulator, independent-peer suite or grayscale build"
+  ],
+  "hardware_verified": false
+}

@@ -1,0 +1,57 @@
+{
+  "feature": "Document-bound clipping records and host/device-journal persistence",
+  "tests_passed": 19,
+  "test_batches": 3,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "checks": [
+    "Capture preserves Unicode source and paragraph separators",
+    "Host and journal reload preserve ranges, quotes and timestamps without changing position or recency",
+    "Repeated range/text insertion preserves original timestamp; conflicting text is rejected",
+    "Exact-document verification rejects changed books, forged quote bytes and split graphemes",
+    "State load/save and journal save reject malformed identity/version/range/text and duplicate ranges",
+    "Rejected writes preserve previous files and journal state",
+    "128-record insertion limit preserves state on overflow; legacy files omit and default empty clippings"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --test clippings --test journal --test book_typography && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco"
+  ],
+  "input_sha256": {
+    "crates/femto-reader/src/clipping.rs": "f346bcdd414932b81e93777c7b5def0dc5be148e9228f82b1f8b417cad3cc71a",
+    "crates/femto-reader/src/selection.rs": "f6befe5739313379530150e96f91db95135687bf672e5807243dfbeafa1fd7aa",
+    "crates/femto-reader/src/state.rs": "f0006c1de86e9c4fb3e46262618c9c1287806957adb059bc99ff751ba9db512c",
+    "crates/femto-reader/src/lib.rs": "bbbb10caf89e7bb21a2bb55d0aebbb9868058734893c9abbcf23dace9186ccbc",
+    "crates/femto-reader/tests/clippings.rs": "5669e5055a47cacbe88d743ad25249a209d9fadaeaed4b14bba30efb69a26c92",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54"
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/clipping-persistence-tests.log",
+      "sha256": "48616ff1e689df8317405c8e7b22d2b088df38aa5dd191e9b9549b6d25cbc98c"
+    },
+    "picco": {
+      "path": "output/verification/clipping-persistence-picco.log",
+      "sha256": "5974f43449550b7f97f757f24613c304120c113fe717ec8c284bfb0ed6511db5"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "3b57270f8e39becdb1266ef335c812e3bbd609a0d47423f7a35acdf532ed561d",
+    "bytes": 5159680,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Stored-field validation does not parse source text; validate_document is required for imported records before trusting the selected range.",
+    "Clipping capture/list/delete UI, highlight painting and export controls remain unfinished.",
+    "The 4 MiB state encoding cap still applies; 128 maximal clippings per book do not guarantee space for all books.",
+    "No physical device, native simulator or independent-network rerun in this checkpoint."
+  ]
+}

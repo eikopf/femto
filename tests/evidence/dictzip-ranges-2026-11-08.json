@@ -1,0 +1,83 @@
+{
+  "feature": "Reject partial or incorrectly sized dictzip definitions; validate selected compressed chunks",
+  "commands": [
+    {
+      "command": "cargo test -p femto-reader --test dictionary (before patch)",
+      "exit_code": 101,
+      "passed": 5,
+      "failed": 1,
+      "failure": "Out-of-range compressed definition was accepted"
+    },
+    {
+      "command": "cargo test -p femto-reader --test dictionary --test ui",
+      "exit_code": 0,
+      "passed": 59
+    },
+    {
+      "command": "cargo test -p femto --test dictionary_cli",
+      "exit_code": 0,
+      "passed": 1
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "vendor/quireink-stardict/src/dict.rs": "45d77bfad72e0934c658268b243e57013d4fc0a206d0714513bca7decb986ee9",
+    "crates/femto-reader/src/dictionary.rs": "f9773b0a46872e356c5d94657c20b927f51f21a0adc9c15139273427437a5450",
+    "crates/femto-reader/tests/dictionary.rs": "bd06cca4d6ec36b3e1f9429c8115f665e73528ccf2fe9336186ec3c146ec1a6c",
+    "scripts/make-dictionary-fixture.py": "2c6b706c17eb4788a561c113f5e78035dafef8885970da66ff8987543c9a6aba",
+    "Cargo.lock": "7040c9e05954fc95624ad2f6715bc6c2b9d18f6ae33cc634c65d3d67f7e355bb",
+    "firmware/picco/Cargo.lock": "dcab9958734dfecf18f142c9b159b9465e6d6736dc930d4cfb0b42d65f6299ca",
+    "tests/fixtures/dictionary/compressed.dict.dz": "58346558e8ad4309a25cda9934e9a24daca102b0ccba552495800f708254361f",
+    "tests/fixtures/dictionary/compressed.idx": "cda408fd512407855fee8516c87b0580ee98609a466aede079d43ce2e123614a",
+    "tests/fixtures/dictionary/compressed.ifo": "1631f3430c2fde631618c0e294a716ee93aa3be81b0b4bb6bf0dac159e17cb9c"
+  },
+  "snapshot_at_completion": true,
+  "logs": {
+    "before": {
+      "path": "output/verification/dictzip-before.log",
+      "sha256": "158811057c6fdb7377f8413abdea80cd4fa5b121b20dff2c25c5ee228e80a7e7"
+    },
+    "final": {
+      "path": "output/verification/dictzip-final.log",
+      "sha256": "76236789966c6ab3fecbd528d4c720086252e57bc6052c0b2286cf3790d5f03f"
+    },
+    "firmware": {
+      "path": "output/verification/dictzip-firmware.log",
+      "sha256": "eeacd4d573f2dde94729cfcb8cee260148ec58fbe5ab05834c51a6741f542e62"
+    }
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "dda2ec9b6faa7c4b991f5a235fdc663cea501024d8385d9eba7f3b51a96aab98",
+    "bytes": 5215952,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "checks": [
+    "Zlib full-flush fixture round-trips through Python gzip during generation",
+    "Exact Unicode and 60,000-byte definitions across 40,000-byte chunks and 32 KiB inflate window",
+    "Requests beyond available uncompressed data return errors",
+    "Bad table version, zero counts/sizes, reserved flags and truncated footer rejected",
+    "Chunks decoding shorter or longer than declared are rejected",
+    "Optional gzip filename scanning bounded to 16 KiB",
+    "Overflowing 64-bit range rejected",
+    "Existing dictionary, selection UI and CLI regressions pass"
+  ],
+  "limits": [
+    "Synthetic fixture only; independent real dictionaries and physical Picco remain unqualified.",
+    "Gzip CRC and header CRC are not verified; unrelated chunks and complete deflate end are not checked.",
+    "Stricter footer checks invalidate the upstream footerless synthetic fixture; upstream suite adaptation and execution remain outstanding.",
+    "Native simulator, grayscale firmware and clean reproducibility were not rerun."
+  ]
+}

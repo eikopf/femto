@@ -1,0 +1,40 @@
+{
+  "feature": "Shared-source range pagination for semantic note previews",
+  "targeted_tests_passed": 40,
+  "workspace_clippy_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Preview index and completed cache share the original chapter allocation",
+    "Every long and inline note page matches extracted-copy reference bounds and pixels",
+    "Reverse page traversal reconstructs within the same note end boundary",
+    "Invalid end chapter, block, order and UTF-8 boundaries fail before page emission",
+    "Cooperative Follow retains full source chapter and Back restores origin",
+    "Ordinary pagination and large indexed chapter regression tests pass"
+  ],
+  "limitations": [
+    "Inline note ends still require a temporary boundary-paragraph copy during pagination",
+    "Whole-paragraph analysis and chapter parsing remain synchronous",
+    "Physical heap and latency unmeasured",
+    "No new native smoke run; prior semantic-note UI smoke evidence is separate"
+  ],
+  "logs": {
+    "final": {
+      "path": "output/verification/note-range-final.log",
+      "sha256": "a597db24cb2352a2273dbe6ed0687590c2539560c79446e947e62e23b826be5d"
+    },
+    "firmware": {
+      "path": "output/verification/note-range-firmware.log",
+      "sha256": "174be845a8e72c9adc9abc6d88e56d926389a7db686e4b1f720eb2c77948811c"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/layout.rs": "1048525084958e6247746a79d24ce3755bbb44f688ec060bc293be097829e79d",
+    "crates/femto-reader/src/pagination.rs": "00c0d889998cb61c44ecb46630bddb758514b48790a423b115ee4cc5f28f6b64",
+    "crates/femto-reader/src/controller.rs": "507fd0bf336a19512a556cafc993b35b14a9916e2f0c6109e0bd4f6d7a330811",
+    "crates/femto-reader/tests/note_bodies.rs": "7a8181a1548e17b7ed8cde702300f447820d37735b8166b6517651eb81c43d74",
+    "tests/fixtures/semantic-notes.epub": "df1e0b9919de38a040fade684930df8d506ed961dde4c6f87b21470271a90d4b",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "ce62b3038f455d0d5bf63d533ccc4dcccfc995a0d9b96ed0e523920eb4aa055b"
+  }
+}

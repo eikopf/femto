@@ -1,0 +1,57 @@
+{
+  "feature": "Explicit coordinator TLS trust and independent application runtime qualification",
+  "targeted_tests_passed": 211,
+  "workspace_clippy_passed": true,
+  "independent_command": "FEMTO_HEADSCALE_RUNTIME_ONLY=1 ./scripts/check-headscale",
+  "independent_passed": true,
+  "independent_report": {
+    "application_map": true,
+    "application_reconnect": true,
+    "application_registration": true,
+    "assigned_ipv4": "100.64.0.1",
+    "closed_runtime_denies_access": true,
+    "identity_lock_released": true,
+    "revoked_during_restart": true,
+    "coordinator": "headscale version 0.29.7\ncommit: v0.29.7\nbuild time: unknown\nbuilt with: go1.27.3 linux/amd64",
+    "untrusted_coordinator_rejected": true,
+    "coordinator_node_continuity": true,
+    "hardware_verified": false
+  },
+  "checks": [
+    "TLS connector clone and timeout changes preserve certificate verification",
+    "Coordinator trust retained across bootstrap, registration, publication and reconnect setup",
+    "Wrong coordinator CA rejected before registration",
+    "Application runtime receives authorized local map",
+    "Coordinator restart withdraws local address; runtime re-registers and receives fresh map",
+    "Coordinator node identity and assigned addresses preserved",
+    "Explicit close denies runtime access and releases identity lock"
+  ],
+  "limitations": [
+    "The new probe does not independently assert endpoint publication acknowledgments",
+    "No new independent UDP/TCP/DERP or catalog/progress traffic check",
+    "Simulator graphical enrollment and peer-service success still unqualified",
+    "No new Picco build or physical hardware qualification"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/host-trust-tests.log",
+      "sha256": "60e1a0221b839596be93cff294f078d81c30f1762b37f6097cbd6ab02f7fa0e4"
+    },
+    "independent": {
+      "path": "output/verification/host-trust-independent.log",
+      "sha256": "a2449aa2e3e5673968034852763a17a6112a459838c838933073570ebf5fdb71"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/host_tls.rs": "55d735f16b1922ae3ad0a2fcccf7cca4956ce3c73693ec0c1d61989bcec798f9",
+    "crates/femto-microlink/src/host_bootstrap.rs": "aff29d144282761ea5a1b69aeb15527fbbf5527453d3f0d494de530689931347",
+    "crates/femto-microlink/src/host_control.rs": "d7ab42cef372edbcc16abd7ff1287e0ad4e41c9bac91cf4c910d3496636d92f2",
+    "crates/femto-microlink/src/host_reconnect.rs": "676ff97b63edf8860c6830ab3ed6d63d1393aa597aab630a00051af665877ae2",
+    "crates/femto-microlink/src/host_registration.rs": "149bd82ca044db2757b346df7fdaf51ede9a484f07e8739580bbc170b4dd9956",
+    "crates/femto-microlink/examples/host-runtime-probe.rs": "eaf65f76088d9d702e766ab083c1591f27bb31b3551df5c72fac9646c547bef6",
+    "scripts/check-headscale": "a5586932e70c73e2eb3ba93cc9b153a21e020fc921ef9bb2f7898cea8da0020a",
+    "scripts/check-headscale.py": "10be215929d1d9e0923bb4248cdc537fcc5891404c9416ef1744fa957abc3934",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199"
+  },
+  "probe_binary_sha256": "73eabdf38ed1bcccc37261c31c49a7d401dc43cd995bf74785bf48f093a1ae66"
+}

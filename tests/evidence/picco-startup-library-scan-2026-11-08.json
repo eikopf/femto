@@ -1,0 +1,49 @@
+{
+  "feature": "Cooperative and skippable Picco startup library scan",
+  "library_tests_passed": 7,
+  "workspace_format_check_passed": true,
+  "monochrome_build_passed": true,
+  "grayscale_build_passed": true,
+  "hardware_verified": false,
+  "host_checks": [
+    "Scanner cancellation preserves an existing cache byte-for-byte",
+    "Cancelled initial scan does not create a cache",
+    "Bounded traversal and hashing tests pass"
+  ],
+  "compiled_device_behavior": [
+    "Saved geometry and light settings are applied before scanning",
+    "Status frame uses the orientation/input barrier",
+    "Directory traversal and hashing yield between input/Wi-Fi polls",
+    "Button or tap skips traversal without partial publication",
+    "Default book candidates remain available after skipped or failed scans",
+    "Status frame allocations are released before traversal"
+  ],
+  "limitations": [
+    "Metadata cache loading/saving, sorting, and metadata parsing remain synchronous",
+    "Simulator startup library scan remains synchronous",
+    "Host tests do not execute the device event loop",
+    "Physical startup latency, wake-button behavior, and SD qualification remain outstanding"
+  ],
+  "logs": {
+    "library_tests": {
+      "path": "output/verification/picco-startup-scan-library_tests.log",
+      "sha256": "d22a00561ea89fd21eafc99e8282e276a59dcfa19e0ee5e6f62e33bf3919f1b4"
+    },
+    "monochrome": {
+      "path": "output/verification/picco-startup-scan-monochrome.log",
+      "sha256": "97d862653cf2d3d69d09629d767f49f70125271bd0513e4cfd8bdba27577177b"
+    },
+    "grayscale": {
+      "path": "output/verification/picco-startup-scan-grayscale.log",
+      "sha256": "4ae0ceaff9c093a116a95ad9573fc3ee09bce4ab873dff831efd9280203d4a02"
+    }
+  },
+  "input_sha256": {
+    "firmware/picco/src/main.rs": "ae200e703c37c16cfbca46c6317ba11b3ca4caf0f84a7d1df03653253f23b9c0",
+    "crates/femto-reader/src/state.rs": "b99589bc2342a00c2fbd87a42f5d19dc6a6c38e761935ca2aaeef65311be64a3",
+    "crates/femto-reader/tests/library.rs": "6a6469bc648e8040cf0b0ff5b970116b9861f7afea2a46558847c965fd24c588",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "32fe990e958eff53ceb522aaefccbdd99a88d0fe3af299db61687277a7fb5346",
+    "output/picco-grayscale/femto-picco.bin": "c50bd3bea0d6123acb75acceba203b8da20df55878471758609f37484d4c30d5"
+  }
+}

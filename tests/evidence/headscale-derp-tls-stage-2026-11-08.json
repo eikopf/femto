@@ -1,0 +1,22 @@
+{
+  "scope": "Independent DERP-only TLS stage; subsequent full-run failure retained",
+  "exchange": {
+    "derp_traffic": true,
+    "direct_udp_sent": 0,
+    "http_body_bytes": 65536,
+    "independent_peer_tls": true,
+    "mode": "derp-tls-peer",
+    "relay_events": 69,
+    "tls_close_notify": true,
+    "tls_verified": true
+  },
+  "wrong_name_rejected": true,
+  "untrusted_rejected": true,
+  "truncated_rejected": true,
+  "full_suite_passed": false,
+  "subsequent_failure": "Direct TCP completed its payload and close but failed the incoming-handshake-response count assertion. Initial run did not record counter values; peer-initiated renewal is a possible explanation, not a measured diagnosis.",
+  "followup": "Count authenticated initiator and confirmed-responder session installations; rerun full fixture.",
+  "log": "output/verification/headscale-derp-tls-stage.log",
+  "log_sha256": "6111b5a7be07df1927794b2acd695c9e40f706ce4a244aef19e8bb3a0e398de4",
+  "hardware_verified": false
+}

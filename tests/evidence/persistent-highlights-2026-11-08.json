@@ -1,0 +1,74 @@
+{
+  "feature": "Persistent clipping highlights with source verification and union rendering",
+  "commands": [
+    {
+      "command": "cargo fmt --all",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p femto-reader --test highlights --test clippings --test ui",
+      "exit_code": 0,
+      "passed": 53
+    },
+    {
+      "command": "cargo test -p femto --test clippings_export",
+      "exit_code": 0,
+      "passed": 5
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "Shared detail-menu toggle enables and disables highlighting without moving the reading anchor",
+    "Host and journal reopen retain exact highlighted pixels",
+    "Font-size reflow and portrait/clockwise rotation keep source ranges and produce palette-preserving inversion",
+    "Repeated capture retains highlight and original timestamp",
+    "Overlapping saved highlights and pending selection invert shared pixels once",
+    "Invalid source cannot be enabled; malformed enabled excerpts are omitted with deduplicated warning and can be disabled",
+    "Exact-record state mutation rejects stale clipping",
+    "CLI journal export retains enabled highlight metadata and does not change source journal files"
+  ],
+  "input_manifest": {
+    "path": "output/verification/persistent-highlights-inputs.json",
+    "sha256": "bc1b91411cef5a52401d7a67e3dc7f9cf6c4a7574d1ac5ead454a537720603b7",
+    "files": 391,
+    "unchanged_at_completion": true
+  },
+  "artifacts": {
+    "tests": {
+      "path": "output/verification/persistent-highlights-tests.log",
+      "sha256": "301521ae9b63ddc0689a745e10fdbfe0517d3111ec4699dde2e3f6361ed8dd7a"
+    },
+    "picco": {
+      "path": "output/verification/persistent-highlights-picco.log",
+      "sha256": "8e2179ae7ac8ef49e6d2bf70aedb834aa12a17a8d1dc0b131080029f67409843"
+    },
+    "firmware": {
+      "path": "output/verification/persistent-highlights-firmware.json",
+      "sha256": "b9f21d228e94c781e4494f0bc053e5006e561b26c572f82916c5620d30f7c345"
+    }
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "06ad1ede8319027342820354e46d71479e70d6c06843e6efdbf27926f40c2963",
+    "bytes": 5176912,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Visible enabled clippings undergo synchronous source extraction on every render; physical latency and memory remain unqualified.",
+    "Native highlight-toggle window input, physical touch and display refresh behavior remain unqualified.",
+    "Existing glyph advance-box limitations apply; no note text, highlight color/style selection, or cross-page selection gestures.",
+    "No independent network interoperability rerun, grayscale firmware build or clean reproducibility pair in this checkpoint."
+  ]
+}

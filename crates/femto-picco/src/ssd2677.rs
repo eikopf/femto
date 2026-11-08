@@ -1,0 +1,103 @@
+use crate::{Bus, Display, Error, Refresh, waveform};
+
+// FreeInk Picco SE0400NQW47 initialization; see THIRD-PARTY.md.
+const INIT: &[(u8, &[u8])] = &[
+    (0x00, &[0x27, 0x09]),
+    (
+        0x83,
+        &[0x00, 0x00, 0x03, 0x1f, 0x00, 0xc8, 0x02, 0xa8, 0x01],
+    ),
+    (0x01, &[0x07, 0xf0, 0x22, 0x20, 0x78, 0x22]),
+    (0x06, &[0x0f, 0x8b, 0x93, 0xc1]),
+    (0xe7, &[0xc1]),
+    (0x50, &[0x77]),
+    (0x62, &[0x98, 0x98, 0x98, 0x75, 0xca, 0xb2, 0x98, 0x7e]),
+    (0xe0, &[0x10]),
+    (0x65, &[0, 0, 0, 0]),
+    (0x30, &[0x04]),
+    (0x82, &[0x28]),
+    (0xe9, &[0x01]),
+];
+
+fn pack(old: u8, new: u8) -> [u8; 2] {
+    let mut packed = 0_u16;
+    for bit in (0..8).rev() {
+        packed = (packed << 2) | u16::from((((old >> bit) & 1) << 1) | ((new >> bit) & 1));
+    }
+    packed.to_be_bytes()
+}
+
+impl<B: Bus> Display<B> {
+    pub(super) fn grayscale_ssd2677(
+        &mut self,
+        msb: &[u8],
+        lsb: &[u8],
+    ) -> Result<(), Error<B::Error>> {
+        self.command(0x04, &[])?;
+        self.bus.delay_ms(10);
+        self.idle()?;
+        let packed = msb
+            .iter()
+            .zip(lsb)
+            .flat_map(|(&high, &low)| pack(high, low));
+        self.bus.command_stream(0x10, packed).map_err(Error::Bus)?;
+        self.command(0x20, &waveform::SE0400_GRAY)?;
+        self.command(0x12, &[0])?;
+        self.bus.delay_ms(10);
+        self.idle()?;
+        self.command(0x02, &[0])?;
+        self.bus.delay_ms(10);
+        self.idle()?;
+        self.previous.copy_from_slice(msb);
+        self.ready = true;
+        Ok(())
+    }
+
+    pub(super) fn initialize_ssd2677(&mut self) -> Result<(), Error<B::Error>> {
+        self.idle()?;
+        for &(command, data) in INIT {
+            self.command(command, data)?;
+            if command == 0 {
+                self.bus.delay_ms(10);
+            }
+        }
+        self.bus.delay_ms(10);
+        self.idle()?;
+        self.previous.fill(255);
+        self.ready = true;
+        Ok(())
+    }
+
+    pub(super) fn refresh_ssd2677(
+        &mut self,
+        plane: &[u8],
+        mode: Refresh,
+    ) -> Result<(), Error<B::Error>> {
+        let packed = self
+            .previous
+            .iter()
+            .zip(plane)
+            .flat_map(|(&old, &new)| pack(old, new));
+        self.bus.command_stream(0x10, packed).map_err(Error::Bus)?;
+        self.command(
+            0x20,
+            if mode == Refresh::Fast {
+                &waveform::SE0400_FAST
+            } else {
+                &waveform::SE0400_FULL
+            },
+        )?;
+        self.command(0x04, &[])?;
+        self.bus.delay_ms(10);
+        self.idle()?;
+        self.command(0x12, &[0])?;
+        self.bus.delay_ms(10);
+        self.idle()?;
+        self.command(0x02, &[0])?;
+        self.bus.delay_ms(10);
+        self.idle()?;
+        self.previous.copy_from_slice(plane);
+        self.ready = true;
+        Ok(())
+    }
+}

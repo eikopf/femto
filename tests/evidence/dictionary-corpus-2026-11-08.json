@@ -1,0 +1,110 @@
+{
+  "feature": "Published WikDict English-German corpus lookup qualification",
+  "report": {
+    "source": "https://download.wikdict.com/dictionaries/stardict/wikdict-en-de.zip",
+    "date": "2026-06-23",
+    "entries": 72413,
+    "synonyms": 57492,
+    "sample_queries": 4675,
+    "reports": {
+      "published_plain": {
+        "definitions": 5483,
+        "lookup_ms": 643,
+        "name": "English-Deutsch FreeDict+WikDict dictionary (en-de)",
+        "prepare_ms": 8,
+        "prepare_steps": 294,
+        "queries": 4675
+      },
+      "derived_dictzip": {
+        "definitions": 5483,
+        "lookup_ms": 2955,
+        "name": "English-Deutsch FreeDict+WikDict dictionary (en-de)",
+        "prepare_ms": 8,
+        "prepare_steps": 294,
+        "queries": 4675
+      }
+    },
+    "sha256": {
+      "wikdict-en-de.zip": "c1d141f39b08893d8e1fdce6e06b6acdaa91b343b4982623de9867a855b4db79",
+      "stardict.ifo": "ab0d3f46a059b8789d57d491fa34478f06ff8f4ec57bcba009c90a9b92ecdb4e",
+      "stardict.idx": "e3d9f7279b3877d3465455cec352439a771a0c2af14c96c24dbc5a8addcaa27d",
+      "stardict.dict": "35404844c12f292acf2e3b424559d9a7f4a84750d8a706cbd8188c1882eb805a",
+      "stardict.syn": "d06acb5e89386722a2cd9cbd2a8468eaa61b8d1666afcc21e3cc1e898e116ca4",
+      "cases.jsonl": "3a0e06dfbe46de7297fdd0a61cd549bd0f30e5aba9db12c3b30e2210afc3e60d",
+      "stardict.dict.dz": "089a6c5358142fb8b97c110d64e3125fd9c32f9725db7cf2e25c7c45b0534408"
+    }
+  },
+  "commands": [
+    {
+      "command": "cargo build --locked -p femto-reader --example dictionary-corpus",
+      "exit_code": 0
+    },
+    {
+      "command": "python scripts/check-dictionary-corpus.py output/dictionary-corpus",
+      "exit_code": 0
+    },
+    {
+      "command": "QUIREINK_STARDICT=output/dictionary-corpus/stardict.ifo QUIREINK_STARDICT_WORDS=font,book,read cargo test --locked --manifest-path vendor/quireink-stardict/Cargo.toml --config 'patch.crates-io.miniz_oxide.path=\"vendor/miniz_oxide\"' --test real -- --ignored",
+      "exit_code": 0,
+      "passed": 1,
+      "note": "Actual run used an absolute corpus path."
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo fmt --all --check",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "Independent Python parsing of all index/synonym records, sorting, counts, definition ranges and synonym targets",
+    "Sampled headwords, synonyms, largest definitions, uppercase variants and a missing word",
+    "Both published plain data and zlib-derived dictzip produce 5,483 expected definitions for 4,675 queries",
+    "Full derived gzip stream validates through Python gzip before lookup",
+    "Previously ignored upstream real-dictionary test runs successfully"
+  ],
+  "tested_files_sha256": {
+    "scripts/check-dictionary-corpus.py": "8397cc5d7e08386c892f812636a8c5e3ea6b486478c4cfe2a2be6766b1bd4525",
+    "crates/femto-reader/examples/dictionary-corpus.rs": "21230f9f650c857faffb0b3251ef22532e4878753194d9e834e85d33ec2b2830",
+    "crates/femto-reader/src/dictionary.rs": "f9773b0a46872e356c5d94657c20b927f51f21a0adc9c15139273427437a5450",
+    "vendor/quireink-stardict/src/dict.rs": "45d77bfad72e0934c658268b243e57013d4fc0a206d0714513bca7decb986ee9",
+    "vendor/quireink-stardict/src/index.rs": "3aba1c0663a5db1d0fc8231d4196f7ecf76dcd9077c6bb9d3416e48f68b36507",
+    "vendor/quireink-stardict/src/text.rs": "8b78357cc1fa49ef8e17d39bd2f8806bd985e371d6e249dba54ec6f969394263",
+    "vendor/quireink-stardict/src/lib.rs": "7f2b2b03af8b80548a82c76a8db6d43707d24725d01bd582aad4b841781c9013",
+    "Cargo.lock": "7040c9e05954fc95624ad2f6715bc6c2b9d18f6ae33cc634c65d3d67f7e355bb",
+    "firmware/picco/Cargo.lock": "dcab9958734dfecf18f142c9b159b9465e6d6736dc930d4cfb0b42d65f6299ca"
+  },
+  "snapshot_at_completion": true,
+  "logs": {
+    "probe": {
+      "path": "output/verification/dictionary-corpus-probe.log",
+      "sha256": "74e698096a7c837ab59a0ea5fd693a06e2860a74dcb5424f6636bea8add62b20"
+    },
+    "checks": {
+      "path": "output/verification/dictionary-corpus-checks.log",
+      "sha256": "a209733fe15aaf53dd1cf4873c6a54f72984029c00cb21a440a093e10c12ca18"
+    }
+  },
+  "attribution": {
+    "publisher": "Karl Bartel",
+    "projects": [
+      "WikDict",
+      "Wiktionary",
+      "DBnary",
+      "FreeDict"
+    ],
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+    "local_only": "Downloaded and derived corpus data remain under ignored output/dictionary-corpus."
+  },
+  "limits": [
+    "One published language-pair snapshot with sampled lookup; not all queries or languages.",
+    "Expected markup conversion reuses the backend function, so only routing and extraction are independently checked.",
+    "Compressed copy is derived with zlib; the published archive itself contains plain definitions.",
+    "No native GUI or physical Picco corpus run, device heap measurement, or general 64-bit offset qualification.",
+    "No production runtime changes or firmware rebuild in this checkpoint.",
+    "Host timings are observations, not device estimates."
+  ]
+}

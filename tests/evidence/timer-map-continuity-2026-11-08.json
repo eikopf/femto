@@ -1,0 +1,53 @@
+{
+  "feature": "Receive-idle and unanswered-data timers survive harmless coordinator maps",
+  "passed_microlink_tests": 203,
+  "workspace_clippy_desktop_tailnet_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Harmless map preserves receive-idle timer deadline",
+    "Queued keepalive is invalidated and regenerated with fresh ciphertext",
+    "Harmless map preserves unanswered-data timer deadline",
+    "Existing revocation and session cancellation tests still pass"
+  ],
+  "logs": {
+    "validation": {
+      "path": "output/verification/timer-map-continuity-validation.log",
+      "sha256": "e382c1035e8403f3f2563f0cc828064ad95ce51015ae55e0772daf60ed4b4200"
+    },
+    "firmware": {
+      "path": "output/verification/timer-map-continuity-firmware.log",
+      "sha256": "4f11e994d4eaf4ed8752046b90cc74ac3a4285b561c067456c2dd84db02faa30"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/network.rs": "88dbaeb4f7d3a733fdf473504b082682abca3adf5dbe63d771fc2de623320201",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "64b3a173aea0bd37e1a49c003513b3b36fd2241bf456e3ccef3ab9a109478a6e"
+  },
+  "independent_diagnostic_relay_stage": {
+    "authenticated_handshake_responses": 2,
+    "authenticated_session_installations": 2,
+    "bytes_read": 65536,
+    "bytes_written": 65536,
+    "deliberately_dropped_initiations": 1,
+    "derp_traffic": true,
+    "direct_udp_sent": 0,
+    "handshake_retry_recovery_ms": 20647,
+    "independent_peer_tcp": true,
+    "initiator_installations": 2,
+    "mode": "derp-tcp-peer",
+    "remote_eof": true,
+    "renewal_elapsed_ms": 195191,
+    "responder_installations": 0,
+    "tcp_closed": true,
+    "timer_only_handshake_recovery": true,
+    "transport_received": 281,
+    "transport_sent": 154
+  },
+  "limitations": [
+    "Diagnostic relay result uses an earlier binary and does not qualify final source",
+    "Diagnostic full run remains active; direct-path and final report are pending",
+    "Independent response loss and physical-device qualification remain outstanding"
+  ]
+}

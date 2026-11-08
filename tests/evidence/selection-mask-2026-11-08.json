@@ -1,0 +1,66 @@
+{
+  "feature": "Packed selection coverage with screen-sized storage and single framebuffer inversion pass",
+  "commands": [
+    {
+      "command": "cargo fmt --all",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p femto-reader --lib --test ui",
+      "exit_code": 0,
+      "library_tests_passed": 39,
+      "ui_tests_passed": 45
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "Exhaustive half-open spans within 257 pixels match a pixel-union oracle, including overlapping repeated spans and unused tail bits",
+    "131072 overlapping span insertions retain the same 48000-byte mask length and capacity for a 480x800 framebuffer",
+    "Existing exact-pixel tests pass for ligatures, combining marks and Hebrew at two and four levels, including panning and cancellation"
+  ],
+  "input_manifest": {
+    "path": "output/verification/selection-mask-inputs.json",
+    "sha256": "323f7c972d748ffd0127c51ea77cbdd3e9669d8541d5d36af79740bed98d0e2f",
+    "files": 390,
+    "unchanged_at_completion": true
+  },
+  "artifacts": {
+    "tests": {
+      "path": "output/verification/selection-mask-tests.log",
+      "sha256": "9479aaeb82ca4bd1e6f1aed848681a46d6fce0528ace218a1e900761ae97f039"
+    },
+    "picco": {
+      "path": "output/verification/selection-mask-picco.log",
+      "sha256": "ba134b48a29a2fc9a9801dcb6ccb9aa0b5c3f242c137658d51783e5c20a40804"
+    },
+    "firmware": {
+      "path": "output/verification/selection-mask-firmware.json",
+      "sha256": "084af5243c6509ee86880cb693939ad8cb47ac1c90278b91777a405fa8186bb9"
+    }
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "5fc8d63e0088ba38f586766fc95cdd514ce5d000c4d900cb8c938e0350df8799",
+    "bytes": 5174880,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Coverage storage is one bit per screen pixel; framebuffer, source text, shaping and per-line cluster allocations remain separate.",
+    "A one-word selection still allocates the screen-sized mask.",
+    "Dense union test exercises span insertion, not a full 131072-glyph page render or physical latency.",
+    "Native smoke, independent Headscale interoperability, grayscale firmware and clean reproducibility were not rerun in this checkpoint.",
+    "Physical Picco readability, refresh behavior and heap use remain unqualified."
+  ]
+}

@@ -1,0 +1,21 @@
+Femto reader specimen
+
+The upper page button opens the previous page. The lower page button opens the next page. This text is included in the firmware so page navigation can run before a storage card is mounted. Reading positions are not saved in this diagnostic.
+
+The reader shapes each paragraph, chooses line breaks, and renders the resulting glyph positions. The device uses the same reader controller as the desktop simulator. Page turns at the start and end of the text leave the page unchanged.
+
+Small type reveals differences in stem weight and spacing. Compare the letters in minimum, illumination, and parallel. Inspect the open counters in a, e, and s. Examine the pairs AV, To, and Wa, then the ligatures in office and affinity. Thin strokes should remain visible without closing the spaces inside letters.
+
+Punctuation provides another useful comparison: commas, periods, colons, semicolons, parentheses, and quotation marks. Digits should remain distinct: 0123456789. Accents should keep their shape and position: café, naïve, résumé. The specimen is a starting point for comparison, not a calibrated font profile.
+
+An e-paper panel keeps its image while the controller is idle. A fast update compares the previous image with the next image. The first update after reset must clean the panel because the software does not know what image was left on the glass.
+
+The current firmware requests a full clean after five fast page turns. That interval is provisional. Physical testing must compare repeated turns at different temperatures and frontlight settings. Residual ink, uneven contrast, and damaged-looking letter edges need to be recorded for each panel variant.
+
+The display is mounted in portrait orientation. Each rendered pixel maps to one physical pixel after rotation. Resampling would blur edges and change small letter shapes. The monochrome path uses a single bit for each pixel; grayscale refresh remains a separate integration task.
+
+This page also tests navigation back through earlier material. Press the previous button several times, then advance again. A held button should turn only one page. Contact bounce should not produce additional turns. Pressing both page buttons together should not navigate.
+
+The prototype still needs storage, touch, frontlight controls, sleep and wake, and network services. This specimen exercises the portable reader and panel interface. It does not establish that those remaining functions work.
+
+End of specimen. Advancing beyond the final page leaves this page displayed. Returning to the first page should reproduce its original layout.

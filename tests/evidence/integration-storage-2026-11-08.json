@@ -1,0 +1,83 @@
+{
+  "scope": "Integrated workspace, native reader/service workflows and grayscale firmware after bounded state serialization, journal startup, canonical library ordering and network loss-fixture extensions",
+  "commands": [
+    "./scripts/check",
+    "./scripts/check-simulator",
+    "FEMTO_PICCO_GRAYSCALE=1 ./scripts/build-picco"
+  ],
+  "final_exit_codes": [
+    0,
+    0,
+    0
+  ],
+  "rust_tests_and_doctests_passed": 920,
+  "rust_test_batches": 67,
+  "python_firmware_tests_passed": 7,
+  "formatting_passed": true,
+  "workspace_compilation_passed": true,
+  "workspace_clippy_passed": true,
+  "native_x11_passed": true,
+  "grayscale_build_passed": true,
+  "input_count": 381,
+  "inputs_unchanged_at_completion": true,
+  "input_manifest": {
+    "path": "output/verification/integration-storage-inputs.json",
+    "sha256": "246f65829abefd15b6ff30000fcef7af96685b6bc6bf52b56e00a897fdfe73fa"
+  },
+  "manifest_note": "Captured shortly after launch; no executable inputs changed during this turn. Documentation edits are excluded.",
+  "interrupted_attempts": "Initial concurrent workspace and native commands both exited 143. Native stdout had reached its success marker; workspace stdout stopped during reader tests. No related processes remained. Unchanged-source sequential reruns both exited zero. The termination cause remains unresolved.",
+  "native_scope": [
+    "Startup cancellation, library navigation/search and typography",
+    "Links and note previews",
+    "Authenticated loopback OPDS acquisition",
+    "Progress conflict choices, persistence/reopen/reset",
+    "Cancellation, stale completion, held-response quit and storage-publication failure/recovery",
+    "Stalled tailnet TLS setup, identity preservation, retry and quit"
+  ],
+  "inspected_screenshots": {
+    "output/simulator-smoke/typography.png": "c0b2e4df9685c619993343b18431204d03704863c3b955ec7cad13e652e6a575",
+    "output/simulator-smoke/sync-conflict.png": "a704618fa366caea12b13286e083873918d8387595ea55837d8a658217679a55"
+  },
+  "grayscale_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "2e76cfa75b694a0d450cbe4b450d734644fb40aee5cb66a5b3a5ad670bf0cda2",
+    "bytes": 5145536,
+    "chip": "esp32s3",
+    "display_levels": 4,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "logs": {
+    "workspace": {
+      "path": "output/verification/integration-storage-workspace.log",
+      "sha256": "fb8bf1cf9b9fea050cf7cc7e7da245b99c81110f4bea10edfd6ac1b0c0558553"
+    },
+    "native": {
+      "path": "output/verification/integration-storage-native.log",
+      "sha256": "97fbee29c3cbc17c71efaa6db4327c95b58ab1dca6b12b7203ea6b3788c3643a"
+    },
+    "grayscale": {
+      "path": "output/verification/integration-storage-grayscale.log",
+      "sha256": "f3f14a356c91038d7001707ba396be6902726df8bb8be6ed3fd99ca5a6d5d4be"
+    },
+    "workspace_interrupted": {
+      "path": "output/verification/integration-storage-workspace-interrupted.log",
+      "sha256": "ec015f4e2597a2674e936fad050d44750a09b6a06c2b89238eaa0d003dab57d1",
+      "exit_code": 143
+    },
+    "native_interrupted": {
+      "path": "output/verification/integration-storage-native-interrupted.log",
+      "sha256": "6dab0fa6dc6a533a7396fe1c3b37752a02779077bba18fe1c89339600ae04091",
+      "exit_code": 143
+    }
+  },
+  "limitations": [
+    "No new independent Headscale run in this checkpoint; prior loss qualification remains separately scoped",
+    "Native stalled-setup test does not complete tailnet enrollment",
+    "No Wayland or physical Picco runtime qualification",
+    "Incremental grayscale build is not a fresh clean reproducibility comparison"
+  ],
+  "hardware_verified": false
+}

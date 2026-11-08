@@ -1,0 +1,40 @@
+{
+  "scope": "Integrated workspace after control heartbeat, inline note context, glyph cache, sync preparation and download-progress changes",
+  "command": "./scripts/check",
+  "exit_code": 0,
+  "rust_tests_and_doctests_passed": 880,
+  "rust_test_batches": 67,
+  "python_firmware_tests_passed": 7,
+  "formatting_passed": true,
+  "workspace_compilation_passed": true,
+  "workspace_clippy_passed": true,
+  "inputs_unchanged_at_completion": true,
+  "input_count": 371,
+  "input_manifest": {
+    "path": "output/verification/integrated-current-inputs.json",
+    "sha256": "9fdaf9865239f6656b7f3f27204cef6bfc58647ffbff6514ce0170794feda876"
+  },
+  "grayscale_picco_build": {
+    "command": "FEMTO_PICCO_GRAYSCALE=1 ./scripts/build-picco",
+    "exit_code": 0,
+    "image": "output/picco-grayscale/femto-picco.bin",
+    "sha256": "50decc93866d1b0e841cddbf4ea7c62178069b714e39dbb704433dd517b4ea36",
+    "bytes": 4999936
+  },
+  "logs": {
+    "workspace": {
+      "path": "output/verification/integrated-current-workspace.log",
+      "sha256": "54a55bdbd3a7d258b79da7583077d8cdfed023781dc1dd3bcfd38d596f9529fa"
+    },
+    "grayscale": {
+      "path": "output/verification/integrated-current-grayscale.log",
+      "sha256": "c1040c520f1391e520add4da1d9ae46ba76c82f6c5325e458b249506554f6e2d"
+    }
+  },
+  "limitations": [
+    "No new independent Headscale/Tailscale run",
+    "No new native simulator smoke test",
+    "No physical hardware qualification",
+    "Incremental firmware build, not a new clean relocation reproducibility comparison"
+  ]
+}

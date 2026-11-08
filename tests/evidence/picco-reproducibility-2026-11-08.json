@@ -1,0 +1,52 @@
+{
+  "verified_at": "2026-11-08T01:35:40.215595+00:00",
+  "platform": "x86_64-linux",
+  "profile": "release",
+  "display_levels": 2,
+  "clean_targets": [
+    {
+      "target_directory": "output/repro-target-fixed-a",
+      "sdkconfig_sha256": "7b1f242f689c21460b55f915fd0de21c9d1a49a21f6743b5e70bbf3e46c945ee"
+    },
+    {
+      "target_directory": "output/repro-target-fixed-b",
+      "sdkconfig_sha256": "7b1f242f689c21460b55f915fd0de21c9d1a49a21f6743b5e70bbf3e46c945ee"
+    }
+  ],
+  "same_checkout": true,
+  "release_artifacts": {
+    "femto-picco.elf": {
+      "bytes": 4950936,
+      "sha256": "6fc56d3a2b0b33e47db9ac9cea91371c002fd7d4f9829e917304f2af08c9dbba",
+      "equal": true
+    },
+    "femto-picco.bin": {
+      "bytes": 4841376,
+      "sha256": "4febee3fba298beb519f7976aabc42602bfbb1c2ef8501b645f90170737ced14",
+      "equal": true
+    },
+    "femto-picco.json": {
+      "bytes": 414,
+      "sha256": "f73f45504400c56e41b5fd5b0e629d96840c07aafc00d258356ec75765182cf8",
+      "equal": true
+    }
+  },
+  "debug_elf_equal": false,
+  "loaded_segments_preserved_except_elf_fingerprint": true,
+  "packaging": "Pinned xtensa-esp-elf-objcopy --strip-all followed by esptool elf2image and image validation",
+  "input_sha256": {
+    "scripts/build-picco": "4fd8ba12889884377aaa29b16e645d7151bd67b58d22bad6b2d6212c081af068",
+    "scripts/picco-image-manifest.py": "da51ec9f5ca908e5d3b9c962c2a50bcb68a9be62077a2aa819477ebcb2a2ee1e",
+    "nix/firmware.nix": "9d1347e801b85d73bdba9a93e9314d4ab4f8c97d30cdf59fc2b91993deceee3e",
+    "flake.lock": "16d754d3d5e9cea8fe9c0cc2cdc766f3867d2b46a561c082139b995d217f278d",
+    "firmware/picco/Cargo.lock": "9e7d65482f01b1428683bd230dcd42fabf44087871222fd33c503a892f744fe3",
+    "firmware/picco/.cargo/config.toml": "a39107d36122c84ddd3c7b00ce46988b90625342dd2f7808bc66b228db1fefc9",
+    "firmware/picco/sdkconfig.defaults": "11d7c7ad7c499cc25c590b0afdd1859f1ec166c3c37109ccd4520749492ad344"
+  },
+  "source_relocation_verified": false,
+  "other_host_verified": false,
+  "grayscale_verified": false,
+  "hardware_verified": false,
+  "normal_incremental_output_matches": true,
+  "firmware_planner_tests_passed": 7
+}

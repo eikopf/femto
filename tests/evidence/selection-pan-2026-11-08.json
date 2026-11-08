@@ -1,0 +1,63 @@
+{
+  "feature": "Native-pixel panning exposes selection-footer-covered text",
+  "ui_tests_passed": 42,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "native_x11_smoke_passed": true,
+  "checks": [
+    "Next shifts page pixels up 32 rows; Previous restores the exact original view",
+    "Repeated input at each pan limit does not redraw",
+    "Two/four-level body pixels match source slices without resampling",
+    "Tap coordinates on the shifted view capture a source word from the formerly covered bottom strip",
+    "Panning and capture preserve source anchor and book framebuffer",
+    "Native screenshot overlap exactly matches original rows shifted by 32 pixels",
+    "Native restoration and subsequent pointer capture/save/reopen workflow pass"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --test ui && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco",
+    "./scripts/check-simulator"
+  ],
+  "input_manifest": {
+    "path": "output/verification/selection-pan-inputs.json",
+    "sha256": "74c147a333cc9304f426295e41b2253ee646f1bc19b3a0fe5ae12e51cd3bf8b3",
+    "files": 390,
+    "unchanged_at_completion": true
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/selection-pan-tests.log",
+      "sha256": "18ffcd675ed7d6b3f87d7da8884f14023beab2ab4732305e2be6007edfe73f2c"
+    },
+    "picco": {
+      "path": "output/verification/selection-pan-picco.log",
+      "sha256": "d2b6db3e6f928ec72b673f553c329166389332aeca2b04ec8fd27bcf5a769e4e"
+    },
+    "native": {
+      "path": "output/verification/selection-pan-native.log",
+      "sha256": "c3a64bfde3fc32e7fa2fe4a877d2f77563979701bf4adb71aa6df21c6b018f63"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "a05903465ac465219877c5f761f335c471069fdfd31bafaa1ac8ed1f593c4787",
+    "bytes": 5172880,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "screenshot": {
+    "path": "output/verification/selection-pan.png",
+    "sha256": "7ad1188aafe760d1cfb1bba509a5a114313649752ceafa94f198be8efb9f73c5",
+    "inspected_at_original_resolution": true
+  },
+  "limits": [
+    "Native bottom-strip word targeting, rotated panning, physical touch and e-ink refresh are not qualified here.",
+    "Multi-word selection, highlighting and button-only word targeting remain unfinished.",
+    "No full workspace or independent network interoperability rerun in this checkpoint."
+  ]
+}

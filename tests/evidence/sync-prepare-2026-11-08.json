@@ -1,0 +1,46 @@
+{
+  "feature": "Progress sync snapshots without UI-thread chapter validation",
+  "tests_passed": 20,
+  "test_suites": {
+    "femto_sync": 13,
+    "device_progress_sync": 7
+  },
+  "workspace_clippy_passed": true,
+  "picco_monochrome_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Immutable Session::prepare captures snapshots and validates checkpoint source without chapter I/O",
+    "Worker rejects invalid baseline before HTTP access and preserves reader state",
+    "Worker rejects a replacement book before HTTP access",
+    "Cancelled and expired conflict resolution returns budget errors before validating observed location",
+    "Existing actual-device-service worker, conflict, cancellation, reset and journal tests pass"
+  ],
+  "limitations": [
+    "Worker document opening and individual chapter validation remain synchronous",
+    "Final reader commit can still perform synchronous parsing and pagination",
+    "No new independent-peer run or physical-device latency measurement"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/sync-prepare-tests.log",
+      "sha256": "d780651570c9449becfc67c4595909a3f24abbaa28b09dced6c082a17dbcd6f2"
+    },
+    "clippy": {
+      "path": "output/verification/sync-prepare-clippy.log",
+      "sha256": "e36657f235bf9eb6d1a013d80600f91735cde6617578fb9b19b131c78bd6ab94"
+    },
+    "firmware": {
+      "path": "output/verification/sync-prepare-firmware.log",
+      "sha256": "0636de9dc10686f8daab5ac05309db8d543d574f1ebe2e80e708453c64eea1ec"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-sync/src/reader.rs": "d54d3a6292b8d68324256af3ddaac59a2ab4d7ddfb9309e1bb93a53d5b9fb6e8",
+    "crates/femto-sync/src/lib.rs": "690abb191204dd0e145c21720f19fc25337383476deeb3018f076532087b5fff",
+    "crates/femto-sync/src/tests.rs": "04c7f77bbeb60076ca10622baed6590388837629ec26bec2a772bddeacc380b1",
+    "crates/femto/examples/headscale-services.rs": "7c2c75d49ace8929d26bac61029bee941e74160ad4b0ee5103a369daa9a0b00d",
+    "firmware/picco/src/progress_sync.rs": "b803263b8694cd4d4cb964b9375057ab88e5f16ac693c30ef8fffa386cff58fe",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "4fa702c4e22feadd497dc7c719da4c78ae442bb229d284dc7b02f07743c8dfae"
+  }
+}

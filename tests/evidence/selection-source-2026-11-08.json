@@ -1,0 +1,63 @@
+{
+  "feature": "Bounded grapheme-aligned source text selection API",
+  "reader_unit_tests_passed": 34,
+  "new_selection_tests": 5,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "contract": {
+    "range": "Half-open chapter/block/source-byte locators, with text endpoints at extended grapheme boundaries",
+    "maximum_chapters": 8,
+    "maximum_output_bytes": 16384,
+    "paragraph_separator": "two newlines",
+    "images": "omitted; image endpoints rejected",
+    "failure": "no partial string returned"
+  },
+  "checks": [
+    "Decomposed accents, ZWJ emoji, Hebrew, and source byte preservation",
+    "Rejected split graphemes, missing endpoints, empty/reversed ranges and image endpoints",
+    "Cross-block and cross-chapter ordering and separators",
+    "Image omission and late chapter failure",
+    "Exact output limit, overflow including separators, and pre-parse chapter-span bound",
+    "Extraction through actual TXT document parser"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --lib && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco"
+  ],
+  "input_sha256": {
+    "crates/femto-reader/src/selection.rs": "f6befe5739313379530150e96f91db95135687bf672e5807243dfbeafa1fd7aa",
+    "crates/femto-reader/src/lib.rs": "9095cdfc881b3dab6719a1ad7dab5600d20b98fb336128744caaab8b4b69cca5",
+    "crates/femto-reader/src/document.rs": "0f2c89286b732cc418e17e0a3f97d63f784f16bc70cde62369bf954eb9bfe313",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54"
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/selection-source-tests.log",
+      "sha256": "02ee44409fa93d10cd0ece37651b6d69ea8e6ea200a0ce758413a2ab009e21cc"
+    },
+    "picco": {
+      "path": "output/verification/selection-source-picco.log",
+      "sha256": "888bd3cb0b13246214c6ec28205b63fb6ce5d1dab206d426ce26d8f19a8440fa"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "f7309b357d4b1a4c61b1e40c7ca61e8f89762cb324251d5942a040cc07ac5e9b",
+    "bytes": 5150864,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Frontend gestures, highlight rendering, clipping persistence/export and dictionaries are not implemented by this API.",
+    "Stored ranges require exact content identity supplied by their caller.",
+    "Output and chapter-count bounds do not establish peak parser heap or physical input latency.",
+    "Firmware compilation checks compatibility; the API is not yet invoked by firmware UI. The only source change during the build was adding a missing field in a cfg(test) fixture.",
+    "No native simulator, independent network, grayscale build or physical device run in this checkpoint."
+  ]
+}

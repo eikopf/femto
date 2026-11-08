@@ -1,0 +1,43 @@
+{
+  "feature": "Native X11 persistent highlight toggle, pixels and state after reopen",
+  "command": "./scripts/check-simulator",
+  "exit_code": 0,
+  "checks": [
+    "Native menu keys enable the first saved word clipping highlight",
+    "Saved reading screenshot shows the word inverted outside selection mode",
+    "Quit/reopen preserves the exact highlighted reading framebuffer and enabled clipping metadata",
+    "Native menu keys disable the highlight and restore the exact original reading framebuffer",
+    "Second quit/reopen preserves disabled state and exact original framebuffer",
+    "Both clipping source ranges, text and timestamps remain unchanged",
+    "Reading position and bookmark remain unchanged",
+    "Complete existing reader, selection, catalog, sync fault and tailnet lifecycle native smoke suite passes"
+  ],
+  "input_manifest": {
+    "path": "output/verification/native-highlights-inputs.json",
+    "sha256": "1eee36622eb2d6b2fb6c1b87df408cb2ee039d998848d530a54a126d3350e1a8",
+    "files": 391,
+    "unchanged_at_completion": true
+  },
+  "artifacts": {
+    "log": {
+      "path": "output/verification/native-highlights-log.log",
+      "sha256": "c6f191cb2da7de0c0bc506aee1583abb3111771caff89020886934cc27e2d79b"
+    },
+    "preview": {
+      "path": "output/verification/native-highlights-preview.png",
+      "sha256": "4891e872293c9aba580ca79e2ced801b72c0355fd1eca08a6646bab0b89cc3f6"
+    },
+    "record": {
+      "path": "output/verification/native-highlights-record.json",
+      "sha256": "364712fccff018bbe87a9017d580e5b8316a36d32cc748cade00e3893aabcf50"
+    }
+  },
+  "visual_findings": [
+    "Original-resolution screenshot shows when in white on black at the beginning of the reading page; surrounding text is unchanged and no selection footer is present."
+  ],
+  "limits": [
+    "One Latin word in portrait X11; physical Picco touch/display, Wayland and native rotated or RTL highlights remain unqualified.",
+    "No runtime Rust changes, firmware rebuild or independent Headscale interoperability rerun in this checkpoint.",
+    "Source verification latency on physical hardware remains unmeasured."
+  ]
+}

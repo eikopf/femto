@@ -1,0 +1,119 @@
+{
+  "feature": "Strict dictionary metadata, index byte-size and entry-count validation",
+  "commands": [
+    {
+      "command": "cargo test -p femto-reader --test dictionary",
+      "exit_code": 0,
+      "passed": 10
+    },
+    {
+      "command": "cargo test --locked --manifest-path vendor/quireink-stardict/Cargo.toml --config 'patch.crates-io.miniz_oxide.path=\"vendor/miniz_oxide\"'",
+      "exit_code": 0,
+      "passed": 6,
+      "ignored": 1
+    },
+    {
+      "command": "python scripts/check-dictionary-corpus.py output/dictionary-corpus",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "rust_passed": 992,
+      "rust_batches": 77,
+      "rust_ignored": 1,
+      "python_passed": 7
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "Required metadata fields, exact signature, UTF-8 and supported versions",
+    "Duplicate known fields and invalid, signed or overflowing numbers rejected",
+    "Index offset width and version compatibility checked",
+    "Empty or nonalphabetic type sequence rejected",
+    "Declared index byte size must match file size",
+    "Nonempty synonym file needs positive declared count",
+    "Preparation rejects extra and missing entries",
+    "Published WikDict sample still matches for plain and derived compressed definitions"
+  ],
+  "corpus_report": {
+    "source": "https://download.wikdict.com/dictionaries/stardict/wikdict-en-de.zip",
+    "date": "2026-06-23",
+    "entries": 72413,
+    "synonyms": 57492,
+    "sample_queries": 4675,
+    "reports": {
+      "published_plain": {
+        "definitions": 5483,
+        "lookup_ms": 622,
+        "name": "English-Deutsch FreeDict+WikDict dictionary (en-de)",
+        "prepare_ms": 10,
+        "prepare_steps": 294,
+        "queries": 4675
+      },
+      "derived_dictzip": {
+        "definitions": 5483,
+        "lookup_ms": 2911,
+        "name": "English-Deutsch FreeDict+WikDict dictionary (en-de)",
+        "prepare_ms": 8,
+        "prepare_steps": 294,
+        "queries": 4675
+      }
+    },
+    "sha256": {
+      "wikdict-en-de.zip": "c1d141f39b08893d8e1fdce6e06b6acdaa91b343b4982623de9867a855b4db79",
+      "stardict.ifo": "ab0d3f46a059b8789d57d491fa34478f06ff8f4ec57bcba009c90a9b92ecdb4e",
+      "stardict.idx": "e3d9f7279b3877d3465455cec352439a771a0c2af14c96c24dbc5a8addcaa27d",
+      "stardict.dict": "35404844c12f292acf2e3b424559d9a7f4a84750d8a706cbd8188c1882eb805a",
+      "stardict.syn": "d06acb5e89386722a2cd9cbd2a8468eaa61b8d1666afcc21e3cc1e898e116ca4",
+      "cases.jsonl": "3a0e06dfbe46de7297fdd0a61cd549bd0f30e5aba9db12c3b30e2210afc3e60d",
+      "stardict.dict.dz": "089a6c5358142fb8b97c110d64e3125fd9c32f9725db7cf2e25c7c45b0534408"
+    }
+  },
+  "tested_files_sha256": {
+    "vendor/quireink-stardict/src/lib.rs": "6da0e7dc82e7fcdaa4cec32fe6bbdcf3d8db8e3474ebb0c77daf68d36f80a4a3",
+    "vendor/quireink-stardict/src/index.rs": "12d05c11dba095ad3a494c1907b171b1a02fc8a775f2264a396463a356f329b1",
+    "crates/femto-reader/src/dictionary.rs": "f9773b0a46872e356c5d94657c20b927f51f21a0adc9c15139273427437a5450",
+    "crates/femto-reader/tests/dictionary.rs": "6353bf5ec3aff9697fa89313ba1de3b2797a104ea33213d357aae7bd89d825ad",
+    "scripts/check": "41e771765079ff25a4b217f2ce1f5ff7a8f80a7bfed9818d1322e4487d8d4f4a",
+    "Cargo.lock": "7040c9e05954fc95624ad2f6715bc6c2b9d18f6ae33cc634c65d3d67f7e355bb",
+    "firmware/picco/Cargo.lock": "dcab9958734dfecf18f142c9b159b9465e6d6736dc930d4cfb0b42d65f6299ca"
+  },
+  "snapshot_at_completion": true,
+  "logs": {
+    "tests": {
+      "path": "output/verification/dictionary-metadata-tests.log",
+      "sha256": "b1f6b482bad933f8d357da55724b89e851531a0fc0ae192c261bc89aa47c2d3c"
+    },
+    "workspace": {
+      "path": "output/verification/dictionary-metadata-workspace.log",
+      "sha256": "451886b7de2c92fec459c7c39b65a36f4469ed20748c6d8f14e7fe5cac773b95"
+    },
+    "firmware": {
+      "path": "output/verification/dictionary-metadata-firmware.log",
+      "sha256": "44b0a39022f10ff2dce653cf3f464a9dd22dbcbd8ec15082519c7bb90f6bec16"
+    }
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "6db99ca4e2010477fa6f60f76e5c2aa20c83e0897563b56aadf254983b117cdd",
+    "bytes": 5217856,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Runtime index ordering, headword UTF-8 and all synonym target validation remain outstanding.",
+    "Typed definition payload and complete gzip CRC checks remain outstanding.",
+    "Dictionary files must remain immutable while open; no file-change detection or persistent cache transaction proof.",
+    "Native simulator, independent tailnet interoperability, grayscale and clean reproducibility were not rerun.",
+    "No physical hardware qualification.",
+    "The optional upstream real-corpus test remains ignored in scripts/check; the independent corpus probe was run separately."
+  ]
+}

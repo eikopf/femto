@@ -1,0 +1,29 @@
+{
+  "feature": "Recoverable stale preview-follow cancellation and rejection",
+  "passed_ui_navigation_tests": 46,
+  "workspace_clippy_desktop_tailnet_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Pending preview follow made stale by an external layout change",
+    "Poll rejection, Back and Cancel all return to a renderable root menu",
+    "Current source position, reading pixels and history preserved",
+    "Existing valid-preview cancellation and successful follow regression tests pass"
+  ],
+  "logs": {
+    "validation": {
+      "path": "output/verification/stale-preview-validation.log",
+      "sha256": "fb3c01324b4655477be471a269d8d83fa3646dbec0aa59e0eb1ca222d7c88bd6"
+    },
+    "firmware": {
+      "path": "output/verification/stale-preview-firmware.log",
+      "sha256": "2b3bea4f028d69d43468554d25d2a029aec89144bdf345976689a6871b32f52a"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/controller.rs": "f4a242939e0668102d8f7ceb1eca5865ecfe197264412437b494eecdc284f82a",
+    "crates/femto-reader/src/ui.rs": "cec9c7ffb1ac8905ab3df7d6ee89e5e7c27c2af7a446e088cfbfc8b8d4a51269",
+    "crates/femto-reader/tests/ui.rs": "7f392d85abace06d69407691dbeaa9bda62cc13791544be209f9a2debdb7704e",
+    "output/picco/femto-picco.bin": "91da996a03a7dbd9b2159f169807645a35b72a483f42dfd082efd7d729817332"
+  }
+}

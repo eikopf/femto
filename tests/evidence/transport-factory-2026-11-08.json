@@ -1,0 +1,41 @@
+{
+  "feature": "Host request factories and simulator worker injection",
+  "targeted_tests_passed": 53,
+  "test_suites": {
+    "catalog": 40,
+    "simulator": 13
+  },
+  "workspace_clippy_passed": true,
+  "native_simulator_smoke_passed": true,
+  "checks": [
+    "Worker-thread construction from a weak runtime generation",
+    "Exact-origin tailnet routing without LAN fallback on failure",
+    "Active transport retains runtime; factory alone does not",
+    "Expired factory rejects tailnet requests",
+    "LAN-only requests do not require runtime",
+    "At most sixteen tailnet origins",
+    "Native authenticated catalog acquisition and progress lifecycle/fault regression"
+  ],
+  "limitations": [
+    "Simulator startup still supplies an unavailable factory; enrollment and connection controls remain unfinished",
+    "Factory routing tests use a rejecting driver, not an independent peer",
+    "No new Picco build or physical hardware qualification"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/transport-factory-tests.log",
+      "sha256": "8ef93763a24599a074722f87a5f699f55b2e527cec988e44dae0b5fe40f45775"
+    },
+    "native": {
+      "path": "output/verification/transport-factory-native.log",
+      "sha256": "57d3dc2bf6b39c89acc22d8da7ae610da7ec89be12950626f3fc375fe5843bfa"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-catalog/src/tailnet.rs": "a4a773cce08636c499ee0646666dd63b2f9460442db86480ba303a3bcbfae4dc",
+    "crates/femto/src/simulator.rs": "337414caccfb6b31ff08aa7bd3415e0cb3c0552cf82ff693023bada70a7aee93",
+    "crates/femto/src/simulator_sync.rs": "45ebd230d745a8f4b81dc277d85472cda4acf8c4325e1534f412e5459c07380d",
+    "scripts/simulator-smoke.py": "80a9a997d950c742387e6128767e1f945a29f1a78e19f070b0f7aaf1383f9cd7",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199"
+  }
+}

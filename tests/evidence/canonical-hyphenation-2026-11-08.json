@@ -1,0 +1,65 @@
+{
+  "feature": "Canonical Unicode dictionary hyphenation with original source offsets",
+  "reader_tests_passed": 202,
+  "reader_test_batches": 28,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "regression_before_fix": "The canonical-accent test failed at its Portuguese decomposed-word hyphenation assertion before normalization was implemented.",
+  "assertions": [
+    "Composed and decomposed Portuguese, German and French have equal normalized line text and automatic hyphen decisions",
+    "Original source bytes are covered without gaps",
+    "Breaks remain at source grapheme boundaries",
+    "Glyph clusters retain valid original source offsets",
+    "Resumed page bounds and raster output equal eager pagination",
+    "Wide reflow preserves source anchors",
+    "Existing CSS restrictions, soft hyphens, unsupported languages and oversized-word checks pass"
+  ],
+  "implementation": "NFC per grapheme for non-ASCII dictionary lookup, with normalized-end to original-byte mapping; ASCII borrows the source. Existing unicode-normalization 0.1.26 is reused.",
+  "limits": [
+    "128 original source bytes per dictionary word",
+    "At most 128 grapheme offset pairs per lookup",
+    "32768 retained candidates per paragraph",
+    "Alphabetic-character check after NFC; noncomposing nonalphabetic marks still skip dictionary lookup",
+    "Equivalent spellings across the source-byte limit may differ"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco"
+  ],
+  "input_sha256": {
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "crates/femto-reader/Cargo.toml": "3a7b2d06a6501fd28a6888e8c0330df65d02f343167b8c58e9c52f8e774c5b36",
+    "crates/femto-reader/src/layout.rs": "ebbe322c4dcf7d1ba65523fa7ec1e4f31c9daae0bd1a236924217254b1c9651a",
+    "crates/femto-reader/tests/hyphenation.rs": "d707f5728236e202ab61d16c2738e064629386c68e85ae6f967759ef954e8438",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54"
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "e5235804b8577517935d6a439c76b002b97acadf0a3a971cf2c5908da5a6965d",
+    "bytes": 5126304,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "logs": {
+    "reader": {
+      "path": "output/verification/canonical-hyphenation-reader.log",
+      "sha256": "ded46910112c7194ea036818b97083ca552bb2a6c539d1e9a3d8a21439685eba"
+    },
+    "picco": {
+      "path": "output/verification/canonical-hyphenation-picco.log",
+      "sha256": "14021239dcdaadb4cfe3e8e62f8da460bd2ce9858e095cc1b079d6fa5ab3a6ff"
+    }
+  },
+  "limitations": [
+    "No new full workspace test suite or native simulator run",
+    "No new grayscale firmware build",
+    "Physical text quality and memory peaks remain unqualified",
+    "No new broad language-corpus validation"
+  ],
+  "hardware_verified": false
+}

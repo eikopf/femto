@@ -1,0 +1,34 @@
+[package]
+name = "femto-microlink"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tailscale-esp32.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+getrandom = "=0.2.17"
+httparse = "=1.10.1"
+sha2.workspace = true
+zeroize = { version = "=1.9.1", features = ["serde"] }
+crc32fast = "=1.5.4"
+smoltcp = { version = "=0.12.0", default-features = false, features = ["alloc", "medium-ip", "proto-ipv4", "socket-tcp"] }
+url = "=2.5.8"
+time = { version = "=0.3.44", default-features = false, features = ["std", "parsing"] }
+
+[target.'cfg(all(unix, not(target_os = "espidf")))'.dependencies]
+fs2 = "=0.4.3"
+tempfile.workspace = true
+rustls = { version = "=0.23.46", default-features = false, features = ["std", "ring", "tls12"] }
+webpki-roots = "=1.0.11"
+
+[dev-dependencies]
+tempfile.workspace = true
+crypto_box = "=0.9.1"
+
+[target.'cfg(all(unix, not(target_os = "espidf")))'.dev-dependencies]
+rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring"] }
+

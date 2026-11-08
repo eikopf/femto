@@ -1,0 +1,38 @@
+{
+  "feature": "Packet-count renewal through session readiness for either handshake role",
+  "threshold": 1152921504606846976,
+  "comparison": "observed next send counter strictly greater than threshold",
+  "passed_microlink_tests": 198,
+  "workspace_clippy_desktop_tailnet_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Injected observations below, at and above threshold for both roles",
+    "Invalid plaintext leaves observed count unchanged",
+    "Successful encryption observes actual nonce from transport header",
+    "Previously used protocol session does not restart observed count after encryption",
+    "Fresh session does not request immediate renewal"
+  ],
+  "limitations": [
+    "Threshold predicates use synthetic observations, not 2^60 transmitted packets",
+    "Raw packet callers must invoke readiness explicitly",
+    "Keepalive timers and total retry-attempt limits remain unfinished"
+  ],
+  "logs": {
+    "validation": {
+      "path": "output/verification/message-rekey-validation.log",
+      "sha256": "52e076e7625c5f000a23219cc38a8cd7ea9a41c611ef1594cb81a017dba6f6bf"
+    },
+    "firmware": {
+      "path": "output/verification/message-rekey-firmware.log",
+      "sha256": "1534d83d2440c157fa4c5d673792805be04c5f50e0540baad81322eb861ddddd"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/transport.rs": "b31da4c23652c1f632f0f1bc038240a5d89bc0342d6ad06f27ed717ce24863b3",
+    "crates/femto-microlink/src/plane.rs": "12a7df1cde80a7d2ed7096fb3848a48503496e95eb2af35e31d0f949d399378d",
+    "crates/femto-microlink/src/network.rs": "8dbc5f4a4dd276a3e24cf407858681adb238d7b953b7f99974b0ae3539da80da",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "a1c9243cb2a89cca6a1456af45bd0f827c79de4649c363e383fd51245032d184"
+  }
+}

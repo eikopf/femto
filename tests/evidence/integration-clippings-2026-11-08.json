@@ -1,0 +1,50 @@
+{
+  "scope": "Integrated workspace and grayscale firmware after frontlight recovery/expiry, typography persistence checks, source selection and clipping capture/persistence/deletion/export",
+  "commands": [
+    "./scripts/check",
+    "FEMTO_PICCO_GRAYSCALE=1 ./scripts/build-picco"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "rust_tests_and_doctests_passed": 944,
+  "rust_test_batches": 70,
+  "python_firmware_tests_passed": 7,
+  "formatting_passed": true,
+  "workspace_compilation_passed": true,
+  "workspace_clippy_passed": true,
+  "input_manifest": {
+    "path": "output/verification/integration-clippings-inputs.json",
+    "sha256": "16ae8d291c48d8c7ba337c257a2f7d3117fc065cacf826804341a572636a0590",
+    "files": 390,
+    "unchanged_at_completion": true
+  },
+  "logs": {
+    "workspace": {
+      "path": "output/verification/integration-clippings-workspace.log",
+      "sha256": "a8fd34ebe8babec8f5def0385520c2ad20ec4d3679ecb9e21069c3f39ba8edb4"
+    },
+    "grayscale": {
+      "path": "output/verification/integration-clippings-grayscale.log",
+      "sha256": "57173ae3d6a9cb8527fd076e2ac3769f5b2cefb12acea76365413218ceef009c"
+    }
+  },
+  "grayscale_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "df54dcd13d1099c75a37d0a7529060c87d340f1827faebe9ef398b09c539baec",
+    "bytes": 5168624,
+    "chip": "esp32s3",
+    "display_levels": 4,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Incremental grayscale build does not establish new clean-build reproducibility or physical display behavior.",
+    "Native X11 smoke was last run for clipping-menu integration; this checkpoint does not rerun native input or add clipping-specific window automation.",
+    "Independent Headscale interoperability was not rerun in this checkpoint.",
+    "Hardware, arbitrary selection gestures, highlight rendering, dictionaries, Bluetooth page turning and other recorded goal requirements remain unfinished."
+  ]
+}

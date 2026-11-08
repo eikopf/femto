@@ -1,0 +1,39 @@
+{
+  "feature": "Source-preserving direction and script-context isolation for inline note previews",
+  "targeted_tests_passed": 41,
+  "workspace_clippy_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "English note after Hebrew prefix matches isolated English rendering",
+    "Hebrew note after English prefix matches isolated Hebrew rendering",
+    "All pages match in forward and backward reconstruction",
+    "Original nonzero source offsets and Follow/Back preserved",
+    "Existing note, navigation and pagination regressions pass"
+  ],
+  "limitations": [
+    "Boundary paragraph analysis still allocates a temporary buffer, including neutral prefix padding",
+    "Pixel-equivalence fixtures disable dictionary hyphenation to avoid metadata differences",
+    "No claim of general inline bidi override support or physical readability",
+    "No new native simulator or grayscale build in this check"
+  ],
+  "logs": {
+    "final": {
+      "path": "output/verification/note-context-final.log",
+      "sha256": "dffed34b9969635afef92cfe2e65dc6f7741b42dc2112caa522ecbe828af284d"
+    },
+    "firmware": {
+      "path": "output/verification/note-context-firmware.log",
+      "sha256": "badfed434756b4c43bded92437bdf4244a2db35029546c6c92748bd535cd0a60"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/layout.rs": "8c4d7a23314b58d8e2634de1ad239199b290c2a50340198a00a5ed6ac34140e8",
+    "crates/femto-reader/src/pagination.rs": "8fa60b636c3969b055740106ba49610229c6d52eae56b9bbd5a4f4e14b8a47d3",
+    "crates/femto-reader/tests/note_bodies.rs": "1451dba01088af14be988e74527a19c4a7d7ef5b5cb5d9afe372aac34443a6c7",
+    "scripts/make-fixtures.py": "f367bc2c435a38186a1a16559ed39af70cc15c3b4e81b0da89a919cdf11ea3b5",
+    "tests/fixtures/note-context.epub": "82e075218935bedb6ec7a5b9073da699bcdd3cdcac717bab3f39a9a61069d529",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "cfd5cb1c98d7ed0265ee01c9ccfe43c0cc2453245b730519841e1b74f2bd0870"
+  }
+}

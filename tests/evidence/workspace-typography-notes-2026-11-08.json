@@ -1,0 +1,45 @@
+{
+  "scope": "Integrated workspace check after per-book typography, semantic note ranges, spacing controls and response-loss fixture updates",
+  "rust_tests_and_doctests_passed": 867,
+  "rust_test_batches": 67,
+  "firmware_python_tests_passed": 7,
+  "format_check_passed": true,
+  "workspace_compile_passed": true,
+  "workspace_clippy_passed": true,
+  "grayscale_picco_build_passed": true,
+  "input_files_checked_unchanged": 369,
+  "input_snapshot": {
+    "path": "output/verification/workspace-current-inputs.json",
+    "sha256": "a89da6cdcbf128c57fbd7a16149a5db50586dc2bc35d81d5a930e4f5a3a3cd77"
+  },
+  "logs": {
+    "workspace": {
+      "path": "output/verification/workspace-typography-notes-workspace.log",
+      "sha256": "e527c032787bdb634bb298f8fcb4b7e8a4d12ea9ea02993ed0a5e89b089f3ae6"
+    },
+    "grayscale": {
+      "path": "output/verification/workspace-typography-notes-grayscale.log",
+      "sha256": "66301c1de191ccf3432332ef583309726996adbe54a52fa963209360affb5f05"
+    }
+  },
+  "grayscale_artifacts": {
+    "output/picco-grayscale/femto-picco.bin": {
+      "bytes": 4987408,
+      "sha256": "851e0e3de984d2de330a24a88fb55bd33a5cb0dcec0f034500f1ae36c13e6211"
+    },
+    "output/picco-grayscale/femto-picco.elf": {
+      "bytes": 5098392,
+      "sha256": "1e08c795a7c304912e88d9b49140a6a69175c781088d04365efde9e61c8d0aeb"
+    },
+    "output/picco-grayscale/femto-picco.json": {
+      "bytes": 414,
+      "sha256": "94e0cd775698933cd4094ce3146d6e81f3d92e20446b6b8b3af2f144148e67c8"
+    }
+  },
+  "limitations": [
+    "No physical device validation",
+    "This check does not rerun independent Headscale or native X11 qualification; their reports remain separate",
+    "This incremental firmware build is not a fresh relocated reproducibility experiment",
+    "The earlier independent direct TCP timeout remains unexplained"
+  ]
+}

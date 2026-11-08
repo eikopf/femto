@@ -1,0 +1,47 @@
+{
+  "feature": "Cancellable direct-link navigation and preview following",
+  "passed_controller_navigation_ui_tests": 62,
+  "workspace_clippy_desktop_tailnet_passed": true,
+  "native_x11_smoke_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Cross-chapter direct link navigation retains source until commit",
+    "Cancelled preview follow returns to identical preview pixels across portrait and landscape layouts",
+    "Preview follow reuses parsed destination chapter through Arc",
+    "Follow preserves current preview page source target and a single return anchor",
+    "Incomplete navigation and stale preview refusal",
+    "Native X11 direct link, preview follow and Back workflows pass"
+  ],
+  "limitations": [
+    "Target resolution and initial chapter parsing remain synchronous",
+    "Preview follow temporarily retains current, preview and destination indexes",
+    "Startup and synchronous controller APIs still index synchronously",
+    "Physical latency, display behavior and memory peaks remain unqualified"
+  ],
+  "logs": {
+    "validation": {
+      "path": "output/verification/cooperative-link-navigation-validation.log",
+      "sha256": "4106e67e35fe1cdf8bc1908ab184dd5bda021b0e9333902b850ac19423efeccf"
+    },
+    "simulator": {
+      "path": "output/verification/cooperative-link-navigation-simulator.log",
+      "sha256": "dd84ae8ee750e5e9a6f34fa0bd934539d15c803e676228ec944dfc578c75fc05"
+    },
+    "firmware": {
+      "path": "output/verification/cooperative-link-navigation-firmware.log",
+      "sha256": "66b25fa09eb5023f2f7bb249fb4ec6bfbffd1fdc3581fb4459d6ca79f14eee41"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/controller.rs": "596e9c0152703ca7c697eeb5b0f83fabd00d8447cfc26c5f0bb170a691be7df6",
+    "crates/femto-reader/src/ui.rs": "b5e679cb5b146ec011685f119e6b0d92fef9342a0f4daee9e7b7538b7dd779ee",
+    "crates/femto-reader/tests/navigation.rs": "8dc8d750af216fb17e31277106acf6967219bb1a147cfa1a33a9350afc219514",
+    "crates/femto-reader/tests/ui.rs": "33cb81c6820a2e90bd7e3f742d37e2a0c620ae15fc25c86b85e519e312bb9865",
+    "scripts/simulator-smoke.py": "9185ddc8337dbe43d2f94eab0d7f1c81df87d35e05c5abb9d093c25de8f8fb23",
+    "tests/fixtures/supplemental-notes.epub": "2802bc6d3b324d6367bebdc984ae2f5cf98272f09d15fa5542766c0b5577a91c",
+    "tests/fixtures/noterefs.epub": "61bdc256c3d8653dc2ee5caecdf93349793d5ca2ec7758d262d85e5e12133960",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "95e2eded118b39ef559ca81eb7b0ee1d485410bd53a8c6e0e6e1a65e57755eaf"
+  }
+}

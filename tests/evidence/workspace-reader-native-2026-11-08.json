@@ -1,0 +1,66 @@
+{
+  "scope": "Integrated workspace, native X11 regression and grayscale firmware after simulator HTTPS, canonical library search and CSS image sizing",
+  "commands": [
+    "./scripts/check",
+    "./scripts/check-simulator",
+    "FEMTO_PICCO_GRAYSCALE=1 ./scripts/build-picco"
+  ],
+  "exit_codes": [
+    0,
+    0,
+    0
+  ],
+  "rust_tests_and_doctests_passed": 907,
+  "rust_test_batches": 67,
+  "python_firmware_tests_passed": 7,
+  "formatting_passed": true,
+  "workspace_compilation_passed": true,
+  "workspace_clippy_passed": true,
+  "native_x11_passed": true,
+  "grayscale_build_passed": true,
+  "inputs_unchanged_at_completion": true,
+  "input_count": 377,
+  "input_manifest": {
+    "path": "output/verification/workspace-reader-native-inputs.json",
+    "sha256": "0efabfd3a222f3533f9e7e611b0114604af315c01afc783306f3445cf989f7a0"
+  },
+  "manifest_note": "Captured shortly after test launch; no code or configuration changes occurred during this turn. Documentation edits are outside the executable-input manifest.",
+  "native_scope": [
+    "Reader startup cancellation, navigation and typography",
+    "Library search, book switching, links and note preview",
+    "Authenticated loopback catalog acquisition",
+    "Progress conflict choices, reopen and reset",
+    "Cancellation, stale completion, held-response quit and storage-publication failure/recovery",
+    "Stalled tailnet TLS setup, identity preservation, retry and quit"
+  ],
+  "inspected_screenshots": {
+    "output/simulator-smoke/reading.png": "42bbd5b6a7395ed691ccd527dddab2d4881963636ba0a94260ff65b3b31ae184",
+    "output/simulator-smoke/sync-conflict.png": "a704618fa366caea12b13286e083873918d8387595ea55837d8a658217679a55"
+  },
+  "grayscale_image": {
+    "path": "output/picco-grayscale/femto-picco.bin",
+    "sha256": "69454ced54ac17452acbcee66114ce6c52a9591a54dd9af8969c2790148d32e0",
+    "bytes": 5125488
+  },
+  "logs": {
+    "workspace": {
+      "path": "output/verification/workspace-reader-native-workspace.log",
+      "sha256": "320bda8aabc1941f51529691a0ea5655747e516996f482f426bad31c3b2c9c16"
+    },
+    "native": {
+      "path": "output/verification/workspace-reader-native-native.log",
+      "sha256": "06a94f424bb9d7229b6a5430faad758211eb6ea7476b5d988bd73798d3829ae0"
+    },
+    "grayscale": {
+      "path": "output/verification/workspace-reader-native-grayscale.log",
+      "sha256": "d8ce6a07fbdcfa1d249ba75a9987e8406c1f1668425bb51a862dbd2a60018b49"
+    }
+  },
+  "limitations": [
+    "No new independent Headscale/Tailscale run; prior independent evidence remains separately scoped",
+    "Native loopback suite does not complete tailnet enrollment",
+    "No Wayland or physical Picco runtime qualification",
+    "Incremental grayscale build is not a fresh clean reproducibility comparison"
+  ],
+  "hardware_verified": false
+}

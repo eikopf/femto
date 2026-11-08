@@ -1,0 +1,67 @@
+{
+  "feature": "Shared reader remote-control adapter",
+  "commands": [
+    {
+      "command": "cargo test --locked -p femto-reader --test remote",
+      "exit_code": 0,
+      "passed": 6
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet --locked -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "rust_passed": 1052,
+      "rust_batches": 81,
+      "rust_ignored": 1,
+      "python_passed": 7
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "crates/femto-reader/src/remote.rs": "b8659829adc548552c9f3a6b65b83b6688d3ccdac922887f24e0ad66c33025ec",
+    "crates/femto-reader/src/lib.rs": "e5135436076f568efd2fa5102b8ac28868b33703152819d1286b259bd8f9fb11",
+    "crates/femto-reader/tests/remote.rs": "fd1f4d5f1fcb3a22ac88728ef6ebaacc59b8e3e5a3e1b0561b4972d8b5acf475",
+    "crates/femto-reader/Cargo.toml": "717605e10c9f9371b4e233134d2192c65199676e50ddb221b4550304ca9df88f",
+    "firmware/picco/Cargo.toml": "f45bebf6f6470edb0e873f6d5bbb17a686329530a63eaaa0054fd3ed093a7cc1",
+    "Cargo.lock": "444efe35c3058a3342bcdace09a9d3785eee9905386ea2a2c04aaa1bf67be53e",
+    "firmware/picco/Cargo.lock": "e1dc1064ec9c76145634eeaa94ccc4106b5b3c219a6d2988e91d9ab611cbdcb9"
+  },
+  "snapshot_at_completion": true,
+  "logs_sha256": {
+    "output/verification/remote-reader-final.log": "2e8b4edb0463dbe0dc5d5b5e427f069b0a64f6b3f3874784e4f03ce863e91149",
+    "output/verification/remote-reader-workspace.log": "594ff973c4b493f1acb742765e2de079eb93858ec70ac06ec0d06d34e0bf9dea",
+    "output/verification/remote-reader-firmware.log": "b6bc71303fb2b7aa88256c702df40576afaf880c6e2a69892ae1590a6519698f"
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "bcaea93fcc6ff16cfbbbb4f686fee13b13ddfd65f4595c59e64349dbb06586c2",
+    "bytes": 5231232,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "checks": [
+    "Actual HID notifications pass through session queue, decoder and bindings into ReaderUi navigation",
+    "Held report suppression and Previous restore exact source position and page pixels",
+    "Menus preserve selection and source anchor; consumed holds are not replayed after closing",
+    "Reflow suppresses remote navigation without changing the anchor",
+    "Cross-chapter turns use cancellable cooperative navigation; completion returns exact original pixels",
+    "Disconnect, stale callbacks, queue overflow and decode failures cannot replay queued turns",
+    "Invalid replacement descriptor preserves the current remote session"
+  ],
+  "limits": [
+    "Shared host-controller integration only; desktop/Picco event loops do not yet provide Bluetooth notifications",
+    "No physical Bluetooth, pairing, bonds or callback synchronization qualification",
+    "New monochrome dependency graph builds, but clean reproducibility and grayscale were not rerun after this change",
+    "One optional dictionary corpus test remains ignored by the full gate"
+  ]
+}

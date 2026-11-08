@@ -1,0 +1,52 @@
+{
+  "feature": "Cooperative cross-chapter navigation in shared device and simulator UI",
+  "passed_controller_and_ui_tests": 46,
+  "workspace_clippy_desktop_tailnet_passed": true,
+  "native_x11_smoke_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Contents, chapters, bookmarks and back match synchronous positions and rendered pixels",
+    "Chapter-boundary page turns preserve jump history and select the preceding final page",
+    "Incomplete, cancelled, invalid and stale jobs leave the active chapter intact",
+    "Chapter menu Cancel/Back and external panel change discard pending indexing",
+    "Touch and button chapter crossings use pending navigation",
+    "Native simulator existing keyboard, pointer, library, note-preview and Back workflow passes"
+  ],
+  "limitations": [
+    "Chapter parsing and target resolution remain synchronous",
+    "Both parsed chapters and compact indexes can coexist while navigation is pending",
+    "Direct links and preview following still index synchronously",
+    "No physical cancellation latency, storage or peak heap qualification"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/cooperative-navigation-tests.log",
+      "sha256": "de4630b6b392b0a38881853ce5fdcce68410fe8e6091c14cae23c2ed79830e12"
+    },
+    "clippy": {
+      "path": "output/verification/cooperative-navigation-clippy.log",
+      "sha256": "acc7dfb6e9a9a8f888c0bf11ef8db0eab94792007fc3240105aa2988d9b88284"
+    },
+    "simulator": {
+      "path": "output/verification/cooperative-navigation-simulator.log",
+      "sha256": "4f97c4945bcbdafd17279aabc5db32ca859989d28289c7a6fd6f0b97e14c8ffd"
+    },
+    "firmware": {
+      "path": "output/verification/cooperative-navigation-firmware.log",
+      "sha256": "173786143ca59a5010974ca2b82dd2d114e71f482d76b688eaccd39eab197906"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/controller.rs": "5887919d4e9ed57ee74c11ab66d25847af9da1e410ed3c346d4f714671a9a63e",
+    "crates/femto-reader/src/ui.rs": "bbbdc044e6b976e9ec85f4edebd57d991630575f4e65d68367feaa29b54cbef7",
+    "crates/femto-reader/tests/controller.rs": "497c1e72b9347f87ff33e0518e6ef70cd5d930d5b99cf1e9bbb3669c085e8001",
+    "crates/femto-reader/tests/ui.rs": "db25abf6a07965539c1e438aed682fb4174be1aca819d2896bea951780a11036",
+    "crates/femto/src/simulator.rs": "5fcdbacdb188117b4efdd44066902742c8773fa5ab17377dabe3544ebf5367f9",
+    "firmware/picco/src/main.rs": "c44fcaf4b0c406f074bbb47187bdd2ddf68489b675c18e2e60be521f2a94f163",
+    "scripts/simulator-smoke.py": "9185ddc8337dbe43d2f94eab0d7f1c81df87d35e05c5abb9d093c25de8f8fb23",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "tests/fixtures/sample.epub": "14a86e9399bf469e5ca607e148e19b461a76338cf608e347b5e21d9e31af0a30",
+    "output/picco/femto-picco.bin": "77d366fa58d10c6d370636e04fe334b5626c4caef2426407162caf27b6daf424"
+  }
+}

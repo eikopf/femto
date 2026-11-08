@@ -1,0 +1,35 @@
+{
+  "feature": "Reconcile stale Picco integration documentation with current implementation",
+  "runtime_changes": false,
+  "device_progress_tests_passed": 7,
+  "command": "nix-shell --run 'cargo test --locked -p femto --test device_progress_sync'",
+  "inspected_contracts": {
+    "progress UI and routing": "main.rs loads Service, dispatches start/cancel/conflict/reset, chooses LAN or captured tailnet driver, and polls journal commits.",
+    "sleep barriers": "panel.rs stops tailnet, catalog and progress in order with separate five-second waits before panel and Wi-Fi shutdown.",
+    "home relay": "tailnet.rs invokes relay_pool::next_plan; the pool requests a missing eligible home independently of queued peer traffic.",
+    "startup": "main.rs polls ReaderStartup::step between loading-frame updates and input checks.",
+    "snapshot preparation": "Session::prepare takes an immutable Reader reference; worker-side exchange performs source validation."
+  },
+  "input_sha256": {
+    "firmware/picco/src/main.rs": "9db57fa2e5174c83a62bf2ef1737ebfe410cf71b5e092cfb19b174ccbd86067f",
+    "firmware/picco/src/panel.rs": "fe1e4ec7ecf18445c992c467efdaf2f78b68ef15bfc176b3073be475264bb3ce",
+    "firmware/picco/src/progress_sync.rs": "95a142a94bdfa7773a4f6fb4d01daa230f2e7f82284e9494d89701772a422b24",
+    "firmware/picco/src/progress_service.rs": "83f4cb07a2a206cc2bddfd14cad5fe709e4813d3547403fd37d7dcce912fa20a",
+    "firmware/picco/src/tailnet.rs": "3137cc6db301a8dc61fd1271ddd5a76667ea18a821ecc1ec6a2320ceae99fe42",
+    "crates/femto-sync/src/reader.rs": "d54d3a6292b8d68324256af3ddaac59a2ab4d7ddfb9309e1bb93a53d5b9fb6e8",
+    "crates/femto-microlink/src/relay_pool.rs": "1fcc2de21ade0b5af4bd8746993861c78ae3e2281c9e2d545dcc3f98cf3f3a3d",
+    "crates/femto/tests/device_progress_sync.rs": "59cef4d9c360a2e1d71446401dd210a77496d4de22762286db065cb0513fc388",
+    "docs/picco-firmware.md": "98c7e78c3cc74d78c2c302a77734554b17cc53f0909d40fe82014b4aec573b65",
+    "docs/device-network.md": "4ac3ee245dab540ca90a0da2cfe336afc52e0d632057e4f745ce9a8e01b6af91",
+    "docs/progress.md": "4ca762dbbc42d08e9060f42a0939e337632e7454acd028235c433bde05b3fd16"
+  },
+  "log": {
+    "path": "output/verification/device-integration-audit-tests.log",
+    "sha256": "db0556b0a7a30075cca29a07ff31df0fdedb5158b052014203453669e3d145f7"
+  },
+  "limits": [
+    "The host tests compile actual progress service and commit modules with injected transport, not the ESP-IDF main loop or physical networking.",
+    "Sleep ordering, startup and home-relay documentation changes use source inspection; no new execution qualification for those paths.",
+    "No firmware rebuild or independent network rerun in this documentation-only checkpoint."
+  ]
+}

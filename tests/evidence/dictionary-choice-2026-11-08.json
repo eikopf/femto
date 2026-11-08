@@ -1,0 +1,81 @@
+{
+  "feature": "Bounded flat-directory dictionary discovery and persisted reader chooser",
+  "commands": [
+    {
+      "command": "cargo test -p femto-reader --test ui --test dictionary",
+      "exit_code": 0,
+      "passed": 68
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "rust_passed": 999,
+      "rust_batches": 77,
+      "rust_ignored": 1,
+      "python_passed": 7
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "Sorted regular .ifo discovery ignores nested directories and symlinks",
+    "Missing directory gives an empty list; 32 choices accepted and the next rejected",
+    "Root chooser changes lookup output while preserving other reader state",
+    "Selected filename persists through host JSON and device journal reopen",
+    "Fresh UI restores the saved available dictionary",
+    "Unavailable preference falls back to first sorted choice without rewriting preference",
+    "Duplicate configuration rejected without replacing active selection",
+    "Invalid saved filenames rejected",
+    "Simulator directory option and compiled Picco discovery/fallback integration"
+  ],
+  "tested_files_sha256": {
+    "crates/femto-reader/src/dictionary.rs": "3d7486483634c5b77159c54db1a788b3bcc884dcdc8e6cc6f4c2fd2b5abb70a1",
+    "crates/femto-reader/src/state.rs": "2b16cbb7e1b76597004e91ade501f5b5c03051f25cf391377a285608ffa3215d",
+    "crates/femto-reader/src/ui.rs": "0b0221c9a4a3405a67323cade4d19a8ba6a4665963c38c10d05e4f9bce23dbc6",
+    "crates/femto-reader/tests/dictionary.rs": "f0a037dac23668f1e5ccd9c352f0589baa4e1109a1a7a5f4bd7b32660a92dcce",
+    "crates/femto-reader/tests/ui.rs": "e10537bc1d1692b64f263fe2414727e797fc84b2f447b93b66f6fb50ff301f43",
+    "crates/femto/src/simulator.rs": "0cb29148697c733b4748a619a19e25d701d15d6600945e4f9210eed580789bc9",
+    "firmware/picco/src/main.rs": "2ec14d1304e736175bb5de5402a85a1bd97fd99e36d4678eca42f1d797401dc2",
+    "Cargo.lock": "7040c9e05954fc95624ad2f6715bc6c2b9d18f6ae33cc634c65d3d67f7e355bb",
+    "firmware/picco/Cargo.lock": "dcab9958734dfecf18f142c9b159b9465e6d6736dc930d4cfb0b42d65f6299ca"
+  },
+  "snapshot_at_completion": true,
+  "logs": {
+    "tests": {
+      "path": "output/verification/dictionary-choice-tests.log",
+      "sha256": "cf250fe1236cf3f49c0a3dfcaebcd2b9e3416c722d02efa4f078cd7bd17d2f40"
+    },
+    "workspace": {
+      "path": "output/verification/dictionary-choice-workspace.log",
+      "sha256": "3859fc9b0e741cd06d733c3cc9e73755766cf1bf3e26b99d37603351660be930"
+    },
+    "firmware": {
+      "path": "output/verification/dictionary-choice-firmware.log",
+      "sha256": "effc75d2442d2eda4880432a19aaec38510878ae2fd938e2bb2ab566fe1b12ef"
+    }
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "b86eeb67cec89511b6989343d98a1227129c21c67166342b4138b6362bb5cb54",
+    "bytes": 5230608,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Flat directory only; nested packages and duplicate base names across directories are not supported.",
+    "4096-entry scan rejection and all filename-length boundary cases are not separately tested here.",
+    "Discovery is synchronous at startup; no hot rescan or physical SD performance proof.",
+    "Native chooser input, physical hardware, independent tailnet, grayscale and clean reproducibility not rerun.",
+    "One optional upstream corpus test remains ignored in the normal gate."
+  ]
+}

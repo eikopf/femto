@@ -1,0 +1,55 @@
+{
+  "feature": "Independent initiation and response loss qualification",
+  "qualification": "One later full run passed; earlier direct TCP stall remains unexplained",
+  "runs": [
+    {
+      "name": "initial",
+      "result": "failed",
+      "details": {
+        "stage": "direct TCP transfer",
+        "error": "service receive timeout",
+        "received_bytes": "not retained by the original runner",
+        "preceding_relay_tcp_passed": true
+      },
+      "log": "output/verification/headscale-response-loss-first-failure.log",
+      "log_sha256": "dc12d431965e7b51e50fd7ce3e52a9549465ebd4fc93aa680145dd837dd3d0b6",
+      "input_sha256": {
+        "crates/femto-microlink/examples/headscale-probe.rs": "d4082928830bddd82be1dd56460231fa2b2271f382bc6307e7cb214cbf567061",
+        "crates/femto-microlink/examples/support/response_loss.rs": "ea5f4cc7b268186af14d1f21f7fdbc8bb16d15a89a057dcc132007472c386695",
+        "crates/femto-microlink/examples/support/transport.rs": "93218d76f44295fee36d5350433e127a5387315fda58a0d1cbcfa598efd0b4e7",
+        "crates/femto-microlink/src/network.rs": "88dbaeb4f7d3a733fdf473504b082682abca3adf5dbe63d771fc2de623320201",
+        "crates/femto-microlink/src/socket_network.rs": "7274781efa317492d59ddf900cdd03165b36aff5574bfae9bd4fca6c966e2c57",
+        "scripts/check-headscale.py": "b4aa1b1bf90e4652cd29370397539e0b5234e16661421dbe303357e936bbb0cf",
+        "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+        "target/debug/examples/headscale-probe": "072906d0dfdefee912c62194ec250fbd1d4f6b070a4855d8d7282715239b8d7d",
+        "target/debug/examples/headscale-services": "434b4ce4be36f153b4ff353b3f2a0acd2dae299f567d9c3c6e0b12a761749738"
+      }
+    },
+    {
+      "name": "diagnostic",
+      "result": "failed",
+      "details": {
+        "stage": "relay handshake preflight",
+        "error": "25-second preflight deadline expired",
+        "transport_received": 0,
+        "transport_sent": 4,
+        "initiated_sessions": 0,
+        "tcp_connected": false
+      },
+      "log": "output/verification/headscale-response-loss-derp-timeout.log",
+      "log_sha256": "723501341536baa63fa8afab122a4620186e220e5ff50decf0a8b1168786ff49",
+      "input_sha256": {
+        "crates/femto-microlink/examples/headscale-probe.rs": "62e2968b9dc6802b0070c5b3f2ebc16bb4d245584de8445871bf19cf76cbd1a0",
+        "crates/femto-microlink/examples/support/response_loss.rs": "ea5f4cc7b268186af14d1f21f7fdbc8bb16d15a89a057dcc132007472c386695",
+        "crates/femto-microlink/examples/support/transport.rs": "93218d76f44295fee36d5350433e127a5387315fda58a0d1cbcfa598efd0b4e7",
+        "crates/femto-microlink/src/network.rs": "88dbaeb4f7d3a733fdf473504b082682abca3adf5dbe63d771fc2de623320201",
+        "crates/femto-microlink/src/socket_network.rs": "7274781efa317492d59ddf900cdd03165b36aff5574bfae9bd4fca6c966e2c57",
+        "scripts/check-headscale.py": "bd689cf1bad862fcbb1f649a33f76087d2e9f25d6594d3885cc5112ecb068af9",
+        "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+        "target/debug/examples/headscale-probe": "61b7bceec66ae7f0020d1c68bafbf396d06a6d32947fe6ca65ad4033db8d0b06",
+        "target/debug/examples/headscale-services": "434b4ce4be36f153b4ff353b3f2a0acd2dae299f567d9c3c6e0b12a761749738"
+      }
+    }
+  ],
+  "subsequent_report": "tests/evidence/headscale-response-loss-2026-11-08.json"
+}

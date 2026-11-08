@@ -1,0 +1,44 @@
+{
+  "feature": "CSS image maximum dimensions",
+  "passed_epub_stream_tests_and_doctests": 282,
+  "passed_reader_tests_and_doctests": 167,
+  "clippy_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "host_images_inspected": [
+    "output/image-limits/page-0000.png",
+    "output/image-limits/page-0001.png"
+  ],
+  "limitations": [
+    "Percentages use the fixed page content area, not nested CSS containing blocks",
+    "CSS width/height, minimum dimensions, explicit inherit, font-relative units and calc remain unsupported",
+    "Physical panel quality and peak device decode memory remain unverified"
+  ],
+  "logs": {
+    "validation": {
+      "path": "output/verification/image-css-limits-validation.log",
+      "sha256": "d850f234570ffd2c2de3a07d38b19386b234e8c5dc1817f4088a1f8be27588cf"
+    },
+    "firmware": {
+      "path": "output/verification/image-css-limits-firmware.log",
+      "sha256": "17a5eb1602b1d002a2f260edd71278b7bd9ef50f9c7ec2e178ee568deb7ec2a3"
+    },
+    "render": {
+      "path": "output/verification/image-css-limits-render.log",
+      "sha256": "4f765ba6550e8d8a8ef4b0d3d36d0bd1ae962cb5e36bb9eb59f50bb1e6a99c6b"
+    }
+  },
+  "input_sha256": {
+    "vendor/epub-stream/src/css.rs": "a3b75d61cf91dd7a7ca97533f94bcd9c4991b6df9677e9f2544a208ad90b81cd",
+    "vendor/epub-stream/src/render_prep.rs": "b47c351fc040d87cccafd4d9f1564c3d5c35bf51f31af61d58269d6cd301aed2",
+    "crates/femto-reader/src/document.rs": "ec4ce2878af700a3ea28ffe7944e71b1762c4b90689b4a93ba37d5cec6e3185c",
+    "crates/femto-reader/src/layout.rs": "2055fea3cbea346b4dbf1125fa941c15099d11c77c4001c65da46c6976c1f048",
+    "crates/femto-reader/tests/image_limits.rs": "a0214306c76a83c9429c33e0a19c992f710f35f62ba6841a9de3feffd10155cf",
+    "crates/femto-reader/tests/pagination_cache.rs": "76af5a8c51b3e204e311345384ea2b2021932af8a1098d2ddcef86d84e7e15b6",
+    "tests/fixtures/image-limits.epub": "da285e440eeda752896ddb6c3d8f45e73e38e0b9a15557befbb0c2ccd6be3b25",
+    "scripts/make-fixtures.py": "2b928d5430c04c0166845036dfe5ad0052a2ff0697bf29627de7f65bc599110f",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/image-limits/page-0000.png": "526330aaf4761196498760ee72c95c53fcf5f004c7028ef9ccde0e4e729aa0e3",
+    "output/image-limits/page-0001.png": "d56daf8fa3c93df6ca9a0e6fe3089b143e7d4eb6a1813c18bb8f4252ce0c14e9"
+  }
+}

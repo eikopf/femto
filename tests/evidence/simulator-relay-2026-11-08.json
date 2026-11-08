@@ -1,0 +1,116 @@
+{
+  "feature": "Explicit relay trust and native DERP-only service qualification",
+  "targeted_tests_passed": 229,
+  "test_suites": {
+    "microlink": 211,
+    "simulator": 18
+  },
+  "workspace_clippy_passed": true,
+  "monochrome_picco_build_passed": true,
+  "relay_command": "FEMTO_HEADSCALE_SIMULATOR_ONLY=1 FEMTO_SIMULATOR_RELAY_ONLY=1 ./scripts/check-headscale",
+  "normal_command": "FEMTO_HEADSCALE_SIMULATOR_ONLY=1 ./scripts/check-headscale",
+  "relay_report": {
+    "native_enrollment": true,
+    "untrusted_coordinator_rejected": true,
+    "streaming_node_online": true,
+    "explicit_disconnect": true,
+    "existing_identity_reconnect": true,
+    "node_key_renewed": true,
+    "coordinator_node_continuity": true,
+    "rotation_committed": true,
+    "quit_releases_identity_lock": true,
+    "native_tailnet_catalog": true,
+    "native_tailnet_epub_exact": true,
+    "native_tailnet_progress_create": true,
+    "native_tailnet_progress_download": true,
+    "native_tailnet_progress_reopen": true,
+    "service_authentication": true,
+    "service_counts": {
+      "feed": 1,
+      "book": 1,
+      "gets": 2,
+      "puts": 1
+    },
+    "official_peer": "1.104.5",
+    "relay_only": true,
+    "coordinator": "headscale version 0.29.7\ncommit: v0.29.7\nbuild time: unknown\nbuilt with: go1.27.3 linux/amd64",
+    "hardware_verified": false
+  },
+  "normal_report": {
+    "native_enrollment": true,
+    "untrusted_coordinator_rejected": true,
+    "streaming_node_online": true,
+    "explicit_disconnect": true,
+    "existing_identity_reconnect": true,
+    "node_key_renewed": true,
+    "coordinator_node_continuity": true,
+    "rotation_committed": true,
+    "quit_releases_identity_lock": true,
+    "native_tailnet_catalog": true,
+    "native_tailnet_epub_exact": true,
+    "native_tailnet_progress_create": true,
+    "native_tailnet_progress_download": true,
+    "native_tailnet_progress_reopen": true,
+    "service_authentication": true,
+    "service_counts": {
+      "feed": 1,
+      "book": 1,
+      "gets": 2,
+      "puts": 1
+    },
+    "official_peer": "1.104.5",
+    "relay_only": false,
+    "coordinator": "headscale version 0.29.7\ncommit: v0.29.7\nbuild time: unknown\nbuilt with: go1.27.3 linux/amd64",
+    "hardware_verified": false
+  },
+  "checks": [
+    "Relay trust is explicit and separate from coordinator/application trust",
+    "Runtime transport settings fixed per generation",
+    "Relay-only pump receives no UDP transport: direct receive, discovery and STUN skipped, direct sends return WouldBlock",
+    "Relay-only mode omits bound local UDP endpoint publication",
+    "Native enrolled and renewed identities perform authenticated catalog acquisition and progress create/download/reopen through official peer",
+    "Normal transport mode regression also passes"
+  ],
+  "limitations": [
+    "No direct-packet counter is asserted; exclusion follows the runtime supplying no UDP transport to the pump",
+    "No new simulator HTTPS, relay migration/failover, or packet-loss qualification",
+    "No new negative native relay-CA scenario",
+    "No physical hardware qualification"
+  ],
+  "fixture_notes": [
+    "An initial run reached relay catalog acquisition but failed creating the next X11 window; the retained failure log is output/verification/simulator-relay-window-failure.log",
+    "Xvfb now uses -noreset across simulator launches; both complete reruns passed",
+    "API documentation comments were added after compilation; no executable Rust behavior changed afterward"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/simulator-relay-tests.log",
+      "sha256": "e1e81d7bf6e53b174aca9f8003874460cd4bcf4ebc82171fad454f66693bb428"
+    },
+    "relay": {
+      "path": "output/verification/simulator-relay-relay.log",
+      "sha256": "a45a34ab549ab1084040717f29707442fb3ab9662425303b006306100f6627ae"
+    },
+    "normal": {
+      "path": "output/verification/simulator-relay-normal.log",
+      "sha256": "5c49495ff2dcc98f85ee75b36c3d63c594825f4aad9de06287999ac08530a95b"
+    },
+    "firmware": {
+      "path": "output/verification/simulator-relay-firmware.log",
+      "sha256": "edacfa942a98a68cb55f2e85da193c98ac27f64fbe7a395c4ea0b17a31546b90"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/host_relay_worker.rs": "8beff541781a30765ea678d5c267e67eac8d901a0587e46220ec89985dc93e65",
+    "crates/femto-microlink/src/socket_network.rs": "2fc8e8a310ea5082ffc01acc2d6af94c658523144e1fd849d9aeb0ca18b5f60b",
+    "crates/femto-microlink/src/host_network.rs": "211181618303bd5734693e86d7b309716166ad2707d59cb89aaeef2182265c9c",
+    "crates/femto-microlink/src/host_runtime.rs": "278b0cf81b8110db4b449a3495ea02c57777124bbc864c898cdba351f27ea30b",
+    "crates/femto-microlink/src/host_registration.rs": "106ebdf36effe66e8976e19bffb62897dd06cce8f60e767cd771a1c6e38f539d",
+    "crates/femto/src/simulator.rs": "7dd33650afb3d20534209c13e833fc36bb9f057382096bfd40b122e75aa40804",
+    "crates/femto/src/simulator_tailnet.rs": "e069648d787ef5505b2a53f6078b4f040fe6ce28c8b97ed1b409092744297c5c",
+    "scripts/simulator-headscale.py": "cd9b13a6c4c8c7033d31392833bbaa956e2cdec5da61344909521b05175c9ba2",
+    "scripts/simulator_services.py": "d666166f60f3dd54b17867b91c707c4bbc8fec2e1dbfd74784687f1ba75ee4fb",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199"
+  },
+  "simulator_binary_sha256": "f45e383cd256e1f3c975234a88b2c27aa7cf870606fd353d22875f330eee0f2a"
+}

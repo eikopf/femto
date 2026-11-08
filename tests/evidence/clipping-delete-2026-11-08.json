@@ -1,0 +1,55 @@
+{
+  "feature": "Clipping deletion with exact-record confirmation",
+  "targeted_tests_passed": 43,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "checks": [
+    "Opening confirmation leaves state unchanged; Keep is initially selected",
+    "Keep and Back preserve state",
+    "Confirmation removes the exact record without changing reading anchor or pixels",
+    "Deleted state persists through host JSON and device journal",
+    "Changed record timestamp or active book rejects confirmation without state changes",
+    "Reordering the list removes the confirmed record and preserves the other record",
+    "Repeated removal fails without mutation"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --test ui --test clippings && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco"
+  ],
+  "input_sha256": {
+    "crates/femto-reader/src/state.rs": "e55b2d593059e501460f562c419556e312be256bf10876fe65e63c53f464e295",
+    "crates/femto-reader/src/ui.rs": "cd100f34a5ee572c95cab4dab75eef1dd23fb874f89ac413914f8b282d14243a",
+    "crates/femto-reader/src/clipping.rs": "f346bcdd414932b81e93777c7b5def0dc5be148e9228f82b1f8b417cad3cc71a",
+    "crates/femto-reader/tests/ui.rs": "8bce6a07d6764b0daa759710b5c784414342f23fb3ecf1ff3be3b4b050efd045",
+    "crates/femto-reader/tests/clippings.rs": "310e7d6afed64f32aebe1271e198af5cb2449a113834d41ce3b7c825031a16e4",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54"
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/clipping-delete-tests.log",
+      "sha256": "f658b100b4f29057d150ac775fec4ba8dca17e51d906a048625ce944296dc8da"
+    },
+    "picco": {
+      "path": "output/verification/clipping-delete-picco.log",
+      "sha256": "80dd4c2c93ce40e47bbf59154fa40ba45e2475e0d059ff754267ccfeb74dc61c"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "cd31866411e49f581e4b56f09e2da07a875ede1b3360f45965fbe64089f913e2",
+    "bytes": 5168432,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "State mutation uses existing frontend save behavior; confirmation does not itself guarantee a durable write.",
+    "No native window-input test for clipping deletion or physical Picco qualification was performed.",
+    "Arbitrary selection gestures, highlight painting, source navigation and export remain unfinished."
+  ]
+}

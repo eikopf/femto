@@ -1,0 +1,70 @@
+{
+  "feature": "Reusable femto-remote workspace crate",
+  "commands": [
+    {
+      "command": "cargo test --locked -p femto-remote",
+      "exit_code": 0,
+      "passed": 26
+    },
+    {
+      "command": "cargo clippy --locked -p femto-remote --all-targets -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "passed": 1046,
+      "batches": 80,
+      "ignored": 1,
+      "python_passed": 7
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/oliver/projects/femto/output/remote-xtensa-target MCU=esp32s3 RUSTFLAGS='--cfg espidf_time64' nix-shell nix/firmware.nix --run 'cargo check --locked -p femto-remote --target xtensa-esp32s3-espidf -Z build-std=std,panic_abort'",
+      "exit_code": 0
+    }
+  ],
+  "dependency": {
+    "name": "hidreport",
+    "version": "0.6.0",
+    "archive_sha256": "6bba4f2ebef8032ef0125a72c7052481c9d63e50f1d48d35c0933ae11aa58c6d",
+    "license": "MIT",
+    "default_features": false,
+    "patch": "Push/Pop only global state; reject popping initial state before mutation"
+  },
+  "tested_files_sha256": {
+    "Cargo.toml": "5397cb99705d462d1970dbb8cf4182023fef86cf5249d90bec0199dc513670f0",
+    "Cargo.lock": "a812a61c347678cdeb269e86231d79ac2aee7502c9e1b2aac12f436a530cec7a",
+    "scripts/check": "73f6f30fc45fec8ee130b73336cebd629881be150fc2dc1c7574ad67761f6997",
+    ".gitignore": "85a793c9929f7fe0ef486da3cfec1cebad96441a8641000c23596da231872b25",
+    "vendor/hidreport/Cargo.toml": "40bf7620ed7df27dfab3a369982e99e408d5906816c8e252c7cb3f336cf39e4e",
+    "vendor/hidreport/Cargo.lock": "7beaad768887fa9d0a4c8328a624ca2e850c7f35e60f29d14e9812f3addc7443",
+    "vendor/hidreport/src/lib.rs": "1cdf76f39180aee0d592de0934aadd7089b25cb7fb87b5b07577d92f339a5dd6",
+    "vendor/hidreport/COPYING": "62d912ff40f62bd4f967c15a247082d40e0dc6369714906bb473180427a1673d",
+    "crates/femto-remote/Cargo.toml": "7b12884f754d2048dafb7cc70f06fcb2f28694da58c5607749d672c82cb64a7e",
+    "crates/femto-remote/src/descriptor.rs": "a7b1065ffd44aa49dbf1989afd55ae478048842a1d58449a195a8585ca7a3239",
+    "crates/femto-remote/src/bindings.rs": "17b83c34236a9614f4d1387b1164c16bdfb5b0e7d1ebe336972fe2907a5fa66b",
+    "crates/femto-remote/src/inbox.rs": "46d48e177439920cf23a7688ce7dcfec3e4968a9a662379832c6e517517a9eeb",
+    "crates/femto-remote/src/lib.rs": "62b41218c8f927c2b17f6478e5f9027861f1688a96804ddb011a629d610e3b7f",
+    "crates/femto-remote/src/input.rs": "8f1a252bac66a39fc3d6572348c3c192a12614e4637a75df48787e33637880e8"
+  },
+  "snapshot_at_completion": true,
+  "logs_sha256": {
+    "output/verification/remote-promotion.log": "e8731bf134063889d521c09236dd3a24b217f1d145dd3ab56a7747b166ba8db7",
+    "output/verification/remote-final-tests.log": "bc85587ea172ff2ad7b0fcd2d84f51ef2e97077c3d174dedae6c893de9cf5333",
+    "output/verification/remote-final-workspace.log": "d30becc06d5d18748a8c60c822bb8ab249225ce16cdb7a1ed1d76f4b88583f18",
+    "output/verification/remote-xtensa.log": "7a256ad784a91352d3c5e50c97dd932f2cff4be888d3a175fb7c4d952d1a9413"
+  },
+  "checks": [
+    "Private descriptor and framing guard; raw upstream parsed reports not exposed",
+    "Keyboard and consumer input, bounded press state, configurable bindings, session-aware FIFO",
+    "Extended four-byte usage ranges rejected before parser can apply the wrong usage page; explicit four-byte usages supported",
+    "Routine repository gate includes the new crate and 18 upstream parser library tests",
+    "Pinned Xtensa compilation passes without firmware integration"
+  ],
+  "limits": [
+    "No Bluetooth transport, physical pairing, bonds, callback synchronization or reader dispatch integration",
+    "Xtensa check does not link or run a firmware image",
+    "Earlier full gate preceded the final extended-range guard; the final full gate was rerun after that change",
+    "One optional dictionary corpus test remains ignored by the routine gate"
+  ]
+}

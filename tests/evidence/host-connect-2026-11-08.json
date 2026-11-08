@@ -1,0 +1,27 @@
+{
+  "feature": "Host registration to application-runtime assembly",
+  "targeted_tests_passed": 211,
+  "workspace_clippy_passed": true,
+  "checks": [
+    "Connection result can move between threads",
+    "Occupied UDP bind fails before rotation preparation",
+    "Setup cancellation precedes UDP bind failure",
+    "Failed setup releases identity-store lock and preserves node identity",
+    "Successful-registration code assembles map worker, UDP, DERP/reconnect and endpoint publication with one monotonic clock"
+  ],
+  "limitations": [
+    "Successful assembly has not yet been exercised against an independent coordinator",
+    "No simulator enrollment controls wired yet",
+    "No new native simulator, Picco build, or physical hardware qualification"
+  ],
+  "logs": {
+    "tests_and_clippy": {
+      "path": "output/verification/host-connect-tests.log",
+      "sha256": "9becb1d0abb81fd68a1e529b50825ac26687acf10f8f74fb9d00bae4ead468ae"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/host_registration.rs": "8b95f072a6293eefb3485d3250b8cc5a7535f0eeee010f813aa7a2a10f6446af",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199"
+  }
+}

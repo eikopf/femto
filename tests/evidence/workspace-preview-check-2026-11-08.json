@@ -1,0 +1,50 @@
+{
+  "verified_at": "2026-11-08T02:10:07.400954+00:00",
+  "commands": [
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "log": "output/verification/femto-workspace-preview-check.log",
+      "log_sha256": "302e684a6ae2b2b71552736b1f21698abaf22ace5c77e74143520e7b484bf26d"
+    },
+    {
+      "command": "./scripts/check-simulator",
+      "exit_code": 0,
+      "log": "output/verification/femto-workspace-preview-simulator.log",
+      "log_sha256": "d97694ceaae858f5b2dd4735e16a9ada0b23731b375305d06e3f3f47c7853ac3"
+    },
+    {
+      "command": "cargo fmt --all --check; cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings",
+      "exit_code": 0,
+      "log": "output/verification/femto-preview-final-lint.log",
+      "log_sha256": "6d6e146d3c667a76a14a29487913cf6bf86ed2a9e03713ab92038fcfa02f4ff4"
+    }
+  ],
+  "rust_test_batches": 64,
+  "rust_tests_and_doctests_passed": 821,
+  "rust_tests_failed": 0,
+  "rust_tests_ignored": 0,
+  "python_firmware_tests_passed": 7,
+  "format_check": true,
+  "workspace_check": true,
+  "workspace_clippy": true,
+  "native_x11_smoke": true,
+  "native_marked_note_preview_close_follow_back": true,
+  "preview_screenshot": "output/simulator-smoke/note-preview.png",
+  "preview_screenshot_sha256": "0d25bf00ac4458fe36dde28b57d0363b1da5278e5f1b9de849b82f3bcf34a1bb",
+  "hardware_verified": false,
+  "wayland_runtime_verified": false,
+  "independent_network_fixture_rerun": false,
+  "input_sha256": {
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "scripts/check": "1ea673906c8e21d9cc2f55fcc73b746d0cf4f5e32127edf67c5a83cda6c8719b",
+    "scripts/check-simulator": "1d3ddcb391482a9db2a1cb386604b583ba11692cf9bf458ff37c4834b3325a6a",
+    "scripts/simulator-smoke.py": "9185ddc8337dbe43d2f94eab0d7f1c81df87d35e05c5abb9d093c25de8f8fb23",
+    "crates/femto-reader/src/ui.rs": "f0df1414ffab0146101e3d1d3357946854a777540eab3ac30c335ade1bad6ad1",
+    "crates/femto-reader/src/controller.rs": "807481fd424fcb18b27275c004ed8fbd048a59456823926d1b181747fa3e85fd",
+    "crates/femto-reader/src/document.rs": "c300a0e50f5f43e30cfac02a090f764b2a9110c112269c6bd7613cff2aac8dc7",
+    "crates/femto/src/simulator.rs": "f17cb2fd27a5767627a3e3bcac47423a6287cebb26789214b95495a40c203fec",
+    "vendor/epub-stream/src/render_prep.rs": "b3ea80f77ee87550decb3db2d658aaf114ce6a5b40545cc479e76406ff420922"
+  },
+  "scope": "Full host workspace plus vendored parser/inflater suites and firmware planner tests. Preview status getter and simulator titles were added after the full run began; the final source passes workspace format/Clippy and the extended native smoke test. Firmware build and independent network fixture evidence remain separate."
+}

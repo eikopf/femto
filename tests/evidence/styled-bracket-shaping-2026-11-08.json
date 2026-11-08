@@ -1,0 +1,39 @@
+{
+  "feature": "Script context retained across style and language spans within a directional run",
+  "passed_reader_tests": 161,
+  "test_batches": 25,
+  "clippy_passed": true,
+  "format_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "host_specimen": "output/styled-brackets/page-0000.png",
+  "host_specimen_sha256": "a5843974ff433f0571d756252a0dfd8b63d2e3f132f22b0c87e531b50e073452",
+  "limitations": [
+    "No bracket matching across separate directional runs or shaping buffers",
+    "No language-dependent quotation matching",
+    "No physical panel or peak-memory qualification"
+  ],
+  "logs": {
+    "reader_and_clippy": {
+      "path": "output/verification/styled-brackets-reader_and_clippy.log",
+      "sha256": "4d52a85a9b7c50bf9af0102d700d3704dfd74150be71009834bcfd1ee7594b17"
+    },
+    "render_and_format": {
+      "path": "output/verification/styled-brackets-render_and_format.log",
+      "sha256": "55ecb599b740df0bf3b7497a4c7be9a4068d119aa4acc32b761096d5fb688e63"
+    },
+    "firmware": {
+      "path": "output/verification/styled-brackets-firmware.log",
+      "sha256": "6ac1b171098a7ea41603fce73598f7a71bc2b89363bab043ef64415a94b863da"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/scripts.rs": "5fb929e9b828af7c66e38a4c00030786ab5dafd85f9a528ebda777670b646a94",
+    "crates/femto-reader/src/layout.rs": "986a95042e745186a332ff595a10cae42a7648e5b383f24e0176d5785dd9b801",
+    "scripts/make-fixtures.py": "06ce1a257fdbfb01fbbc9480abf48f6dc4525e9dce7dd3fa19d6e2cb2582193c",
+    "tests/fixtures/styled-brackets.epub": "5f8568f562fd42e0ecc18da0825cfa2272e34c18325810d027e4badf96a2ed0b",
+    "tests/fixtures/DejaVuSerif.ttf": "47d363d2d6235e8177f6077035a3079034c9b01236ed5fa844285130b56315a3",
+    "tests/fixtures/DejaVuSans.ttf": "58568c88a01b80dfc056daca3eeafd434a0380df1a48dda53f0de0d716109bbd",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199"
+  }
+}

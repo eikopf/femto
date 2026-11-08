@@ -1,0 +1,46 @@
+[workspace]
+members = ["crates/femto-catalog", "crates/femto-reader", "crates/femto", "crates/femto-microlink", "crates/femto-picco", "crates/femto-sync", "crates/femto-remote"]
+resolver = "2"
+exclude = ["vendor/epub-stream", "vendor/swash", "vendor/miniz_oxide", "vendor/quireink-stardict", "vendor/hidreport"]
+
+[patch.crates-io]
+hidreport = { path = "vendor/hidreport" }
+quireink-stardict = { path = "vendor/quireink-stardict" }
+epub-stream = { path = "vendor/epub-stream" }
+swash = { path = "vendor/swash" }
+miniz_oxide = { path = "vendor/miniz_oxide" }
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+
+[workspace.dependencies]
+hidreport = { version = "=0.6.0", default-features = false }
+quireink-stardict = "=0.3.0"
+quireink-platform = "=0.3.0"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+epub-stream = "=0.1.0"
+rustybuzz = "=0.20.1"
+swash = "=0.2.6"
+unicode-bidi = "=0.3.18"
+unicode-linebreak = "=0.1.5"
+unicode-segmentation = "=1.12.0"
+unicode-script = "=0.5.9"
+unicode-normalization = { version = "=0.1.26", default-features = false }
+hypher = { version = "=0.1.8", default-features = false, features = ["alloc", "english", "german", "french", "spanish", "italian", "dutch", "portuguese"] }
+sha2 = "0.10"
+png = "=0.18.1"
+zune-jpeg = { version = "=0.5.15", default-features = false, features = ["std"] }
+clap = { version = "4", features = ["derive"] }
+tempfile = "3"
+tailscale-esp32 = { git = "https://github.com/0xdilo/tailscale-esp32", rev = "dbd49fe4018023ba07596e4377496718ef21d6ae" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+

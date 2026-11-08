@@ -1,0 +1,57 @@
+{
+  "feature": "Semantic footnote/endnote body previews with source-preserving Follow",
+  "tests_passed": {
+    "reader_clippy": 50,
+    "parser": 277
+  },
+  "workspace_clippy_passed": true,
+  "native_x11_smoke_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Long-note preview excludes neighboring notes and chapter text",
+    "Inline extraction retains original UTF-8 source offsets and styled content",
+    "Namespace aliases and scoped bindings; group tokens excluded",
+    "Nested and empty parser boundaries; oversized attributes rejected",
+    "Preview leaves saved state and source position unchanged",
+    "Cooperative Follow retains full source document, including trailing content; Back returns to origin",
+    "Unmarked targets retain whole-chapter preview"
+  ],
+  "limitations": [
+    "Extraction retains a full source chapter and a truncated copy; physical heap qualification outstanding",
+    "Chapter parsing and copy remain synchronous",
+    "Native smoke covers existing note-reference UI and Follow/Back; semantic body boundaries are covered by dedicated host tests",
+    "Semantic markers on image elements themselves do not create note containers",
+    "No claim of physical input/display or memory qualification"
+  ],
+  "logs": {
+    "reader_clippy": {
+      "path": "output/verification/note-body-reader_clippy.log",
+      "sha256": "23f5c29ff3c4420c3f1a27dcd122634d24c10095ac0fd3024fd68b8eef0080e7"
+    },
+    "parser": {
+      "path": "output/verification/note-body-parser.log",
+      "sha256": "8196a638d65806bdffa29f36f2171c1364745a76d666d3b2c54f5d097810e366"
+    },
+    "native": {
+      "path": "output/verification/note-body-native.log",
+      "sha256": "71253c331f9d4bf7b3784027fa8c08a6d582b81811eca686e2e2d71cc92b14a0"
+    },
+    "firmware": {
+      "path": "output/verification/note-body-firmware.log",
+      "sha256": "bb709fa8b47a8462b42eb0be7cf42a55a685257a1396a5cbf277eb47486c8148"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/document.rs": "7efb9b00fbc2d0c79d82f5b0dae9e6d30b22e7083b7d490cb2ee6b61113b24eb",
+    "crates/femto-reader/src/controller.rs": "507fd0bf336a19512a556cafc993b35b14a9916e2f0c6109e0bd4f6d7a330811",
+    "crates/femto-reader/src/pagination.rs": "b933e67714ed829420322b4d16dd68f1b1d5647265856d4de2d027b86d8c1a89",
+    "crates/femto-reader/tests/note_bodies.rs": "7a8181a1548e17b7ed8cde702300f447820d37735b8166b6517651eb81c43d74",
+    "vendor/epub-stream/src/render_prep.rs": "8dbff8331805d7c317639f0c1d428dd0eac65dae2703ac15a2d7fbb58f5423a9",
+    "vendor/epub-stream/src/book.rs": "1f12945bb22e4bb12f5b986e8d36f2248da8a61cbe92509afb6e23c18f29f9ba",
+    "scripts/make-fixtures.py": "415f029cb4aa4e6c488a10f5719003a9a6f82aa0ee08fe5b9f42302fefbebe91",
+    "tests/fixtures/semantic-notes.epub": "df1e0b9919de38a040fade684930df8d506ed961dde4c6f87b21470271a90d4b",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "fe688237c35e53f1258231672338b78058c333d77a8d10bf2d000ff92604e79b"
+  }
+}

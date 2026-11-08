@@ -1,0 +1,34 @@
+{
+  "feature": "CLI clipping export from an offline device journal copy",
+  "export_tests_passed": 5,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "checks": [
+    "Exactly one state source required; missing and conflicting arguments rejected",
+    "Newest valid journal generation exported",
+    "Both slot bytes and directory entry count unchanged after successful export",
+    "Truncated newest slot falls back to older valid state without modifying either slot",
+    "Corrupt-only state emits no JSON",
+    "Missing or empty journal source rejected without creating directories",
+    "Existing host JSON, exact-source, empty-export and host-lock tests still pass"
+  ],
+  "command": "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto --test clippings_export && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+  "input_sha256": {
+    "crates/femto/src/main.rs": "c921e9576fbdc68778fd7de4337da8513c96760e548b36987507b0ced07f0a72",
+    "crates/femto/src/clippings.rs": "172db3a73c7428a756cbc95d20e1117ebb37a5a47f8ea7492087d0369168a59f",
+    "crates/femto/tests/clippings_export.rs": "ca79a0a1ef3ffd1927f6514a53d770580d5a9e97d71dfb0ef40982b9bf8634ac",
+    "crates/femto-reader/src/journal.rs": "ae803f5185c069de8abb2958b927db11af37085a2894366cdef2e8b90f3dbaba",
+    "crates/femto-reader/src/clipping.rs": "f346bcdd414932b81e93777c7b5def0dc5be148e9228f82b1f8b417cad3cc71a",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e"
+  },
+  "log": {
+    "path": "output/verification/clipping-journal-export-tests.log",
+    "sha256": "1af33317e4e54ab8268c9378579ee70109c391fed70e5c807789848cca160c88"
+  },
+  "limits": [
+    "Journal input must be an offline copy; export does not acquire firmware ownership or establish a live shared-storage snapshot.",
+    "Fallback to an older slot can omit recent captures or retain later-deleted excerpts.",
+    "Host generated-slot tests do not qualify physical SD copying, device power failure, or on-device export UI.",
+    "Only host CLI code changed; no firmware build, native simulator or network rerun in this checkpoint."
+  ]
+}

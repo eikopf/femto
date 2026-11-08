@@ -1,0 +1,50 @@
+{
+  "scope": "Integrated workspace and grayscale firmware after clipping source navigation, Unicode excerpt wrapping, word hit testing, explicit word/range selection, view panning and pending-selection feedback",
+  "commands": [
+    "./scripts/check",
+    "FEMTO_PICCO_GRAYSCALE=1 ./scripts/build-picco"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "rust_tests_and_doctests_passed": 958,
+  "rust_test_batches": 70,
+  "python_firmware_tests_passed": 7,
+  "formatting_passed": true,
+  "workspace_compilation_passed": true,
+  "workspace_clippy_passed": true,
+  "input_manifest": {
+    "path": "output/verification/integration-selection-inputs.json",
+    "sha256": "04d564d56d4aa9fe4e12483ffa9b894b424327867085d655953b56e086c60711",
+    "files": 390,
+    "unchanged_at_completion": true
+  },
+  "logs": {
+    "workspace": {
+      "path": "output/verification/integration-selection-workspace.log",
+      "sha256": "34440b9a15e35b832cfed987c5a338b8baa6486e3f3672d4acf45ebdbc3a93f4"
+    },
+    "grayscale": {
+      "path": "output/verification/integration-selection-grayscale.log",
+      "sha256": "e77b0c0cce28cd6d181a454a5aa0564f31f96ac8c619b5439b5716df05431fa1"
+    }
+  },
+  "grayscale_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "477032cba81f7796693918a5b684f7737ba2d9c3506da54bd2fb84705a6d7fde",
+    "bytes": 5178576,
+    "chip": "esp32s3",
+    "display_levels": 4,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Incremental grayscale build does not establish clean-build reproducibility or physical display behavior.",
+    "Native input was qualified separately in selection-feedback-2026-11-08.json; this checkpoint does not rerun the native suite.",
+    "Independent Headscale interoperability was not rerun in this checkpoint.",
+    "Physical Picco operation, cross-page selection, persistent highlights, dictionaries, Bluetooth page turning and remaining documented requirements are not established by these checks."
+  ]
+}

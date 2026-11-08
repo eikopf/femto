@@ -1,0 +1,63 @@
+{
+  "feature": "Library traversal fault isolation and complete-cache preservation",
+  "targeted_tests_passed": 44,
+  "suites": {
+    "library": 9,
+    "ui": 35
+  },
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "permission_test_exercised": true,
+  "regression_before_fix": "Unreadable child directory caused Library::scan and scan_cached to return PermissionDenied, preventing available sibling books from being returned.",
+  "assertions": [
+    "Cached and uncached scans return the readable sibling and a bounded diagnostic",
+    "Incomplete traversal preserves previous cache bytes",
+    "Permission restoration recovers both books with metadata cache hits",
+    "Depth-limited traversal returns accessible new books without replacing the complete cache",
+    "A later complete traversal publishes the new metadata cache"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --test library --test ui -- --nocapture && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco"
+  ],
+  "input_sha256": {
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "crates/femto-reader/src/state.rs": "5faeae94624714ee11e588dd29b66f7b7d1262c4167845ccce2d9ccaba525f83",
+    "crates/femto-reader/src/library_cache.rs": "d4f3342a6b3201468ad13193d6e8e087717a2d8df45974f9549901caed864e28",
+    "crates/femto-reader/tests/library.rs": "5c2c43850ce2a45b3344f7526c861aabffdfed7f153376b7904b46a135580970",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54"
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "15a06d4320a48e058fa32ef5d244c2990faa60a2837afd5bf165715d9090672e",
+    "bytes": 5126656,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "logs": {
+    "before": {
+      "path": "output/verification/library-traversal-before.log",
+      "sha256": "dff84c98d7cd1944c6370c1f7de90d77b3e259a9b82085ee87ace427767ebe31"
+    },
+    "tests": {
+      "path": "output/verification/library-traversal-tests.log",
+      "sha256": "d0aee6a7d7fd0b406436c56d369fd33d2fd85996426e9a092fdce1bdc8b87e27"
+    },
+    "picco": {
+      "path": "output/verification/library-traversal-picco.log",
+      "sha256": "dbfe455ecc582817723ab1b5bb20518a0481db0a6aca12e9f9520be731b53c17"
+    }
+  },
+  "limitations": [
+    "No direct injection of directory-iterator or file-type lookup failures",
+    "No new full workspace or full reader test suite",
+    "No new native simulator or grayscale firmware run",
+    "No filesystem snapshot guarantee, physical SD removal, or storage power-loss qualification"
+  ],
+  "hardware_verified": false
+}

@@ -1,0 +1,53 @@
+{
+  "feature": "Explicit word selection with preview and save/cancel controls",
+  "ui_tests_passed": 41,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "checks": [
+    "Reading framebuffer unchanged above the 32-pixel instruction footer",
+    "Misses and page-turn buttons do not navigate while selecting",
+    "Preview and default Cancel preserve state",
+    "Save captures exact source range/text without moving the reading anchor or changing book pixels",
+    "Footer tap cancels mode",
+    "Position changes before picking or saving reject selection without state mutation"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --test ui && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco"
+  ],
+  "input_sha256": {
+    "crates/femto-reader/src/ui.rs": "3e099db8f94cd5f88a9986a0a0501b6be9d934b869c8fccc39d2e49b040a3375",
+    "crates/femto-reader/tests/ui.rs": "ed0330f4ac21206886cf567de333de89f1a018362cd22e423662bedd47a0a141",
+    "crates/femto-reader/src/controller.rs": "53eb6cd94a39107f67c4b42cfbb3d307079f504ea0fc24e6caea622eb216d0ea",
+    "crates/femto-reader/src/clipping.rs": "f346bcdd414932b81e93777c7b5def0dc5be148e9228f82b1f8b417cad3cc71a",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54"
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/word-selection-tests.log",
+      "sha256": "0411bcce2cc58220181392215c28b197633d80142862667a3518b2fccbb6283a"
+    },
+    "picco": {
+      "path": "output/verification/word-selection-picco.log",
+      "sha256": "8da6ffc8d48c7e3769454b5ec3d66cf96d2c06555e4b63678c4c2fd9109e1bc0"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "01384048f254fca8f2fadff308d01ebf2d955bb63665971f47708a36366961df",
+    "bytes": 5172768,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "The footer covers the bottom 32 pixels; words wholly under it cannot be selected until the viewport reserves space through reflow.",
+    "Multi-word selection, highlight painting and button-only word targeting remain unfinished.",
+    "No native pointer-input, physical touch, grayscale build or full workspace rerun in this checkpoint."
+  ]
+}

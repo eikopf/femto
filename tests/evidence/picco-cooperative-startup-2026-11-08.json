@@ -1,0 +1,50 @@
+{
+  "feature": "Cooperative Picco book startup with loading screen and cancellation",
+  "controller_tests_passed": 20,
+  "workspace_clippy_passed": true,
+  "monochrome_firmware_build_passed": true,
+  "grayscale_firmware_build_passed": true,
+  "hardware_verified": false,
+  "host_checks": [
+    "Failed file replacement preserves the pending fallback",
+    "Cancellation returns fonts and unchanged saved state",
+    "A cancelled job can be retried with the same owned inputs",
+    "Loading frames render in portrait/landscape and two/four display levels",
+    "Existing restored-position and synchronous-pixel-equivalence tests pass"
+  ],
+  "compiled_device_behavior": [
+    "Wake resume is attempted before default EPUB and TXT candidates",
+    "Hash/index steps are separated by input and Wi-Fi polling",
+    "Button or tap cancellation falls back to the library or specimen without journal writes during loading",
+    "Loading progress refreshes at most once every two seconds",
+    "Initial loading frame uses the orientation input barrier",
+    "Fallback indexing is cooperative"
+  ],
+  "limitations": [
+    "Host tests do not execute the ESP-IDF event loop",
+    "Metadata/chapter parsing, font/state loading, and library scanning remain synchronous",
+    "Physical cancellation latency, wake-button behavior, display timing, and peak memory remain unqualified"
+  ],
+  "logs": {
+    "validation": {
+      "path": "output/verification/picco-cooperative-startup-validation.log",
+      "sha256": "960b12f5af98fc82475513a83f941a7a7ef96155e69bb770cdc6d0aeda422425"
+    },
+    "monochrome": {
+      "path": "output/verification/picco-cooperative-startup-monochrome.log",
+      "sha256": "76f7e429bcb3a7785040df2a48943ba35963fd5bcae65858b604f202d3db7dad"
+    },
+    "grayscale": {
+      "path": "output/verification/picco-cooperative-startup-grayscale.log",
+      "sha256": "e6cdc38d7cc2db6111378ca9692fe9669556c3f703e204e3ff74a4000a1c48f0"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/controller.rs": "da51255ebd597e4b6824d268a502bee1ab2e3fbd3f6f18ca00a5e52879490f0b",
+    "crates/femto-reader/tests/controller.rs": "7c1e954ac1733760cb01073e0298173b4647f256eb61fdffab367294e2528e50",
+    "firmware/picco/src/main.rs": "5545ee649db1d1dac0fa06d364868e78fcc08c5cfd339fb69c31c6aaa872a58f",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "904a33310ba948b69aac325401746379a703b8c0bb5c83a9ead7059837710099",
+    "output/picco-grayscale/femto-picco.bin": "d4bbba73cd71b0da1810e19d93546f6e5e30197c2b942f88fbc7dbebcefccf3e"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "feature": "Bounded receive-idle WireGuard keepalive replies",
+  "reply_delay_ms": 10000,
+  "maximum_timers": 256,
+  "maximum_new_keepalives_per_tick": 1,
+  "passed_microlink_tests": 200,
+  "workspace_clippy_desktop_tailnet_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "independent_peer_rerun": false,
+  "checks": [
+    "No reply before deadline and one queued reply at deadline",
+    "Repeated data coalesces into one follow-up interval",
+    "Empty authenticated keepalives do not arm responses",
+    "Blocked and full output queues retain bounded timer state",
+    "Expired queued keepalive regenerates with fresh nonce",
+    "Authenticated output cancels pending replies",
+    "Peer withdrawal prevents queued reply transmission"
+  ],
+  "limitations": [
+    "Egress acceptance can precede physical relay transmission",
+    "Send-without-receive handshake timer and total retry limits remain unfinished",
+    "Persistent-keepalive configuration remains unfinished",
+    "Physical latency, memory and independent-peer timer qualification remain outstanding"
+  ],
+  "logs": {
+    "validation": {
+      "path": "output/verification/receive-idle-keepalive-validation.log",
+      "sha256": "f4e345ca18b4a7b275717c557bda721dc3208d1f2e97d3993e46de167318910a"
+    },
+    "firmware": {
+      "path": "output/verification/receive-idle-keepalive-firmware.log",
+      "sha256": "6fdc107b0d8fe0db024488e4ce5daff9bbf17de5f5b0ca3bdd575da3153a2eb9"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/network.rs": "12ead141b7d19f45108e7369fd9d49046d0c425bede23063f2c415e5035f4af8",
+    "crates/femto-microlink/src/plane.rs": "12a7df1cde80a7d2ed7096fb3848a48503496e95eb2af35e31d0f949d399378d",
+    "crates/femto-microlink/src/transport.rs": "b31da4c23652c1f632f0f1bc038240a5d89bc0342d6ad06f27ed717ce24863b3",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "58b65d5578d2a9a763f33729a599adc9cf2c0c1af774acc0eb2d3ee9f74d76ce"
+  }
+}

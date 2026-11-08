@@ -1,0 +1,45 @@
+{
+  "feature": "Shared line-spacing and margin controls with cancellable per-book reflow",
+  "ui_tests_passed": 34,
+  "workspace_clippy_passed": true,
+  "native_x11_smoke_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Spacing and margin presets cycle and wrap",
+    "Cancellation preserves old layout and pixels",
+    "Completed reflow preserves the source anchor",
+    "Per-book preferences persist",
+    "Button navigation skips presets that cannot fit the viewport",
+    "Native pointer selections save spacing and margin preferences and reset restores defaults"
+  ],
+  "limitations": [
+    "Preset values are not physically calibrated panel profiles",
+    "Device input, visual quality and heap usage remain unqualified"
+  ],
+  "logs": {
+    "ui": {
+      "path": "output/verification/spacing-controls-ui.log",
+      "sha256": "82ba68a0ecde600a31c683510798ef90ddb48f346135b3826328857f49bd5b6a"
+    },
+    "clippy": {
+      "path": "output/verification/spacing-controls-clippy.log",
+      "sha256": "8851b18ed7216e8b06e564b0762900c0744638b90613ba8834ce2fda503b66fd"
+    },
+    "native": {
+      "path": "output/verification/spacing-controls-native.log",
+      "sha256": "4253b5582bec9f5015b3be365339cb65e81347e4f7f58d9669f8586dad691945"
+    },
+    "firmware": {
+      "path": "output/verification/spacing-controls-firmware.log",
+      "sha256": "60a0ad3aa5916ee524ffaf4092cd7dcea921bc3e70c6b66691dc388e2c246fc5"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/ui.rs": "02ead0d319cdc514061a0cca26c19846275ad9924ed51d306a9a651d1b3014bb",
+    "crates/femto-reader/tests/ui.rs": "60cca9b7c7388fcbf8e26c46c32411ce8f73ecf80232920724a8d4717963493e",
+    "scripts/simulator-smoke.py": "1b5c9bd28e9bb2f88b1f061abecc8f17270a54fa969a9690288367bf01571e83",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "1b4b4f585d71a454da1af6e2df944e9288b86921d1ce8ea939434a9b4db4d7ae"
+  }
+}

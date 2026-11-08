@@ -1,0 +1,145 @@
+{
+  "status": "passed",
+  "run": "/home/oliver/projects/femto/output/repro-current-u9n39ql1",
+  "builds": [
+    {
+      "levels": 2,
+      "source": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/source-a",
+      "target": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/target-2-a",
+      "artifacts": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/artifacts-2-a",
+      "log": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/build-2-a.log",
+      "target_absent_before_build": true,
+      "started_at": 1794148293.7280645,
+      "exit_code": 0,
+      "finished_at": 1794148747.443599,
+      "log_sha256": "0b7088d03f3f8041cb608970eaf5b74e053dcc74c3eb8e4d5641462d8003c4e5"
+    },
+    {
+      "levels": 2,
+      "source": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/source-b",
+      "target": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/target-2-b",
+      "artifacts": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/artifacts-2-b",
+      "log": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/build-2-b.log",
+      "target_absent_before_build": true,
+      "started_at": 1794148747.4944904,
+      "exit_code": 0,
+      "finished_at": 1794149201.990245,
+      "log_sha256": "d3c4d568a41fc9b29a43d5ea7e02a342f899ead67186f52e83b05f3763494186"
+    },
+    {
+      "levels": 4,
+      "source": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/source-a",
+      "target": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/target-4-a",
+      "artifacts": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/artifacts-4-a",
+      "log": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/build-4-a.log",
+      "target_absent_before_build": true,
+      "started_at": 1794149202.0376246,
+      "exit_code": 0,
+      "finished_at": 1794149657.1018713,
+      "log_sha256": "e77ec7ea1c34da44b2bf0d528e7d473cb4fd4d2b07fceeb6e39f9d3664f459cc"
+    },
+    {
+      "levels": 4,
+      "source": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/source-b",
+      "target": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/target-4-b",
+      "artifacts": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/artifacts-4-b",
+      "log": "/home/oliver/projects/femto/output/repro-current-u9n39ql1/build-4-b.log",
+      "target_absent_before_build": true,
+      "started_at": 1794149657.148436,
+      "exit_code": 0,
+      "finished_at": 1794150112.8363955,
+      "log_sha256": "f8a8b25a3febdd4c83720da9ff781b89e6eac0b854c4367c58bd14b6415af48e"
+    }
+  ],
+  "comparisons": {
+    "2": {
+      "femto-picco.elf": {
+        "sha256": "b62b632f184a7faf5669c8a83ceeded150d91ba9ae6d2a361283c6d8b6925a14",
+        "equal": true
+      },
+      "femto-picco.bin": {
+        "sha256": "b86eeb67cec89511b6989343d98a1227129c21c67166342b4138b6362bb5cb54",
+        "equal": true
+      },
+      "femto-picco.json": {
+        "sha256": "a306a519c8e9183981eacc6df75745a39864b0528cecc48e01c88d95fb2dbd73",
+        "equal": true
+      },
+      "femto-picco.debug.elf": {
+        "sha256": "c3443fa323e797c80ce585920a1772d77e50a26a96f73cb9df541f620e16cd8a",
+        "equal": true
+      }
+    },
+    "4": {
+      "femto-picco.elf": {
+        "sha256": "6401182455f09bb460a6e92b6a76419a7edb37621aa81d63f84b17edf4a7c079",
+        "equal": true
+      },
+      "femto-picco.bin": {
+        "sha256": "7950b27879e9c81a516c38ff34f5969cee503ca385ea29e7496588bfcdc68e8c",
+        "equal": true
+      },
+      "femto-picco.json": {
+        "sha256": "ab08b184c5319fbf7c37f3e334cfe2af039641ccccf4b05497928bec362f448f",
+        "equal": true
+      },
+      "femto-picco.debug.elf": {
+        "sha256": "8626adf6fb0101f0f225bd07d7070e37b8d5a88532addc45265419417e67f4f4",
+        "equal": true
+      }
+    }
+  },
+  "inputs_sha256": "d09babff5f4847bf84100636de52a2b4a214cb2073ceeee516b379fd80c0405c",
+  "input_count": 575,
+  "inputs_unchanged": true,
+  "finished_at": 1794150113.0467007,
+  "feature": "Dictionary-enabled firmware reproducibility",
+  "command": "./scripts/check-picco-repro",
+  "platform": "x86_64-linux",
+  "input_path_set_unchanged": true,
+  "matches_incremental": {
+    "2": {
+      "femto-picco.elf": true,
+      "femto-picco.bin": true,
+      "femto-picco.json": true,
+      "femto-picco.debug.elf": true
+    },
+    "4": {
+      "femto-picco.elf": true,
+      "femto-picco.bin": true,
+      "femto-picco.json": true,
+      "femto-picco.debug.elf": true
+    }
+  },
+  "input_manifest": "output/repro-current-u9n39ql1/inputs.json",
+  "report_sha256": "cfb2e06c3e2275ec0bb95edca828db601c5445adc20843646baf35705e5ffd9e",
+  "firmware": {
+    "2": {
+      "image": "femto-picco.bin",
+      "sha256": "b86eeb67cec89511b6989343d98a1227129c21c67166342b4138b6362bb5cb54",
+      "bytes": 5230608,
+      "chip": "esp32s3",
+      "display_levels": 2,
+      "reference_app_offset": "0xE0000",
+      "reference_app_size": "0xE70000",
+      "hardware_verified": false,
+      "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+    },
+    "4": {
+      "image": "femto-picco.bin",
+      "sha256": "7950b27879e9c81a516c38ff34f5969cee503ca385ea29e7496588bfcdc68e8c",
+      "bytes": 5230704,
+      "chip": "esp32s3",
+      "display_levels": 4,
+      "reference_app_offset": "0xE0000",
+      "reference_app_size": "0xE70000",
+      "hardware_verified": false,
+      "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+    }
+  },
+  "limits": [
+    "Same host and pinned toolchain; no independent-host reproducibility qualification",
+    "No physical Picco boot, display, SD, memory or sleep qualification",
+    "Evidence describes the input snapshot at completion before documentation and later implementation changes"
+  ]
+}

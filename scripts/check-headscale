@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+if [[ "${FEMTO_HEADSCALE_SHELL:-}" != 1 ]]; then
+  exec nix-shell nix/headscale.nix --run './scripts/check-headscale'
+fi
+cargo build --locked -p femto-microlink --example headscale-probe
+cargo build --locked -p femto-microlink --example host-runtime-probe
+cargo build --locked -p femto --example headscale-services
+if [[ "${FEMTO_HEADSCALE_SIMULATOR_ONLY:-}" == 1 ]]; then
+  cargo build --locked -p femto --features desktop --bin femto-simulator
+fi
+if [[ "${FEMTO_HEADSCALE_CLI_ONLY:-}" == 1 ]]; then
+  cargo build --locked -p femto --bin femto
+fi
+python scripts/check-headscale.py

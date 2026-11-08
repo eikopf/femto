@@ -1,0 +1,37 @@
+{
+  "scope": "Native X11 progress-sync cancellation, stale completion and joined quit",
+  "command": "./scripts/check-simulator",
+  "exit_code": 0,
+  "checks": [
+    "Server holds a valid remote download response until cancellation through native menu",
+    "Cancelled response preserves local position/checkpoint and adds no upload",
+    "Subsequent sync reuses worker and commits the remote position",
+    "Navigation while response is held makes completion stale and preserves navigated position/prior checkpoint",
+    "Another request proves worker reuse after stale completion",
+    "Quit finishes within five-second test bound before the server releases the pending response",
+    "Reopened state retains navigated position/checkpoint",
+    "Existing native startup, reader, catalog, sync conflict/choice/reset smoke cases pass"
+  ],
+  "limitations": [
+    "Loopback HTTP fixture only; no native HTTPS or tailnet qualification",
+    "Five-second quit assertion does not bound synchronous platform DNS",
+    "Native persistence-failure and broader error workflows remain unqualified",
+    "No production Rust code changed, new firmware build or physical-device test in this check"
+  ],
+  "log": {
+    "path": "output/verification/simulator-sync-faults.log",
+    "sha256": "43761842af137a18fa121b7c4fc3236bb0d44dcc4f782dcd072b1d76b5b39d47"
+  },
+  "input_sha256": {
+    "scripts/simulator-smoke.py": "989decc0e4a72b1b5bf5c93045403e3d2c6c5447433932fd310271d9fbf21f69",
+    "crates/femto/src/simulator.rs": "051905586c38429609dae530c88b844202581b62bb148a993480cba88ce7a989",
+    "crates/femto/src/simulator_sync.rs": "fcc3d8c5540affbd3070712458c1bc32e6dd0509e5734cdf872aa01bc69e3f1a",
+    "crates/femto/src/host_http.rs": "bf0fb9ca0b7f3fd25705c298468c719289435603b316b9afd692f8b30778d492",
+    "firmware/picco/src/progress_service.rs": "83f4cb07a2a206cc2bddfd14cad5fe709e4813d3547403fd37d7dcce912fa20a",
+    "crates/femto-catalog/src/worker.rs": "337ba69653c26a61e66b0f3109bec08359510bbf46a5d761a3fa50b2d7653f3f",
+    "crates/femto-sync/src/reader.rs": "d54d3a6292b8d68324256af3ddaac59a2ab4d7ddfb9309e1bb93a53d5b9fb6e8",
+    "tests/fixtures/sample.epub": "14a86e9399bf469e5ca607e148e19b461a76338cf608e347b5e21d9e31af0a30",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "target/debug/femto-simulator": "606dda80b33993a06e22e908893aba9656d61054219915c70bd566c89d3cd90d"
+  }
+}

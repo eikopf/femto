@@ -1,0 +1,44 @@
+{
+  "feature": "Cancellable cooperative device orientation reflow",
+  "passed_controller_and_ui_tests": 43,
+  "workspace_clippy_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "One page indexed per poll for each of four orientations",
+    "Old geometry, orientation, position and pixels retained before completion and on cancellation",
+    "Completed geometry and pixels equal synchronous rotation",
+    "Stale same-dimension orientation rejects pending work",
+    "UI Back and Cancel, concurrent resize/rotation refusal, panel-change cancellation",
+    "Picco integration retains pause/full-refresh/resume and saves after presentation"
+  ],
+  "limitations": [
+    "Startup and synchronous controller rotation API still index synchronously",
+    "Paragraph analysis and final rasterization have no wall-clock deadline",
+    "Physical responsiveness, touch transition, display quality and peak memory remain unverified"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/cooperative-rotation-tests.log",
+      "sha256": "93068fd0e275b55247348676e85035fa9823606353e4c78b83013002807e84d5"
+    },
+    "clippy": {
+      "path": "output/verification/cooperative-rotation-clippy.log",
+      "sha256": "fab11a8f0c74de48ce6083106174c88c597c725b21113254dbecf82402fb005f"
+    },
+    "firmware": {
+      "path": "output/verification/cooperative-rotation-firmware.log",
+      "sha256": "39c5152a57859a3675377b123b8be9b78624145c07f2ac7dd3660b6a3ea9216c"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/controller.rs": "bc04b5b1333be83cdec9b09d710881e9c65ff465473f68ad11a90dfb83c9d2af",
+    "crates/femto-reader/src/ui.rs": "a508e01d2e1fbb9f3eb7142cb775931e8b6f6d557eebcccc80d611ef742a263a",
+    "crates/femto-reader/tests/controller.rs": "298ba54d894d2eac24a673a4fd9e0e423a0f3706590f7b57618b41229ab4a83c",
+    "crates/femto-reader/tests/ui.rs": "90720f6027838de99a728b31f7673f77f99818d7b6ec1d201b5b738ef6d74534",
+    "firmware/picco/src/main.rs": "9c514f61b1935945d222e3d7cfdbb32a61335aa5bf4f7e4a67faebe2df32b5fd",
+    "firmware/picco/src/panel.rs": "fe1e4ec7ecf18445c992c467efdaf2f78b68ef15bfc176b3073be475264bb3ce",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "877d3ac6c55b7a9591f698dc697afbb1fc42138667ea0464ecfbffdafa95548a"
+  }
+}

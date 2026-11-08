@@ -1,0 +1,30 @@
+{
+  "observed_at_utc": "2026-11-07T16:24:25.222855+00:00",
+  "command": "cargo run --locked -- opds-fetch URL --timeout 10",
+  "result": "success",
+  "transport": "HTTP/1 over certificate-verified Rustls HTTPS",
+  "catalogs": [
+    {
+      "url": "https://test.opds.io/2.0/navigation.json",
+      "title": "OPDS 2.0 Test Navigation",
+      "navigation_count": 5,
+      "publication_count": 0,
+      "group_count": 0,
+      "projected_output_sha256": "3500362b19fd640f425125b7ea2abd1f355d26a951178cec398aa307cacff7ff"
+    },
+    {
+      "url": "https://test.opds.io/2.0/home.json",
+      "title": "OPDS 2.0 Test Catalog",
+      "navigation_count": 8,
+      "publication_count": 2,
+      "group_count": 3,
+      "projected_output_sha256": "6721ba8ac4f6ec14c7185b7accb4c58b4d1f1221f75aac5e08850c1462d80b6f"
+    }
+  ],
+  "not_tested": [
+    "authentication",
+    "downloads",
+    "tailnet TCP",
+    "Picco hardware"
+  ]
+}

@@ -1,0 +1,1615 @@
+//! Reader transitions shared by terminal, desktop, and device frontends.
+
+use crate::{
+    Error, Result,
+    document::{Block, Chapter, Document, DocumentLink, Paragraph, Span, TextStyle},
+    layout::{
+        Fonts, LayoutConfig, Locator, Page, paginate, rasterize_display, rasterize_display_report,
+    },
+    pagination::{PageCache, PageIndexer},
+    state::{BookTypography, ReaderState},
+};
+use unicode_segmentation::UnicodeSegmentation;
+
+#[derive(Clone, Copy, Debug)]
+pub enum Action {
+    Next,
+    Previous,
+    Chapter(usize),
+    Contents(usize),
+    Link(usize),
+    Bookmark(usize),
+    Clipping(usize),
+    ToggleBookmark,
+    Back,
+    Reflow(LayoutConfig),
+    Rotate(crate::state::Rotation),
+    Tap { x: u32, y: u32 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Effect {
+    Unchanged,
+    Redraw,
+    Menu,
+}
+
+pub struct Reader {
+    pub document: Document,
+    pub state: ReaderState,
+    fonts: Fonts,
+    pagination: PageCache,
+    page_index: usize,
+    position: Locator,
+    history: Vec<Locator>,
+    links: Vec<DocumentLink>,
+}
+
+pub struct LinkPreview {
+    source_chapter: std::sync::Arc<Chapter>,
+    pagination: PageCache,
+    page_index: usize,
+    target: Locator,
+    origin: String,
+    origin_position: Locator,
+    origin_layout: LayoutConfig,
+    config: LayoutConfig,
+}
+
+impl LinkPreview {
+    pub fn page(&self) -> &Page {
+        self.pagination.page()
+    }
+
+    pub fn page_index(&self) -> usize {
+        self.page_index
+    }
+
+    pub fn page_count(&self) -> usize {
+        self.pagination.bounds().len()
+    }
+}
+
+pub struct PreviewOpening {
+    source_chapter: std::sync::Arc<Chapter>,
+    indexer: PageIndexer,
+    target: Locator,
+    origin: String,
+    origin_position: Locator,
+    origin_layout: LayoutConfig,
+    config: LayoutConfig,
+}
+
+impl PreviewOpening {
+    pub fn indexed_pages(&self) -> usize {
+        self.indexer.page_count()
+    }
+}
+
+pub struct Reflowing {
+    indexer: PageIndexer,
+    origin: String,
+    position: Locator,
+    previous: LayoutConfig,
+    next: LayoutConfig,
+    previous_rotation: crate::state::Rotation,
+    next_rotation: crate::state::Rotation,
+    previous_raster: crate::display::TextRaster,
+    next_raster: crate::display::TextRaster,
+}
+
+pub struct Navigating {
+    clipping: Option<crate::clipping::Clipping>,
+    indexer: PageIndexer,
+    target: Locator,
+    origin: String,
+    position: Locator,
+    layout: LayoutConfig,
+    rotation: crate::state::Rotation,
+    history: Vec<Locator>,
+    remember: bool,
+    back: bool,
+    links: Vec<DocumentLink>,
+}
+
+pub struct BookOpening {
+    phase: OpeningPhase,
+    origin: String,
+    origin_position: Locator,
+    config: LayoutConfig,
+}
+enum OpeningPhase {
+    Hashing {
+        path: std::path::PathBuf,
+        file: crate::document::FileHash,
+    },
+    Indexing(Box<IndexedOpening>),
+}
+struct IndexedOpening {
+    typography: BookTypography,
+    document: Document,
+    indexer: PageIndexer,
+    position: Locator,
+    links: Vec<DocumentLink>,
+}
+
+/// Startup owns its inputs; dropping it cancels without writing reader state.
+pub struct ReaderStartup {
+    phase: OpeningPhase,
+    fonts: Fonts,
+    state: ReaderState,
+}
+
+impl ReaderStartup {
+    pub fn from_file(
+        path: impl AsRef<std::path::Path>,
+        fonts: Fonts,
+        state: ReaderState,
+    ) -> Result<Self> {
+        state.layout.validate()?;
+        let path = path.as_ref().to_owned();
+        let file = crate::document::FileHash::new(std::fs::File::open(&path)?);
+        Ok(Self {
+            phase: OpeningPhase::Hashing { path, file },
+            fonts,
+            state,
+        })
+    }
+
+    pub fn from_document(document: Document, fonts: Fonts, state: ReaderState) -> Result<Self> {
+        Ok(Self {
+            phase: OpeningPhase::Indexing(Box::new(prepare_opening(document, &state)?)),
+            fonts,
+            state,
+        })
+    }
+
+    /// Replaces the pending book only after the new file handle opens.
+    pub fn open_file(&mut self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        let path = path.as_ref().to_owned();
+        let file = crate::document::FileHash::new(std::fs::File::open(&path)?);
+        self.phase = OpeningPhase::Hashing { path, file };
+        Ok(())
+    }
+
+    pub fn cancel(self) -> (Fonts, ReaderState) {
+        (self.fonts, self.state)
+    }
+
+    pub fn loading_frame(&self, levels: u16) -> Result<Vec<u8>> {
+        let config = LayoutConfig {
+            width: self.state.layout.width,
+            height: self.state.layout.height,
+            ..LayoutConfig::default()
+        };
+        let text = format!(
+            "Opening book\n\n{} pages indexed\n\nPress a button or tap to cancel.",
+            self.indexed_pages()
+        );
+        let mut document = Document::from_text("Opening book", &text)?;
+        let chapter = document.chapter(0)?;
+        let pages = paginate(&chapter, &self.fonts, config)?;
+        rasterize_display(
+            pages
+                .pages
+                .first()
+                .ok_or(Error::Layout("missing loading page"))?,
+            &self.fonts,
+            config,
+            self.state.text_raster,
+            levels,
+            |_| Err(Error::Document("loading page has no resources".into())),
+        )
+    }
+
+    pub fn indexed_pages(&self) -> usize {
+        match &self.phase {
+            OpeningPhase::Hashing { .. } => 0,
+            OpeningPhase::Indexing(job) => job.indexer.page_count(),
+        }
+    }
+
+    /// Hashes one file chunk or indexes one page. Metadata and chapter parsing
+    /// occur synchronously when hashing completes.
+    pub fn step(&mut self) -> Result<bool> {
+        match &mut self.phase {
+            OpeningPhase::Hashing { path, file } => {
+                if let Some(file) = file.step()? {
+                    let document = Document::from_hashed(path, file)?;
+                    self.phase =
+                        OpeningPhase::Indexing(Box::new(prepare_opening(document, &self.state)?));
+                }
+                Ok(false)
+            }
+            OpeningPhase::Indexing(job) => job.indexer.step(&self.fonts),
+        }
+    }
+
+    pub fn finish(mut self) -> Result<Reader> {
+        let OpeningPhase::Indexing(job) = self.phase else {
+            return Err(Error::Document("startup hashing not completed".into()));
+        };
+        let IndexedOpening {
+            typography,
+            document,
+            indexer,
+            position,
+            links,
+        } = *job;
+        let pagination = indexer.finish()?;
+        let position = normalize_position(&pagination, position);
+        let page_index = pagination.page_for(position);
+        typography.apply(&mut self.state);
+        Ok(Reader {
+            document,
+            fonts: self.fonts,
+            state: self.state,
+            pagination,
+            page_index,
+            position,
+            history: Vec::new(),
+            links,
+        })
+    }
+}
+
+fn prepare_opening(mut document: Document, state: &ReaderState) -> Result<IndexedOpening> {
+    if document.metadata.chapters.is_empty() {
+        return Err(Error::Document("book has no chapters".into()));
+    }
+    let mut position = state
+        .books
+        .get(&document.metadata.id)
+        .map(|book| book.position)
+        .unwrap_or_default();
+    if position.chapter >= document.document_count() {
+        position = Locator::default();
+    }
+    let typography = state.typography_for(&document.metadata.id);
+    typography.text_raster.validate()?;
+    let config = typography.layout(state.layout);
+    let chapter = document.chapter(position.chapter)?;
+    let links = chapter.links.clone();
+    Ok(IndexedOpening {
+        typography,
+        document,
+        position,
+        links,
+        indexer: PageIndexer::new(chapter, config, position)?,
+    })
+}
+
+impl BookOpening {
+    pub fn indexed_pages(&self) -> usize {
+        match &self.phase {
+            OpeningPhase::Hashing { .. } => 0,
+            OpeningPhase::Indexing(opening) => opening.indexer.page_count(),
+        }
+    }
+}
+
+impl Reader {
+    pub fn new(mut document: Document, fonts: Fonts, mut state: ReaderState) -> Result<Self> {
+        if document.metadata.chapters.is_empty() {
+            return Err(Error::Document("book has no chapters".into()));
+        }
+        let mut position = state
+            .books
+            .get(&document.metadata.id)
+            .map(|book| book.position)
+            .unwrap_or_default();
+        if position.chapter >= document.document_count() {
+            position = Locator::default();
+        }
+        state
+            .typography_for(&document.metadata.id)
+            .apply(&mut state);
+        state.text_raster.validate()?;
+        let chapter = document.chapter(position.chapter)?;
+        let links = chapter.links.clone();
+        let pagination = PageCache::new(chapter, &fonts, state.layout, position)?;
+        position = normalize_position(&pagination, position);
+        let page_index = pagination.page_for(position);
+        Ok(Self {
+            document,
+            fonts,
+            state,
+            pagination,
+            page_index,
+            position,
+            history: Vec::new(),
+            links,
+        })
+    }
+
+    pub fn page(&self) -> &Page {
+        self.pagination.page()
+    }
+
+    pub fn begin_reflow(&self, next: LayoutConfig) -> Result<Reflowing> {
+        Ok(Reflowing {
+            indexer: PageIndexer::from_shared(self.pagination.chapter(), next, self.position)?,
+            origin: self.document.metadata.id.clone(),
+            position: self.position,
+            previous: self.state.layout,
+            next,
+            previous_rotation: self.state.rotation,
+            next_rotation: self.state.rotation,
+            previous_raster: self.state.text_raster,
+            next_raster: self.state.text_raster,
+        })
+    }
+    /// Prepares layout and raster changes as one cancellable transition.
+    pub fn begin_typography(&self, next: BookTypography) -> Result<Reflowing> {
+        next.text_raster.validate()?;
+        let mut job = self.begin_reflow(next.layout(self.state.layout))?;
+        job.next_raster = next.text_raster;
+        Ok(job)
+    }
+
+    /// Prepares cross-chapter navigation. Other actions use normal dispatch.
+    pub fn begin_navigation(&mut self, action: Action) -> Result<Option<Navigating>> {
+        let mut clipping = None;
+        let chapter = self.position.chapter;
+        let (target, remember, back) = match action {
+            Action::Link(index) => (self.link_target(index)?, true, false),
+            Action::Clipping(index) => {
+                let record = self.verified_clipping(index)?;
+                let target = record.range.start;
+                clipping = Some(record);
+                (target, true, false)
+            }
+            Action::Chapter(chapter) => (
+                Locator {
+                    chapter,
+                    ..Default::default()
+                },
+                true,
+                false,
+            ),
+            Action::Contents(index) => {
+                let entry = self
+                    .document
+                    .metadata
+                    .contents
+                    .get(index)
+                    .cloned()
+                    .ok_or_else(|| Error::Document("contents entry out of range".into()))?;
+                (
+                    self.document.resolve_link(&entry.base, &entry.href)?,
+                    true,
+                    false,
+                )
+            }
+            Action::Bookmark(index) => {
+                let target = self
+                    .state
+                    .books
+                    .get(&self.document.metadata.id)
+                    .and_then(|book| book.bookmarks.get(index))
+                    .ok_or_else(|| Error::Document("bookmark out of range".into()))?
+                    .location;
+                (target, true, false)
+            }
+            Action::Back => match self.history.last() {
+                Some(target) => (*target, false, true),
+                None => return Ok(None),
+            },
+            Action::Next
+                if self.page_index + 1 == self.page_count()
+                    && chapter + 1 < self.document.metadata.chapters.len() =>
+            {
+                (
+                    Locator {
+                        chapter: chapter + 1,
+                        ..Default::default()
+                    },
+                    false,
+                    false,
+                )
+            }
+            Action::Previous
+                if self.page_index == 0
+                    && chapter > 0
+                    && chapter < self.document.metadata.chapters.len() =>
+            {
+                (
+                    Locator {
+                        chapter: chapter - 1,
+                        block: usize::MAX,
+                        byte: usize::MAX,
+                    },
+                    false,
+                    false,
+                )
+            }
+            _ => return Ok(None),
+        };
+        if target.chapter == chapter {
+            return Ok(None);
+        }
+        let destination = self.document.chapter(target.chapter)?;
+        let mut job =
+            self.navigation_job(target, remember, back, std::sync::Arc::new(destination))?;
+        job.clipping = clipping;
+        Ok(Some(job))
+    }
+    fn navigation_job(
+        &self,
+        target: Locator,
+        remember: bool,
+        back: bool,
+        chapter: std::sync::Arc<Chapter>,
+    ) -> Result<Navigating> {
+        let links = chapter.links.clone();
+        Ok(Navigating {
+            clipping: None,
+            indexer: PageIndexer::from_shared(chapter, self.state.layout, target)?,
+            target,
+            origin: self.document.metadata.id.clone(),
+            position: self.position,
+            layout: self.state.layout,
+            rotation: self.state.rotation,
+            history: self.history.clone(),
+            remember,
+            back,
+            links,
+        })
+    }
+    fn check_navigation(&self, job: &Navigating) -> Result<()> {
+        if let Some(clipping) = &job.clipping
+            && !self
+                .state
+                .books
+                .get(&clipping.book_id)
+                .is_some_and(|book| book.clippings.contains(clipping))
+        {
+            return Err(Error::Document("clipping changed during navigation".into()));
+        }
+        if job.origin != self.document.metadata.id
+            || job.position != self.position
+            || job.layout != self.state.layout
+            || job.rotation != self.state.rotation
+            || job.history != self.history
+        {
+            return Err(Error::Document("reader changed during navigation".into()));
+        }
+        Ok(())
+    }
+    pub fn step_navigation(&self, job: &mut Navigating) -> Result<bool> {
+        self.check_navigation(job)?;
+        job.indexer.step(&self.fonts)
+    }
+    pub fn finish_navigation(&mut self, job: Navigating) -> Result<Effect> {
+        self.check_navigation(&job)?;
+        let pagination = job.indexer.finish()?;
+        let position = normalize_position(&pagination, job.target);
+        rasterize_display(
+            pagination.page(),
+            &self.fonts,
+            job.layout,
+            self.state.text_raster,
+            256,
+            |source| self.document.resource(source),
+        )?;
+        if job.remember {
+            if self.history.len() == 64 {
+                self.history.remove(0);
+            }
+            self.history.push(self.position);
+        }
+        if job.back {
+            self.history.pop();
+        }
+        self.page_index = pagination.page_for(position);
+        self.pagination = pagination;
+        self.position = position;
+        self.links = job.links;
+        Ok(Effect::Redraw)
+    }
+    pub fn begin_rotation(&self, rotation: crate::state::Rotation) -> Result<Reflowing> {
+        let mut next = self.state.layout;
+        if rotation.landscape() != self.state.rotation.landscape() {
+            core::mem::swap(&mut next.width, &mut next.height);
+        }
+        let mut job = self.begin_reflow(next)?;
+        job.next_rotation = rotation;
+        Ok(job)
+    }
+    fn check_reflow(&self, job: &Reflowing) -> Result<()> {
+        if job.origin != self.document.metadata.id
+            || job.position != self.position
+            || job.previous != self.state.layout
+            || job.previous_rotation != self.state.rotation
+            || job.previous_raster != self.state.text_raster
+        {
+            return Err(Error::Document("reader changed during reflow".into()));
+        }
+        Ok(())
+    }
+    pub fn step_reflow(&self, job: &mut Reflowing) -> Result<bool> {
+        self.check_reflow(job)?;
+        job.indexer.step(&self.fonts)
+    }
+    pub fn finish_reflow(&mut self, job: Reflowing) -> Result<Effect> {
+        self.check_reflow(&job)?;
+        let pagination = job.indexer.finish()?;
+        let position = normalize_position(&pagination, job.position);
+        rasterize_display(
+            pagination.page(),
+            &self.fonts,
+            job.next,
+            job.next_raster,
+            256,
+            |source| self.document.resource(source),
+        )?;
+        self.page_index = pagination.page_for(position);
+        self.position = position;
+        self.pagination = pagination;
+        self.state.layout = job.next;
+        self.state.text_raster = job.next_raster;
+        self.state.rotation = job.next_rotation;
+        Ok(Effect::Redraw)
+    }
+
+    /// Opens the file without hashing or parsing it. Dropping the job cancels.
+    pub fn begin_open_file(&self, path: impl AsRef<std::path::Path>) -> Result<BookOpening> {
+        let path = path.as_ref().to_owned();
+        let file = crate::document::FileHash::new(std::fs::File::open(&path)?);
+        Ok(BookOpening {
+            phase: OpeningPhase::Hashing { path, file },
+            origin: self.document.metadata.id.clone(),
+            origin_position: self.position,
+            config: self.state.layout,
+        })
+    }
+    /// Parses the destination before starting cooperative page indexing.
+    pub fn begin_open(&self, document: Document) -> Result<BookOpening> {
+        Ok(BookOpening {
+            phase: OpeningPhase::Indexing(Box::new(prepare_opening(document, &self.state)?)),
+            origin: self.document.metadata.id.clone(),
+            origin_position: self.position,
+            config: self.state.layout,
+        })
+    }
+
+    fn check_opening(&self, opening: &BookOpening) -> Result<()> {
+        if opening.origin != self.document.metadata.id
+            || opening.origin_position != self.position
+            || opening.config != self.state.layout
+        {
+            return Err(Error::Document("reader changed while opening book".into()));
+        }
+        if let OpeningPhase::Indexing(job) = &opening.phase
+            && job.typography != self.state.typography_for(&job.document.metadata.id)
+        {
+            return Err(Error::Document(
+                "book typography changed while opening".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn step_open(&self, opening: &mut BookOpening) -> Result<bool> {
+        self.check_opening(opening)?;
+        match &mut opening.phase {
+            OpeningPhase::Hashing { path, file } => {
+                if let Some(file) = file.step()? {
+                    let document = Document::from_hashed(path, file)?;
+                    opening.phase = self.begin_open(document)?.phase;
+                }
+                Ok(false)
+            }
+            OpeningPhase::Indexing(job) => job.indexer.step(&self.fonts),
+        }
+    }
+
+    /// Renders and validates the destination before replacing visible state.
+    pub fn finish_open(&mut self, opening: BookOpening) -> Result<()> {
+        self.check_opening(&opening)?;
+        let OpeningPhase::Indexing(job) = opening.phase else {
+            return Err(Error::Document("book hashing not completed".into()));
+        };
+        let IndexedOpening {
+            typography,
+            mut document,
+            indexer,
+            position,
+            links,
+        } = *job;
+        let pagination = indexer.finish()?;
+        let position = normalize_position(&pagination, position);
+        let page_index = pagination.page_for(position);
+        rasterize_display(
+            pagination.page(),
+            &self.fonts,
+            typography.layout(self.state.layout),
+            typography.text_raster,
+            256,
+            |source| document.resource(source),
+        )?;
+        let timestamp = self
+            .state
+            .books
+            .get(&self.document.metadata.id)
+            .map_or(0, |book| book.last_opened);
+        self.record_position(timestamp);
+        typography.apply(&mut self.state);
+        self.document = document;
+        self.pagination = pagination;
+        self.page_index = page_index;
+        self.position = position;
+        self.links = links;
+        self.history.clear();
+        Ok(())
+    }
+
+    /// Synchronous convenience wrapper for callers without an event loop.
+    pub fn open_document(&mut self, document: Document) -> Result<()> {
+        let mut opening = self.begin_open(document)?;
+        while !self.step_open(&mut opening)? {}
+        self.finish_open(opening)
+    }
+    /// Source anchor retained across reflow until an explicit navigation action.
+    pub fn position(&self) -> Locator {
+        self.position
+    }
+
+    /// Captures source text from the first through the last visible text line.
+    /// Images and generated markers contribute no text. Reading position is unchanged.
+    pub fn clip_page_text(&mut self, now: u64) -> Result<bool> {
+        let page = self.page();
+        let first = page
+            .lines
+            .first()
+            .ok_or_else(|| Error::Document("page has no text to clip".into()))?;
+        let last = page.lines.last().expect("first text line exists");
+        let range = first.start..last.end;
+        let clipping = crate::clipping::Clipping::capture(&mut self.document, range, now)?;
+        self.state.add_clipping(clipping)
+    }
+
+    pub fn toggle_clipping_highlight(&mut self, index: usize) -> Result<()> {
+        let clipping = self
+            .state
+            .books
+            .get(&self.document.metadata.id)
+            .and_then(|book| book.clippings.get(index))
+            .cloned()
+            .ok_or_else(|| Error::Document("clipping out of range".into()))?;
+        if !clipping.highlighted {
+            clipping.validate_document(&mut self.document)?;
+        }
+        self.state
+            .set_clipping_highlight(&clipping, !clipping.highlighted)
+    }
+
+    fn verified_clipping(&mut self, index: usize) -> Result<crate::clipping::Clipping> {
+        let clipping = self
+            .state
+            .books
+            .get(&self.document.metadata.id)
+            .and_then(|book| book.clippings.get(index))
+            .cloned()
+            .ok_or_else(|| Error::Document("clipping out of range".into()))?;
+        clipping.validate_document(&mut self.document)?;
+        Ok(clipping)
+    }
+
+    pub fn progress_snapshot(&self) -> crate::progress::Progress {
+        crate::progress::Progress {
+            version: 1,
+            book_id: self.document.metadata.id.clone(),
+            position: self.position,
+            recorded_at: self
+                .state
+                .books
+                .get(&self.document.metadata.id)
+                .map_or(0, |book| book.last_opened),
+        }
+    }
+
+    /// Persists a prepared destination and checkpoint before changing visible state.
+    /// A persistence error can have an unknown durable outcome; the owner must
+    /// follow its store's recovery rules before another write.
+    pub fn commit_progress(
+        &mut self,
+        expected: &crate::progress::Progress,
+        checkpoint: crate::progress::SyncCheckpoint,
+        now: u64,
+        persist: impl FnOnce(&ReaderState) -> Result<()>,
+    ) -> Result<Effect> {
+        if &self.progress_snapshot() != expected {
+            return Err(Error::Document("local progress changed during sync".into()));
+        }
+        checkpoint.validate(&self.document.metadata.id)?;
+        checkpoint.baseline.validate_document(&mut self.document)?;
+        let target = checkpoint.baseline.position;
+        let chapter = self.document.chapter(target.chapter)?;
+        let links = chapter.links.clone();
+        let pagination = PageCache::new(chapter, &self.fonts, self.state.layout, target)?;
+        let page_index = pagination.page_for(target);
+        rasterize_display(
+            pagination.page(),
+            &self.fonts,
+            self.state.layout,
+            self.state.text_raster,
+            256,
+            |source| self.document.resource(source),
+        )?;
+        let mut state = self.state.clone();
+        state.set_position(&self.document.metadata.id, target, now);
+        state
+            .books
+            .get_mut(&self.document.metadata.id)
+            .unwrap()
+            .sync = Some(checkpoint);
+        persist(&state)?;
+        if target != self.position {
+            if self.history.len() == 64 {
+                self.history.remove(0);
+            }
+            self.history.push(self.position);
+        }
+        self.state = state;
+        self.pagination = pagination;
+        self.page_index = page_index;
+        self.position = target;
+        self.links = links;
+        Ok(Effect::Redraw)
+    }
+    pub fn page_index(&self) -> usize {
+        self.page_index
+    }
+    pub fn section_label(&self) -> String {
+        let chapter = self.position.chapter;
+        if chapter < self.document.metadata.chapters.len() {
+            format!(
+                "chapter {}/{}",
+                chapter + 1,
+                self.document.metadata.chapters.len()
+            )
+        } else {
+            "supplemental document".into()
+        }
+    }
+    pub fn page_count(&self) -> usize {
+        self.pagination.pages.len()
+    }
+    /// Approximate book progress through the visible page; excludes supplements.
+    pub fn book_progress_percent(&self) -> Option<u8> {
+        self.document.estimated_progress(
+            self.position.chapter,
+            self.page_index + 1,
+            self.page_count(),
+        )
+    }
+    pub fn warnings(&self) -> &[String] {
+        &self.pagination.warnings
+    }
+
+    pub fn page_links(&self) -> Vec<&DocumentLink> {
+        let page = self.page();
+        self.links
+            .iter()
+            .filter(|link| link.start < page.end && link.end > page.start)
+            .collect()
+    }
+
+    /// Returns a Unicode word's source range under a logical display coordinate.
+    /// Hits use positive glyph advances and line ink height. Ligatures select the
+    /// complete source word; this does not provide caret positions within a glyph.
+    pub fn word_at(&self, x: u32, y: u32) -> Option<std::ops::Range<Locator>> {
+        if x >= self.state.layout.width || y >= self.state.layout.height {
+            return None;
+        }
+        let (x, y) = (x as f32, y as f32);
+        let chapter = self.pagination.chapter();
+        for line in &self.page().lines {
+            if y < line.baseline - line.ascent || y >= line.baseline + line.descent {
+                continue;
+            }
+            let Some(Block::Text(paragraph)) = chapter.blocks.get(line.start.block) else {
+                continue;
+            };
+            for glyph in &line.glyphs {
+                if glyph.advance <= 0.0 || x < glyph.x || x >= glyph.x + glyph.advance {
+                    continue;
+                }
+                if let Some((start, word)) =
+                    paragraph.text.unicode_word_indices().find(|(start, word)| {
+                        *start <= glyph.cluster && glyph.cluster < start + word.len()
+                    })
+                {
+                    return Some(
+                        Locator {
+                            byte: start,
+                            ..line.start
+                        }..Locator {
+                            byte: start + word.len(),
+                            ..line.start
+                        },
+                    );
+                }
+            }
+        }
+        None
+    }
+
+    /// Source-ordered words represented by positive-advance glyphs on this page.
+    pub(crate) fn visible_words(&self) -> Result<Vec<(String, Locator, Locator)>> {
+        let chapter = self.pagination.chapter();
+        let mut words = Vec::new();
+        for (block, source) in chapter.blocks.iter().enumerate() {
+            let Block::Text(paragraph) = source else {
+                continue;
+            };
+            let mut clusters: Vec<_> = self
+                .page()
+                .lines
+                .iter()
+                .filter(|line| line.start.block == block)
+                .flat_map(|line| line.glyphs.iter())
+                .filter(|glyph| glyph.advance > 0.0)
+                .map(|glyph| glyph.cluster)
+                .collect();
+            if clusters.is_empty() {
+                continue;
+            }
+            clusters.sort_unstable();
+            clusters.dedup();
+            for (byte, word) in paragraph.text.unicode_word_indices() {
+                let end = byte + word.len();
+                let index = clusters.partition_point(|cluster| *cluster < byte);
+                if clusters.get(index).is_none_or(|cluster| *cluster >= end) {
+                    continue;
+                }
+                if words.len() == 1024 {
+                    return Err(Error::Limit("page word choices"));
+                }
+                let start = Locator {
+                    chapter: chapter.index,
+                    block,
+                    byte,
+                };
+                words.push((
+                    format!(
+                        "{}: {}",
+                        words.len() + 1,
+                        word.chars().take(32).collect::<String>()
+                    ),
+                    start,
+                    Locator { byte: end, ..start },
+                ));
+            }
+        }
+        Ok(words)
+    }
+
+    /// Returns the page-link index under a logical display coordinate.
+    pub fn link_at(&self, x: u32, y: u32) -> Option<usize> {
+        if x >= self.state.layout.width || y >= self.state.layout.height {
+            return None;
+        }
+        let (x, y) = (x as f32, y as f32);
+        let links = self.page_links();
+        if links.is_empty() {
+            return None;
+        }
+        for image in &self.page().images {
+            if x >= image.x as f32
+                && x < image.x as f32 + image.size.width as f32
+                && y >= image.y as f32
+                && y < image.y as f32 + image.size.height as f32
+                && let Some(index) = links
+                    .iter()
+                    .position(|link| link.start <= image.location && link.end > image.location)
+            {
+                return Some(index);
+            }
+        }
+        for line in &self.page().lines {
+            if y < line.baseline - line.ascent || y >= line.baseline + line.descent {
+                continue;
+            }
+            for glyph in &line.glyphs {
+                if glyph.advance <= 0.0 || x < glyph.x || x >= glyph.x + glyph.advance {
+                    continue;
+                }
+                let start = Locator {
+                    byte: glyph.cluster,
+                    ..line.start
+                };
+                let end = Locator {
+                    byte: line
+                        .glyphs
+                        .iter()
+                        .map(|g| g.cluster)
+                        .filter(|byte| *byte > glyph.cluster)
+                        .min()
+                        .unwrap_or(line.end.byte),
+                    ..line.start
+                };
+                if let Some(index) = links
+                    .iter()
+                    .position(|link| link.start < end && link.end > start)
+                {
+                    return Some(index);
+                }
+            }
+        }
+        None
+    }
+
+    fn link_target(&mut self, index: usize) -> Result<Locator> {
+        let href = self
+            .page_links()
+            .get(index)
+            .map(|link| link.href.clone())
+            .ok_or_else(|| Error::Document("page link out of range".into()))?;
+        let base = self
+            .document
+            .document_href(self.page().start.chapter)
+            .ok_or_else(|| Error::Document("document out of range".into()))?
+            .clone();
+        self.document.resolve_link(&base, &href)
+    }
+
+    pub fn begin_preview(&mut self, index: usize, config: LayoutConfig) -> Result<PreviewOpening> {
+        let target = self.link_target(index)?;
+        let chapter = std::sync::Arc::new(self.document.chapter(target.chapter)?);
+        Ok(PreviewOpening {
+            indexer: PageIndexer::for_preview(std::sync::Arc::clone(&chapter), config, target)?,
+            source_chapter: chapter,
+            target,
+            config,
+            origin: self.document.metadata.id.clone(),
+            origin_position: self.position,
+            origin_layout: self.state.layout,
+        })
+    }
+
+    fn validate_preview_opening(&self, job: &PreviewOpening) -> Result<()> {
+        if job.origin != self.document.metadata.id
+            || job.origin_position != self.position
+            || job.origin_layout != self.state.layout
+        {
+            return Err(Error::Document("link preview opening is stale".into()));
+        }
+        Ok(())
+    }
+
+    pub fn step_preview(&self, job: &mut PreviewOpening) -> Result<bool> {
+        self.validate_preview_opening(job)?;
+        job.indexer.step(&self.fonts)
+    }
+
+    pub fn finish_preview(&self, job: PreviewOpening) -> Result<LinkPreview> {
+        self.validate_preview_opening(&job)?;
+        let pagination = job.indexer.finish()?;
+        let page_index = pagination.page_for(job.target);
+        Ok(LinkPreview {
+            source_chapter: job.source_chapter,
+            pagination,
+            page_index,
+            target: job.target,
+            config: job.config,
+            origin: job.origin,
+            origin_position: job.origin_position,
+            origin_layout: job.origin_layout,
+        })
+    }
+
+    pub fn preview_link(&mut self, index: usize, config: LayoutConfig) -> Result<LinkPreview> {
+        let mut job = self.begin_preview(index, config)?;
+        while !self.step_preview(&mut job)? {}
+        self.finish_preview(job)
+    }
+
+    pub(crate) fn validate_preview(&self, preview: &LinkPreview) -> Result<()> {
+        if preview.origin != self.document.metadata.id
+            || preview.origin_position != self.position
+            || preview.origin_layout != self.state.layout
+        {
+            return Err(Error::Document("link preview is stale".into()));
+        }
+        Ok(())
+    }
+
+    pub fn turn_preview(&self, preview: &mut LinkPreview, next: bool) -> Result<Effect> {
+        self.validate_preview(preview)?;
+        let index = if next {
+            (preview.page_index + 1).min(preview.page_count().saturating_sub(1))
+        } else {
+            preview.page_index.saturating_sub(1)
+        };
+        if index == preview.page_index {
+            return Ok(Effect::Unchanged);
+        }
+        preview.pagination.select(index, &self.fonts)?;
+        preview.page_index = index;
+        preview.target = preview.page().start;
+        Ok(Effect::Redraw)
+    }
+
+    pub fn render_preview(&mut self, preview: &LinkPreview, levels: u16) -> Result<Vec<u8>> {
+        self.validate_preview(preview)?;
+        rasterize_display(
+            preview.page(),
+            &self.fonts,
+            preview.config,
+            self.state.text_raster,
+            levels,
+            |source| self.document.resource(source),
+        )
+    }
+
+    pub fn follow_preview(&mut self, preview: &LinkPreview) -> Result<Effect> {
+        self.validate_preview(preview)?;
+        self.move_to(preview.target, true)
+    }
+    pub fn begin_follow_preview(&self, preview: &LinkPreview) -> Result<Option<Navigating>> {
+        self.validate_preview(preview)?;
+        if preview.target.chapter == self.position.chapter {
+            return Ok(None);
+        }
+        self.navigation_job(
+            preview.target,
+            true,
+            false,
+            std::sync::Arc::clone(&preview.source_chapter),
+        )
+        .map(Some)
+    }
+
+    pub fn render(&mut self, levels: u16) -> Result<Vec<u8>> {
+        self.render_with_selection(None, levels)
+    }
+
+    pub(crate) fn render_selection(
+        &mut self,
+        range: &std::ops::Range<Locator>,
+        levels: u16,
+    ) -> Result<Vec<u8>> {
+        self.render_with_selection(Some(range), levels)
+    }
+
+    fn render_with_selection(
+        &mut self,
+        pending: Option<&std::ops::Range<Locator>>,
+        levels: u16,
+    ) -> Result<Vec<u8>> {
+        let mut rendered = rasterize_display_report(
+            self.pagination.page(),
+            &self.fonts,
+            self.state.layout,
+            self.state.text_raster,
+            levels,
+            |source| self.document.resource(source),
+        )?;
+        for warning in rendered.warnings {
+            if self.pagination.warnings.len() < 64 && !self.pagination.warnings.contains(&warning) {
+                self.pagination.warnings.push(warning);
+            }
+        }
+        self.draw_link_underlines(&mut rendered.pixels);
+        let mut ranges: Vec<_> = pending.into_iter().cloned().collect();
+        let mut omitted = false;
+        let chapter = self.pagination.chapter();
+        if let Some(book) = self.state.books.get(&self.document.metadata.id) {
+            for clipping in &book.clippings {
+                if !clipping.highlighted
+                    || !self.pagination.page().lines.iter().any(|line| {
+                        clipping.range.start < line.end && clipping.range.end > line.start
+                    })
+                {
+                    continue;
+                }
+                let validation = if clipping.range.start.chapter == chapter.index
+                    && clipping.range.end.chapter == chapter.index
+                {
+                    clipping.validate_chapter(&self.document.metadata.id, &chapter)
+                } else {
+                    clipping.validate_document(&mut self.document)
+                };
+                if validation.is_ok() {
+                    ranges.push(clipping.range.clone());
+                } else {
+                    omitted = true;
+                }
+            }
+        }
+        let warning = "Saved highlight omitted: source verification failed";
+        if omitted
+            && self.pagination.warnings.len() < 64
+            && !self.pagination.warnings.iter().any(|w| w == warning)
+        {
+            self.pagination.warnings.push(warning.into());
+        }
+        if !ranges.is_empty() {
+            self.draw_selection_ranges(&mut rendered.pixels, &ranges);
+        }
+        Ok(rendered.pixels)
+    }
+
+    fn draw_selection_ranges(&self, pixels: &mut [u8], ranges: &[std::ops::Range<Locator>]) {
+        let config = self.state.layout;
+        let mut coverage = vec![0u8; pixels.len().div_ceil(8)];
+        for line in &self.page().lines {
+            let mut clusters: Vec<_> = line.glyphs.iter().map(|g| g.cluster).collect();
+            clusters.push(line.end.byte);
+            clusters.sort_unstable();
+            clusters.dedup();
+            for glyph in &line.glyphs {
+                if glyph.advance <= 0.0 {
+                    continue;
+                }
+                let start = Locator {
+                    byte: glyph.cluster,
+                    ..line.start
+                };
+                let next = clusters.partition_point(|byte| *byte <= glyph.cluster);
+                let end = Locator {
+                    byte: clusters.get(next).copied().unwrap_or(line.end.byte),
+                    ..line.start
+                };
+                if !ranges
+                    .iter()
+                    .any(|range| range.start < end && range.end > start)
+                {
+                    continue;
+                }
+                let left = (glyph.x.floor().max(0.0) as u32).min(config.width);
+                let right = ((glyph.x + glyph.advance).ceil().max(0.0) as u32).min(config.width);
+                let top =
+                    ((line.baseline - line.ascent).floor().max(0.0) as u32).min(config.height);
+                let bottom =
+                    ((line.baseline + line.descent).ceil().max(0.0) as u32).min(config.height);
+                if left < right && top < bottom {
+                    for y in top..bottom {
+                        let row = y as usize * config.width as usize;
+                        mark_selection_span(
+                            &mut coverage,
+                            row + left as usize,
+                            row + right as usize,
+                        );
+                    }
+                }
+            }
+        }
+        for (index, pixel) in pixels.iter_mut().enumerate() {
+            if coverage[index / 8] & (1 << (index % 8)) != 0 {
+                *pixel = 255 - *pixel;
+            }
+        }
+    }
+
+    fn draw_link_underlines(&self, pixels: &mut [u8]) {
+        let links = self.page_links();
+        if links.is_empty() {
+            return;
+        }
+        let config = self.state.layout;
+        for line in &self.page().lines {
+            let mut clusters: Vec<_> = line.glyphs.iter().map(|glyph| glyph.cluster).collect();
+            clusters.push(line.end.byte);
+            clusters.sort_unstable();
+            clusters.dedup();
+            for glyph in &line.glyphs {
+                if glyph.advance <= 0.0 {
+                    continue;
+                }
+                let start = Locator {
+                    byte: glyph.cluster,
+                    ..line.start
+                };
+                let next = clusters.partition_point(|byte| *byte <= glyph.cluster);
+                let end = Locator {
+                    byte: clusters.get(next).copied().unwrap_or(line.end.byte),
+                    ..line.start
+                };
+                if !links
+                    .iter()
+                    .any(|link| link.start < end && link.end > start)
+                {
+                    continue;
+                }
+                let left = glyph.x.floor().max(0.0) as u32;
+                let right = (glyph.x + glyph.advance).ceil().max(0.0) as u32;
+                let top = (glyph.y + glyph.size * 0.12).round().max(0.0) as u32;
+                let thickness = (glyph.size / 18.0).round().max(1.0) as u32;
+                for y in top..top.saturating_add(thickness).min(config.height) {
+                    let row = y as usize * config.width as usize;
+                    let start = row + left.min(config.width) as usize;
+                    let end = row + right.min(config.width) as usize;
+                    pixels[start..end].fill(0);
+                }
+            }
+        }
+    }
+
+    /// Renders a bounded menu using the same font and grayscale path as books.
+    pub fn render_panel(&self, lines: &[String], levels: u16) -> Result<Vec<u8>> {
+        if lines.len() > 8 || lines.iter().any(|line| line.chars().count() > 40) {
+            return Err(Error::Limit("menu text"));
+        }
+        let chapter = Chapter {
+            language: "und".into(),
+            index: 0,
+            href: String::new(),
+            warnings: Vec::new(),
+            anchors: Default::default(),
+            notes: Vec::new(),
+            links: Vec::new(),
+            blocks: lines
+                .iter()
+                .map(|text| {
+                    Block::Text(Paragraph {
+                        list: None,
+                        text: text.clone(),
+                        spans: vec![Span {
+                            language: None,
+                            range: 0..text.len(),
+                            style: TextStyle::default(),
+                        }],
+                    })
+                })
+                .collect(),
+        };
+        let config = LayoutConfig {
+            font_size: 18.0,
+            ..self.state.layout
+        };
+        let pages = paginate(&chapter, &self.fonts, config)?;
+        if pages.pages.len() != 1 {
+            return Err(Error::Layout("menu does not fit viewport"));
+        }
+        rasterize_display(
+            &pages.pages[0],
+            &self.fonts,
+            config,
+            self.state.text_raster,
+            levels,
+            |_| Err(Error::Document("menu resource".into())),
+        )
+    }
+
+    pub fn record_position(&mut self, now: u64) {
+        self.state
+            .set_position(&self.document.metadata.id, self.position, now);
+        let typography = BookTypography::current(&self.state);
+        self.state
+            .books
+            .get_mut(&self.document.metadata.id)
+            .unwrap()
+            .typography = Some(typography);
+    }
+
+    /// Menu rows share their partition with pointer hit testing.
+    pub fn render_rows(
+        &self,
+        rows: &[String],
+        selected: Option<usize>,
+        levels: u16,
+    ) -> Result<Vec<u8>> {
+        let width = self.state.layout.width;
+        let height = self.state.layout.height;
+        let geometry = crate::menu::Geometry::new(width, height)?;
+        if rows.len() > geometry.rows {
+            return Err(Error::Limit("menu rows"));
+        }
+        let mut pixels = vec![255; (width * height) as usize];
+        for (index, text) in rows.iter().enumerate() {
+            let (y, row_height) = geometry.row(index);
+            let row = self.render_cell(text, width, row_height, levels)?;
+            let offset = (y * width) as usize;
+            for (destination, source) in pixels[offset..offset + row.len()].iter_mut().zip(row) {
+                *destination = if selected == Some(index) {
+                    255 - source
+                } else {
+                    source
+                };
+            }
+            let line = offset + ((row_height - 1) * width) as usize;
+            pixels[line..line + width as usize].fill(0);
+        }
+        Ok(pixels)
+    }
+
+    pub(crate) fn render_cell(
+        &self,
+        text: &str,
+        width: u32,
+        height: u32,
+        levels: u16,
+    ) -> Result<Vec<u8>> {
+        let chapter = Chapter {
+            language: "und".into(),
+            index: 0,
+            href: String::new(),
+            warnings: vec![],
+            anchors: Default::default(),
+            notes: Vec::new(),
+            links: vec![],
+            blocks: vec![Block::Text(Paragraph {
+                list: None,
+                text: text.to_owned(),
+                spans: vec![Span {
+                    language: None,
+                    range: 0..text.len(),
+                    style: TextStyle::default(),
+                }],
+            })],
+        };
+        let config = LayoutConfig {
+            width,
+            height,
+            // Retain the layout engine's three-line minimum for 18 px menu text.
+            margin: 12.min(height.saturating_sub(65) / 2),
+            font_size: 18.0,
+            line_height: 1.2,
+            hyphenation: crate::layout::Hyphenation::Off,
+        };
+        let pages = paginate(&chapter, &self.fonts, config)?;
+        if pages.pages.len() != 1 {
+            return Err(Error::Layout("menu row exceeds viewport"));
+        }
+        rasterize_display(
+            &pages.pages[0],
+            &self.fonts,
+            config,
+            Default::default(),
+            levels,
+            |_| Err(Error::Document("menu resource".into())),
+        )
+    }
+
+    fn move_to(&mut self, target: Locator, remember: bool) -> Result<Effect> {
+        let previous = self.position;
+        // Build the destination before changing visible state or back history.
+        let mut links = None;
+        let replacement = if target.chapter != previous.chapter {
+            let chapter = self.document.chapter(target.chapter)?;
+            links = Some(chapter.links.clone());
+            let pages = PageCache::new(chapter, &self.fonts, self.state.layout, target)?;
+            Some(pages)
+        } else {
+            None
+        };
+        if replacement.is_none() {
+            let index = self.pagination.page_for(target);
+            self.pagination.select(index, &self.fonts)?;
+        }
+        let pages = replacement.as_ref().unwrap_or(&self.pagination);
+        let target = normalize_position(pages, target);
+        let index = pages.page_for(target);
+        if target == previous {
+            return Ok(Effect::Unchanged);
+        }
+        if remember {
+            if self.history.len() == 64 {
+                self.history.remove(0);
+            }
+            self.history.push(previous);
+        }
+        if let Some(pages) = replacement {
+            self.pagination = pages;
+        }
+        if let Some(links) = links {
+            self.links = links;
+        }
+        self.page_index = index;
+        self.position = target;
+        Ok(Effect::Redraw)
+    }
+
+    pub fn dispatch(&mut self, action: Action) -> Result<Effect> {
+        let chapter = self.page().start.chapter;
+        match action {
+            Action::Contents(index) => {
+                let entry = self
+                    .document
+                    .metadata
+                    .contents
+                    .get(index)
+                    .cloned()
+                    .ok_or_else(|| Error::Document("contents entry out of range".into()))?;
+                let target = self.document.resolve_link(&entry.base, &entry.href)?;
+                self.move_to(target, true)
+            }
+            Action::Link(index) => {
+                let target = self.link_target(index)?;
+                self.move_to(target, true)
+            }
+            Action::Next if self.page_index + 1 < self.page_count() => {
+                self.pagination.select(self.page_index + 1, &self.fonts)?;
+                self.page_index += 1;
+                self.position = self.page().start;
+                Ok(Effect::Redraw)
+            }
+            Action::Next if chapter + 1 < self.document.metadata.chapters.len() => self.move_to(
+                Locator {
+                    chapter: chapter + 1,
+                    ..Default::default()
+                },
+                false,
+            ),
+            Action::Previous if self.page_index > 0 => {
+                self.pagination.select(self.page_index - 1, &self.fonts)?;
+                self.page_index -= 1;
+                self.position = self.page().start;
+                Ok(Effect::Redraw)
+            }
+            Action::Previous if chapter > 0 && chapter < self.document.metadata.chapters.len() => {
+                self.move_to(
+                    Locator {
+                        chapter: chapter - 1,
+                        block: usize::MAX,
+                        byte: usize::MAX,
+                    },
+                    false,
+                )
+            }
+            Action::Chapter(chapter) => self.move_to(
+                Locator {
+                    chapter,
+                    ..Default::default()
+                },
+                true,
+            ),
+            Action::Bookmark(index) => {
+                let target = self
+                    .state
+                    .books
+                    .get(&self.document.metadata.id)
+                    .and_then(|book| book.bookmarks.get(index))
+                    .ok_or_else(|| Error::Document("bookmark out of range".into()))?
+                    .location;
+                self.move_to(target, true)
+            }
+            Action::Clipping(index) => {
+                let clipping = self.verified_clipping(index)?;
+                self.move_to(clipping.range.start, true)
+            }
+            Action::ToggleBookmark => {
+                let page = self.page();
+                let label = page
+                    .lines
+                    .iter()
+                    .find(|line| line.start <= self.position && self.position <= line.end)
+                    .or_else(|| page.lines.first())
+                    .map(|line| line.text.clone())
+                    .unwrap_or_else(|| format!("Chapter {} image", chapter + 1));
+                self.state
+                    .toggle_bookmark(&self.document.metadata.id, self.position, label);
+                Ok(Effect::Redraw)
+            }
+            Action::Back => {
+                let Some(target) = self.history.last().copied() else {
+                    return Ok(Effect::Unchanged);
+                };
+                let effect = self.move_to(target, false)?;
+                self.history.pop();
+                Ok(effect)
+            }
+            Action::Rotate(rotation) => {
+                if rotation == self.state.rotation {
+                    return Ok(Effect::Unchanged);
+                }
+                let mut config = self.state.layout;
+                if rotation.landscape() != self.state.rotation.landscape() {
+                    core::mem::swap(&mut config.width, &mut config.height);
+                }
+                self.dispatch(Action::Reflow(config))?;
+                self.state.rotation = rotation;
+                Ok(Effect::Redraw)
+            }
+            Action::Reflow(config) => {
+                let anchor = self.position;
+                let updated =
+                    PageCache::new(self.document.chapter(chapter)?, &self.fonts, config, anchor)?;
+                let anchor = normalize_position(&updated, anchor);
+                self.page_index = updated.page_for(anchor);
+                self.position = anchor;
+                self.pagination = updated;
+                self.state.layout = config;
+                Ok(Effect::Redraw)
+            }
+            Action::Tap { x, y } => {
+                let config = self.state.layout;
+                if x >= config.width || y >= config.height {
+                    return Ok(Effect::Unchanged);
+                }
+                if let Some(index) = self.link_at(x, y) {
+                    return self.dispatch(Action::Link(index));
+                }
+                if x < config.width / 3 {
+                    self.dispatch(Action::Previous)
+                } else if x >= config.width * 2 / 3 {
+                    self.dispatch(Action::Next)
+                } else {
+                    Ok(Effect::Menu)
+                }
+            }
+            Action::Next | Action::Previous => Ok(Effect::Unchanged),
+        }
+    }
+}
+
+fn normalize_position(pages: &PageCache, requested: Locator) -> Locator {
+    let page = pages.page();
+    let text_position = page.lines.iter().any(|line| {
+        if requested.chapter != line.start.chapter
+            || requested.block != line.start.block
+            || requested.byte < line.start.byte
+            || requested.byte > line.end.byte
+        {
+            return false;
+        }
+        let offset = requested.byte - line.start.byte;
+        // The omitted suffix consists only of ASCII layout whitespace.
+        offset >= line.text.len() || line.text.is_char_boundary(offset)
+    });
+    if text_position || page.images.iter().any(|image| image.location == requested) {
+        requested
+    } else {
+        page.start
+    }
+}
+
+// The half-open span is within the framebuffer. Only its boundary bytes need
+// bitwise updates; whole bytes can be filled without per-pixel iteration.
+fn mark_selection_span(coverage: &mut [u8], start: usize, end: usize) {
+    if start >= end {
+        return;
+    }
+    let first = start / 8;
+    let last = (end - 1) / 8;
+    let first_mask = u8::MAX << (start % 8);
+    let last_mask = u8::MAX >> (7 - (end - 1) % 8);
+    if first == last {
+        coverage[first] |= first_mask & last_mask;
+    } else {
+        coverage[first] |= first_mask;
+        coverage[first + 1..last].fill(u8::MAX);
+        coverage[last] |= last_mask;
+    }
+}
+
+#[cfg(test)]
+mod selection_coverage_tests {
+    use super::mark_selection_span;
+
+    #[test]
+    fn packed_spans_match_pixel_union_at_every_byte_boundary() {
+        const PIXELS: usize = 257;
+        for start in 0..=PIXELS {
+            for end in start..=PIXELS {
+                let mut coverage = vec![0; PIXELS.div_ceil(8)];
+                mark_selection_span(&mut coverage, 7, 19);
+                mark_selection_span(&mut coverage, start, end);
+                mark_selection_span(&mut coverage, start, end);
+                for pixel in 0..coverage.len() * 8 {
+                    assert_eq!(
+                        coverage[pixel / 8] & (1 << (pixel % 8)) != 0,
+                        (7..19).contains(&pixel) || (start..end).contains(&pixel),
+                        "span {start}..{end}, pixel {pixel}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dense_overlapping_selection_retains_one_bit_per_screen_pixel() {
+        let mut coverage = vec![0; (480usize * 800).div_ceil(8)];
+        let capacity = coverage.capacity();
+        for glyph in 0..131_072 {
+            let row = glyph % 800;
+            mark_selection_span(&mut coverage, row * 480, (row + 1) * 480);
+        }
+        assert_eq!(coverage.len(), 48_000);
+        assert_eq!(coverage.capacity(), capacity);
+        assert!(coverage.iter().all(|byte| *byte == u8::MAX));
+    }
+}

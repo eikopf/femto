@@ -1,0 +1,55 @@
+{
+  "feature": "Persisted automatic-hyphenation mode with cancellable typography reflow",
+  "workspace_rust_tests_passed": 855,
+  "workspace_test_batches": 65,
+  "firmware_python_tests_passed": 7,
+  "final_targeted_tests_passed": 43,
+  "workspace_clippy_passed": true,
+  "native_x11_smoke_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Book language, automatic-Off, and explicit language selection",
+    "Automatic-Off retains author soft hyphens",
+    "Explicit language retains CSS hyphenation restrictions",
+    "Mode selection leaves source text and shaping language unchanged",
+    "Cancelled reflow preserves pixels and old mode",
+    "Completed reflow preserves source position and saves the mode",
+    "Missing persisted mode defaults to Book; unknown modes fail",
+    "Native pointer selection updates persisted mode without moving source position"
+  ],
+  "limitations": [
+    "Global setting, not per-book layout",
+    "Shaping-language override and spelling transformations remain unfinished",
+    "Native run preceded internal reflow-guard consolidation; final code received targeted UI/hyphenation tests, workspace Clippy, and firmware build",
+    "Physical device input and typography quality remain unqualified"
+  ],
+  "logs": {
+    "workspace": {
+      "path": "output/verification/hyphenation-controls-workspace.log",
+      "sha256": "35fd7ddf34f7ca409bf764aef4a806223d05bf24ee276d1e5fc9acb71c3e3d0d"
+    },
+    "final_ui_hyphenation_clippy": {
+      "path": "output/verification/hyphenation-controls-final_ui_hyphenation_clippy.log",
+      "sha256": "a5864efb3504c6cd3cd11b074b779904b961cc72b851fc5734f9199865084efb"
+    },
+    "native_x11": {
+      "path": "output/verification/hyphenation-controls-native_x11.log",
+      "sha256": "279e543b7a90b5a4f0402476445ae54d6fc0d0b5739650d84faee61ab860a69d"
+    },
+    "firmware": {
+      "path": "output/verification/hyphenation-controls-firmware.log",
+      "sha256": "948aacc1b5ec665ac49c610ff26bc2481dc5ee881525bc612659923c5190b875"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/layout.rs": "478903249008b9043d6cc65d7195f8e92820d8f2f304e40f64e342f27205551e",
+    "crates/femto-reader/src/ui.rs": "4be5c9a4cf5f39a0a48e9e95fa146d42e50e2ca46b09e3c26e3289e37b033a53",
+    "crates/femto-reader/src/controller.rs": "38a3361096ec99c5a47aa8d81b6b0987c6aac38eb1a9f475575bbcbdba8b6661",
+    "crates/femto-reader/tests/hyphenation.rs": "22534908028873b752ec96a661cc90a5cfe7d8541a103dcb18145e9fc02e342a",
+    "crates/femto-reader/tests/ui.rs": "dc8214786892a7870019d1a61d643b6906c3844b96192d105dca56c4636b8541",
+    "scripts/simulator-smoke.py": "fb7edd22440e1b77e5c30bbdcc4dd3302ac932d943db22d8f315991000ebfb80",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "26ed48dc50ef53b2863d223ecaf09ae7e28c27f3168c8f36253a8dbbd39a6f2d"
+  }
+}

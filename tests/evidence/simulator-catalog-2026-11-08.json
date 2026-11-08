@@ -1,0 +1,60 @@
+{
+  "feature": "Native simulator catalog browsing and acquisition through shared Picco controller",
+  "targeted_tests_passed": 38,
+  "test_suites": {
+    "femto_cli_unit": 15,
+    "simulator_unit": 12,
+    "device_catalog": 11
+  },
+  "workspace_clippy_passed": true,
+  "native_x11_smoke_passed": true,
+  "picco_monochrome_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Explicit configuration-directory option and shared catalog menu",
+    "Injected host HTTP/TLS transport extracted from CLI",
+    "Authenticated loopback OPDS feed selected via native keyboard",
+    "Publication selected and exact EPUB acquired without leftover part file",
+    "Existing native navigation, typography, library, links and footnote smoke checks pass",
+    "Shared controller tests use explicit mock transport in simulator test binary"
+  ],
+  "limitations": [
+    "Simulator tailnet and progress-sync integration remain unfinished",
+    "Native fixture uses HTTP; no new native HTTPS trust qualification",
+    "No Wayland or physical hardware qualification",
+    "Final post-firmware-build source edit changed only cfg(test) module visibility"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/simulator-catalog-tests.log",
+      "sha256": "dfa216389252909d3175dd59b41efc31ba33b3b5bbed7643cb294d7e2dca9c81"
+    },
+    "clippy": {
+      "path": "output/verification/simulator-catalog-clippy.log",
+      "sha256": "978890dc187018a9b34cbf38251b2d945da187896ffd00145eeddebd1cfd36ea"
+    },
+    "native": {
+      "path": "output/verification/simulator-catalog-native.log",
+      "sha256": "6d0d8453c9ca0c69748c6fd3a47cf29af4b32ad53b32d4e44fd595538da64672"
+    },
+    "firmware": {
+      "path": "output/verification/simulator-catalog-firmware.log",
+      "sha256": "7afc8d24495367e1229eca512026088c456dfe7e0a6ee940d7e8357e2a06820d"
+    }
+  },
+  "screenshot": {
+    "path": "output/simulator-smoke/catalog.png",
+    "sha256": "9810d0fca2dc453a004ba7e8410d64a2b1480393c80b831cffa9c2f67a5a931c"
+  },
+  "input_sha256": {
+    "crates/femto/src/simulator.rs": "8ffd469dd53b106cc4eb3d70cd265ce5707513297e3a4aa2dcd2d0c0af9cc792",
+    "crates/femto/src/catalog.rs": "fee852fa5a488aab8952fd243ebd14c1ad92c5005894869e47de07b0613f0962",
+    "crates/femto/src/host_http.rs": "bf0fb9ca0b7f3fd25705c298468c719289435603b316b9afd692f8b30778d492",
+    "firmware/picco/src/catalog.rs": "6351189633538e42325a06de21d75c759ad3e358c1e92778451c49429a65e4ff",
+    "crates/femto/tests/device_catalog.rs": "a5fe61483693f3d64368b0587c8ca043e0e9641440e8b78b73fc0a59637c1b96",
+    "crates/femto/tests/support/catalog_network.rs": "1ed8552c4ded4b6727089ff7e3b30f2c8f20db9988a3bd715d8af345869c4e89",
+    "scripts/simulator-smoke.py": "53c43bce675d11daf5d46d783cdd326b3d64fb7afda18361e24645c813006935",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "2fad5d738d76257f8e7da0f650c31826e01bdcbe66a7a2ac1bdc49970cb5c580"
+  }
+}

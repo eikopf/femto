@@ -1,0 +1,44 @@
+{
+  "feature": "Progress synchronization preserves clipping and highlight edits through commit and journal reopen",
+  "commands": [
+    {
+      "command": "cargo fmt --all",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p femto-sync --lib",
+      "exit_code": 0,
+      "passed": 14
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "Shared reader sync fixtures now contain a saved highlighted page excerpt",
+    "Create and download retain the excerpt, its highlight flag, source range, text and timestamp in reopened journals",
+    "Changing highlight state or removing an excerpt after exchange and adding another highlighted excerpt survives completion commit and journal reopen",
+    "Progress position and checkpoint still update to the expected remote record",
+    "Stale and cancelled completions, persistence errors and checkpoint reset preserve annotated state through existing whole-state and framebuffer assertions",
+    "Torn newest journal recovery retains the prior complete annotated state"
+  ],
+  "tested_files_sha256": {
+    "crates/femto-sync/src/tests.rs": "f6ae66f466d7f681027085a7683213eae57f83cd36a4c2846d9112a283351932",
+    "crates/femto-sync/src/reader.rs": "d54d3a6292b8d68324256af3ddaac59a2ab4d7ddfb9309e1bb93a53d5b9fb6e8",
+    "crates/femto-reader/src/controller.rs": "6e629f020107f95f4457ef2cfd7923fdddb637e2f1020cc179aa345fcda26ade",
+    "crates/femto-reader/src/clipping.rs": "b36c4bd937eae3ac8fadf10758ffb6f410c56e3bdfdbfff1df66a24c10c3eca9",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e"
+  },
+  "snapshot_at_completion": true,
+  "log": {
+    "path": "output/verification/highlight-sync-tests.log",
+    "sha256": "e14c45bf1e41cf6b28d1de991cddfc5f4dd933b22da8d10d8b0787181a861ce3"
+  },
+  "limits": [
+    "Tests use the shared reader/session implementation and synthetic HTTP responses; annotation-specific native/device input and independent tailnet exchanges are not qualified here.",
+    "No production code changes or firmware rebuild in this checkpoint.",
+    "Clippings and highlights remain local state; the progress protocol does not synchronize annotations between readers.",
+    "Physical storage durability remains unqualified."
+  ]
+}

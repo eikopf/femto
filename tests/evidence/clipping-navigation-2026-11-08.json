@@ -1,0 +1,54 @@
+{
+  "feature": "Source-verified navigation from saved clippings",
+  "targeted_tests_passed": 61,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "checks": [
+    "Synchronous and cooperative source jumps target the saved range start",
+    "Back returns to the prior reading anchor and pixels",
+    "Dropping a pending cross-chapter job leaves reading unchanged",
+    "Removing a clipping after indexing rejects further steps and commit",
+    "Forged text and missing clipping indices fail without moving the reader",
+    "Shared clipping-menu source action navigates and permits Back"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --test controller --test ui && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco"
+  ],
+  "input_sha256": {
+    "crates/femto-reader/src/controller.rs": "0c2ab496f659fb91f05af2b5204a51001410fe434b8028b3302acf238ca0110d",
+    "crates/femto-reader/src/ui.rs": "f5cf4d59aba23fa7d4df824abc33420ac0bd2ed7b253689cef0129d28cc6a0de",
+    "crates/femto-reader/src/clipping.rs": "f346bcdd414932b81e93777c7b5def0dc5be148e9228f82b1f8b417cad3cc71a",
+    "crates/femto-reader/tests/controller.rs": "c69248e8ce6031cda20de750f60e4129e48d36ad7f68c973ede93381b700dee5",
+    "crates/femto-reader/tests/ui.rs": "0773dc2dd644cf43c23ff6487d674667f40c3a29bf8f422aa9c1b020635db74d",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54"
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/clipping-navigation-tests.log",
+      "sha256": "7bcdeef80e61e89dc0fe9d22af922bc23fb72d26618570a8406d27a02ae5e865"
+    },
+    "picco": {
+      "path": "output/verification/clipping-navigation-picco.log",
+      "sha256": "6a9ea94a87fcc5dced696588ae92f2f2d05b5ad0c208ef361dc0090b29cb356a"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "98891bf639a481a618a89afc6eed870840ae18d09e8583029c9b60bb9e6a411a",
+    "bytes": 5169616,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Source extraction and destination parsing remain synchronous; only subsequent cross-chapter indexing is cancellable.",
+    "Native window input and physical Picco latency for this action remain unqualified.",
+    "No independent network, grayscale firmware or full workspace test rerun in this checkpoint."
+  ]
+}

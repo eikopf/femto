@@ -1,0 +1,9 @@
+Femto e-paper type specimen
+
+Minimum stem widths: iii lll HHH mmm nnn. Counters: a e o p 6 8 9. Punctuation: . , : ; ! ? ( ) [ ].
+
+Kerning and ligatures: AVATAR To Wa office affinity efficient. Combining marks: café naïve Å.
+
+Mixed directions: English שלום עולם English. Digits: 0123456789 1/2 3/4.
+
+The quick brown fox jumps over the lazy dog. A quiet page keeps its place when the font changes.

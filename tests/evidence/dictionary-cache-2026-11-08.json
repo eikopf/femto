@@ -1,0 +1,80 @@
+{
+  "feature": "Reuse one prepared dictionary between selections and release it before storage sleep preparation",
+  "commands": [
+    {
+      "command": "cargo test -p femto-reader --test ui --test dictionary",
+      "exit_code": 0,
+      "passed": 66
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/check-simulator",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "1000-entry UI fixture needs multiple preparation polls initially and one poll for repeated lookup",
+    "Identical results and unchanged reader state across reuse",
+    "Canceling an already prepared job preserves reusable indexes",
+    "Injected definition read failure drops the dictionary; subsequent lookup rebuilds it",
+    "Explicit release and same-path configuration force fresh preparation",
+    "Metadata and unused compressed-definition file handles close after opening",
+    "Compiled Picco sleep path releases dictionary files before storage preparation",
+    "Native repeated lookup produces identical result pixels and restores selection/reading pixels without state changes",
+    "Full existing native reader/catalog/sync/tailnet smoke suite passes"
+  ],
+  "input_manifest": {
+    "path": "output/verification/dictionary-cache-inputs.json",
+    "sha256": "e88c2d72154f2f0670a7776702a2727b91f842a72b4e8ee1c4cbaabc0b342c23",
+    "files": 416,
+    "scope": "Recorded inputs remained unchanged throughout native run",
+    "unchanged_at_completion": true
+  },
+  "artifacts": {
+    "tests": {
+      "path": "output/verification/dictionary-cache-tests.log",
+      "sha256": "f98bb635704a5295fd4681afbfeae1c48bee4189277d40dedf22bb7415290815"
+    },
+    "firmware": {
+      "path": "output/verification/dictionary-cache-firmware.log",
+      "sha256": "6ef9c583e70a7444eed0d60db527c5db986585d0788198b2ba59b0298c8779d1"
+    },
+    "native": {
+      "path": "output/verification/dictionary-cache-native.log",
+      "sha256": "1a5eadc5566ccb1347f0fbada8318a94f2949f51c25138630af7a0cd04ae7173"
+    },
+    "image": {
+      "path": "output/verification/dictionary-cache-image.png",
+      "sha256": "cda7ff0d2df07e1d8ca4e2a4fff68c039b005175cff06aa205fdafab5f196ae3"
+    },
+    "state": {
+      "path": "output/verification/dictionary-cache-state.json",
+      "sha256": "54c934d87f1ee0177db96a38494f520475742ed186d1f953df92a3e116a2d447"
+    }
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "a84fd9253ca2c10d182952d24f7537e6ddc52f5a9d6556ec32e73dc316120a50",
+    "bytes": 5222496,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Retained cache increases idle memory use; device heap and latency remain unmeasured.",
+    "No file-change detection; source files must remain immutable while open.",
+    "Sleep/storage handle release is compiled but not physically qualified.",
+    "Native workflow covers a portrait Latin definition on X11, not rotated or RTL output.",
+    "Full workspace, independent tailnet, grayscale and clean reproducibility were not rerun."
+  ]
+}

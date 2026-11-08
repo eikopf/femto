@@ -1,0 +1,43 @@
+{
+  "feature": "Preserve automatic handshake retry intent across harmless coordinator maps",
+  "passed_microlink_tests": 203,
+  "workspace_clippy_desktop_tailnet_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Empty authenticated map delta preserves retry series",
+    "Retry uses a fresh handshake permit after map generation changes",
+    "Dropped initiation and response recover without application demand",
+    "Authorization withdrawal still cancels retries"
+  ],
+  "independent_loss_qualification": {
+    "first_run": "Failed before relay-only TCP connection; no qualification claimed",
+    "diagnostic_rerun": "Running separately; no final result yet"
+  },
+  "limitations": [
+    "Initial independent timeout is consistent with the permit-cancellation bug but does not by itself prove its cause",
+    "The running diagnostic binary predates the continuity fix; a final updated-binary run is required",
+    "Independent response-loss and physical-device qualification remain outstanding"
+  ],
+  "logs": {
+    "validation": {
+      "path": "output/verification/handshake-retry-map-continuity-validation.log",
+      "sha256": "7982c5974b9c340e22256c679e064085d7ffb2ece00d6ffe4a3a8d1cd10e2057"
+    },
+    "firmware": {
+      "path": "output/verification/handshake-retry-map-continuity-firmware.log",
+      "sha256": "eac5306e03f7ac11f66cc259e2a8da601311d55d4772a062960a9540074819f9"
+    },
+    "initial_independent_failure": {
+      "path": "output/verification/handshake-retry-map-continuity-initial_independent_failure.log",
+      "sha256": "4449fb59a03d3d2bb4a5eceff186f7ffc6f12396fcb0bfa9d9130c6af6e2c106"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/network.rs": "d06005900bd69e5040789ca74fd5f7550a81a0d8bc575bfd5e3a15860ec0ec33",
+    "crates/femto-microlink/examples/headscale-probe.rs": "514fd8156da6745b7359119e427aabb0ebe7ada4bc012572d348af6f99d885d3",
+    "scripts/check-headscale.py": "d027785052076bff85f58eaec925c724086872dcd11fe6de3069a97b7d3e5192",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "ece309e37e49a8fb78761677a532cb9eaacd517b00a5e9ebd1997fa97c75e324"
+  }
+}

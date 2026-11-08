@@ -1,0 +1,63 @@
+{
+  "feature": "Unicode line-break wrapping for excerpt and deletion-confirmation rows",
+  "targeted_tests_passed": 76,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "native_x11_smoke_passed": true,
+  "checks": [
+    "Prefer natural line breaks within the existing 32-grapheme row budget",
+    "Preserve blank LF/CRLF paragraph spacing and honor mandatory Unicode breaks",
+    "Keep nonbreaking-space groups together until fallback required",
+    "Fallback leaves combining sequences, ZWJ emoji, flags and Hebrew marks intact",
+    "Row concatenation preserves paragraph text bytes",
+    "Existing clipping UI and native capture/reopen/source-jump/keep/delete workflow pass"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --lib --test ui && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco",
+    "./scripts/check-simulator"
+  ],
+  "input_manifest": {
+    "path": "output/verification/excerpt-wrap-inputs.json",
+    "sha256": "de103944d592643cbfeb7058a8441a76fcfb5e9afac514f9d5cf3fbe69a27545",
+    "files": 390,
+    "unchanged_at_completion": true
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/excerpt-wrap-tests.log",
+      "sha256": "ebd613c7916d9ba7e8c2995828d7885e11495e64c5951e8c6985b685e196de3f"
+    },
+    "picco": {
+      "path": "output/verification/excerpt-wrap-picco.log",
+      "sha256": "e53981b0d14939acc2220d88294e0f09e49fea2afe1169590db6df61d953b2c4"
+    },
+    "native": {
+      "path": "output/verification/excerpt-wrap-native.log",
+      "sha256": "12ed0747be6fa11a80fd9180985ac38494e3faf5b1d6e52f33d62d9e2e9c9ae3"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "dd92cb07e0374010258784e260b93cd764eb62144a7b8174ea14095f90ef6315",
+    "bytes": 5169376,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "screenshot": {
+    "path": "output/verification/excerpt-wrap-delete.png",
+    "sha256": "8da8250d942aeb48f1a5f91e058ce2588927d381867f5189be0c872fd57fbadf",
+    "inspected_at_original_resolution": true,
+    "finding": "The sample words flow and their no longer split across rows; the paragraph gap is visible; Keep remains selected."
+  },
+  "limits": [
+    "This remains grapheme-budget wrapping, not pixel-measured line layout; wide-script/custom-font fit is not guaranteed.",
+    "Long unbroken runs still split at grapheme boundaries.",
+    "No physical display qualification, grayscale firmware, independent network or full workspace rerun in this checkpoint."
+  ]
+}

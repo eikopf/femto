@@ -1,0 +1,42 @@
+{
+  "feature": "Throttled staged-byte download progress in Picco catalog menu",
+  "device_catalog_tests_passed": 11,
+  "workspace_clippy_passed": true,
+  "picco_monochrome_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Accepted partial writes count while failed writes do not",
+    "Flush and write errors retain writer behavior",
+    "Whole-KiB titles refresh at most once every two seconds",
+    "Validation has a distinct Checking book phase",
+    "Hidden panel suppresses progress refresh",
+    "Cancellation discards progress and late completion does not reopen panel",
+    "Existing acquisition, duplicate preservation, invalid EPUB and cancellation tests pass"
+  ],
+  "limitations": [
+    "No total-size percentage, rate estimate or download resume",
+    "Fast downloads may finish before progress refresh",
+    "No new independent-peer transfer or physical refresh/latency measurement",
+    "Byte count does not establish durable storage"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/download-progress-tests.log",
+      "sha256": "a903da040c5cf8a123d4fd6fbb317ab27201e4a3628af4b56d9182247a22a466"
+    },
+    "clippy": {
+      "path": "output/verification/download-progress-clippy.log",
+      "sha256": "6a1ae11493cd55a833871fcfc846ed3b8ebbfb253d1b43c88eab3625ac78cbe8"
+    },
+    "firmware": {
+      "path": "output/verification/download-progress-firmware.log",
+      "sha256": "d434fbdde5775156d6aa6604f2a3815315c07274d6381e0fbd631b75cc3523e2"
+    }
+  },
+  "input_sha256": {
+    "firmware/picco/src/catalog.rs": "89d43bc4f86ff4362b6cdec33cd5e0f8a7fd328beb1aca619ed9b61aac112b09",
+    "crates/femto/tests/device_catalog.rs": "f606fd5b169185d367ab73791d6d205569146d3b043820f1a0012a7394dc3892",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "f3a3f7b459df90625ff68f8f203820a5246c8d81c646a02e0d023c1c1145b8f6"
+  }
+}

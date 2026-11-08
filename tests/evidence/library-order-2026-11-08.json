@@ -1,0 +1,63 @@
+{
+  "feature": "Canonical library title ordering with deterministic original-path ties",
+  "targeted_tests_passed": 74,
+  "suites": {
+    "reader_unit": 29,
+    "library": 10,
+    "ui": 35
+  },
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "regression_before_fix": "The initial same-directory reproducer placed a decomposed accented title before z, while equivalent composed titles followed z. The final regression places equivalent titles in separate folders to avoid same-directory case-equivalent filename requirements.",
+  "implementation": "Stable original-path sort followed by stable cached title-key sort using the same NFC/lowercase/NFC key as library search. No path clones are added to the cached title keys.",
+  "assertions": [
+    "Consistent uncached, cold-cache and warm-cache order",
+    "Canonical title ties resolved by original path",
+    "Recreating source files in reverse order retains display order and four cache hits",
+    "Original filenames, metadata titles and content bytes preserved",
+    "Canonical search still finds both title representations"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --lib --test library --test ui && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco"
+  ],
+  "input_sha256": {
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "crates/femto-reader/src/state.rs": "aa1f3b93d4cf67e6ce1fedef0b8d93445ac8914dcbd205cf6dddf60f0ad56de9",
+    "crates/femto-reader/tests/library.rs": "0e29a133af165db4936429fb8bcbcab52cb3f17f5d6cb48f331f812559d5026d",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54"
+  },
+  "logs": {
+    "before": {
+      "path": "output/verification/library-order-before.log",
+      "sha256": "9f39cd0f8f026588265bc5fb77879a2fc2ac1dd2237bad4b9c78be96474d5f00"
+    },
+    "tests": {
+      "path": "output/verification/library-order-tests.log",
+      "sha256": "c106ee241b8af6dd5d1202c86cdc3461727653cd0ae6c264db3a834b477da3d9"
+    },
+    "picco": {
+      "path": "output/verification/library-order-picco.log",
+      "sha256": "4d3f66b9eeefdf591bd02f6bbc7727b8c16d53b9b06e7b3096c327e36eed0b67"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "59f2dd6fb7c673cac6324e5d29cc02ac07b299ba1421fd004426efd24baaa174",
+    "bytes": 5145424,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limitations": [
+    "Unicode key ordering is not locale-specific collation",
+    "Truncated traversal can retain a different subset when directory enumeration changes",
+    "No new full workspace/native/independent-peer suite or grayscale build",
+    "Physical device memory and latency remain unqualified"
+  ],
+  "hardware_verified": false
+}

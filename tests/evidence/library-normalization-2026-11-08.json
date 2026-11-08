@@ -1,0 +1,62 @@
+{
+  "feature": "Canonical Unicode local-library search",
+  "targeted_tests_passed": 59,
+  "test_suites": {
+    "reader_library": 24,
+    "reader_ui": 35
+  },
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "dependency": {
+    "unicode-normalization": "0.1.26",
+    "tinyvec": "1.13.3",
+    "default_features": false,
+    "unicode_tables": "18.0.0",
+    "normalization": "NFC before and after Rust lowercase conversion"
+  },
+  "firmware_bytes": {
+    "before": 4999808,
+    "after": 5121104,
+    "increase": 121296
+  },
+  "assertions": [
+    "Canonical equivalence across title, author and path",
+    "Composed/decomposed accents and Hangul with uppercase queries",
+    "Original entries, metadata and filenames preserved",
+    "Empty query retains all entries",
+    "Accents and compatibility characters remain significant",
+    "Shared UI opens original decomposed filename from composed query"
+  ],
+  "limitations": [
+    "No full Unicode case folding, locale casing, accent stripping, compatibility normalization, or input method support",
+    "OPDS query text is unchanged",
+    "Per-field temporary normalization allocations; device latency and peak heap unmeasured",
+    "Incremental firmware build, not new clean reproducibility qualification",
+    "No physical Picco or new native-window run"
+  ],
+  "input_sha256": {
+    "Cargo.toml": "1a862d2bb64952808e9573dce1ca8c7f450d013a8a27658860fc4a4bf6072b95",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54",
+    "crates/femto-reader/Cargo.toml": "3a7b2d06a6501fd28a6888e8c0330df65d02f343167b8c58e9c52f8e774c5b36",
+    "crates/femto-reader/src/state.rs": "cf169be8c66c56ef357c3b1856cb6a635cdf2271937e11ae8b8aee2597a3208b",
+    "crates/femto-reader/tests/ui.rs": "25cc806b647bab5a3663a8eb680208621ce099a0ba4348385bffd2b6f3b01346"
+  },
+  "firmware_sha256": "63da906371990ba6caad40a3873cf4077861d66f0e2575762488be3346b74c0c",
+  "logs": {
+    "tests": {
+      "path": "output/verification/library-normalization-tests.log",
+      "sha256": "0bc444bb875c3fee6581ec0e02e0dd86d22ad4a8b78556e545d64d8e9f6f01c5"
+    },
+    "ui": {
+      "path": "output/verification/library-normalization-ui.log",
+      "sha256": "8e1c76215754f2ef9b0fbfac6cea795f3fc191339307175ebf4fa93c55ae672b"
+    },
+    "picco": {
+      "path": "output/verification/library-normalization-picco.log",
+      "sha256": "4b2e379b71a3c3dfd7bd7b0cd763efafc8a6d375bfcabfd134ac42ce33aaebb7"
+    }
+  },
+  "hardware_verified": false
+}

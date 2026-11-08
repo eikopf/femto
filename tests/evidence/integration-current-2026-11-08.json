@@ -1,0 +1,76 @@
+{
+  "scope": "Integrated workspace, native X11 workflows and grayscale build after CLI trust/cancellation, canonical dictionary hyphenation and library traversal fault isolation",
+  "commands": [
+    "./scripts/check",
+    "./scripts/check-simulator",
+    "FEMTO_PICCO_GRAYSCALE=1 ./scripts/build-picco"
+  ],
+  "exit_codes": [
+    0,
+    0,
+    0
+  ],
+  "rust_tests_and_doctests_passed": 911,
+  "rust_test_batches": 67,
+  "python_firmware_tests_passed": 7,
+  "formatting_passed": true,
+  "workspace_compilation_passed": true,
+  "workspace_clippy_passed": true,
+  "native_x11_passed": true,
+  "grayscale_build_passed": true,
+  "input_count": 381,
+  "workspace_input_manifest": {
+    "path": "output/verification/integration-current-inputs.json",
+    "sha256": "5978e8ed49bf401035af0f6d744bf5e85198031a25dc1ef86b046179300047aa"
+  },
+  "native_input_manifest": {
+    "path": "output/verification/integration-current-native-inputs.json",
+    "sha256": "028b73ee6259995603ce1fc704851430864565d4f7fee7bcbcc399965bb6e9d2"
+  },
+  "input_verification": "Runtime/build inputs unchanged throughout. After the initial passing native run, scripts/simulator-smoke.py was changed to wait for the rendered typography panel. The complete native suite passed again. Final manifest inputs were unchanged at completion. Initial manifest captured shortly after launch; documentation edits are excluded.",
+  "native_capture_fix": "The saved font-size update can precede presentation. typography.png now waits for text in the second control row, absent from the temporary reflow panel. The final screenshot shows Typography and 26 px controls.",
+  "native_scope": [
+    "Reader startup cancellation, navigation, typography, library search and switching",
+    "Links and note previews",
+    "Authenticated loopback OPDS acquisition",
+    "Progress conflicts, resolution, persistence and reset",
+    "Cancellation, stale completion, held-response quit and storage-publication failure/recovery",
+    "Stalled tailnet TLS setup, identity preservation, reconnect and quit"
+  ],
+  "inspected_screenshots": {
+    "output/simulator-smoke/reading.png": "42bbd5b6a7395ed691ccd527dddab2d4881963636ba0a94260ff65b3b31ae184",
+    "output/simulator-smoke/typography.png": "c0b2e4df9685c619993343b18431204d03704863c3b955ec7cad13e652e6a575"
+  },
+  "grayscale_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "1ef1379ffe4521605de65e2b9848d752174010a458b8a9719c65ef67abb3f237",
+    "bytes": 5126816,
+    "chip": "esp32s3",
+    "display_levels": 4,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "logs": {
+    "workspace": {
+      "path": "output/verification/integration-current-workspace.log",
+      "sha256": "8dff5ccda585b467ac0b63521529c8817af16097d02b3c12ee2479fc8051937b"
+    },
+    "native": {
+      "path": "output/verification/integration-current-native.log",
+      "sha256": "848e80c881c579c1663eaffa828eb396733e193ec5aaf26643351244a08819f3"
+    },
+    "grayscale": {
+      "path": "output/verification/integration-current-grayscale.log",
+      "sha256": "9147c1df97c0f79fd9a55ed3e8f1f42d8ebe127f00ed21438fbd4af1610e8794"
+    }
+  },
+  "limitations": [
+    "No fresh independent Headscale/Tailscale exchange in this checkpoint",
+    "Native stalled-setup test does not complete enrollment",
+    "No Wayland or physical Picco runtime qualification",
+    "Incremental grayscale build does not establish fresh clean-build reproducibility"
+  ],
+  "hardware_verified": false
+}

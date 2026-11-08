@@ -1,0 +1,61 @@
+{
+  "feature": "Per-book typography with transactional cooperative opening",
+  "tests_passed": {
+    "reader": 183,
+    "sync": 11
+  },
+  "workspace_clippy_passed": true,
+  "picco_build_passed": true,
+  "native_x11_smoke_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Independent font size, line height, margins, hyphenation and raster settings for each book",
+    "Viewport and rotation remain device settings",
+    "Source anchors survive book switching and startup",
+    "Synchronous and cooperative startup produce matching pixels",
+    "Cancelled, stale and viewport-incompatible openings preserve the active reader",
+    "Legacy books inherit active settings",
+    "Host files and device journal reject invalid book preferences without replacing good state"
+  ],
+  "limitations": [
+    "Physical panel calibration remains unfinished",
+    "No per-book reset control yet; unseen books inherit active settings",
+    "First native run timed out waiting for a Library pointer action while other checks ran; rerun passed without changing the smoke script; cause not established",
+    "Reader suite and firmware build preceded a lint-only nested-if collapse in the opening stale guard; Clippy and final native run used the collapsed form"
+  ],
+  "logs": {
+    "reader": {
+      "path": "output/verification/book-typography-reader.log",
+      "sha256": "55a9c1254369d19b30794515e5e6057eb0aebf35b477c6f76dcc00d872221333"
+    },
+    "sync": {
+      "path": "output/verification/book-typography-sync.log",
+      "sha256": "b087b289f9f04001b24f61d4bb4f1346a703e88e7d5a42cd947fb7521508979c"
+    },
+    "clippy": {
+      "path": "output/verification/book-typography-clippy.log",
+      "sha256": "638c9a2ba3210c24b105adfa1aed4a74e5f1bbe6f1dd52705f191df869cf41b6"
+    },
+    "firmware": {
+      "path": "output/verification/book-typography-firmware.log",
+      "sha256": "33ee20e30d65382bc4cd6ce7f18d0ae70dd1c18769140925bbe4aee714108c0f"
+    },
+    "native": {
+      "path": "output/verification/book-typography-native.log",
+      "sha256": "c18fa296f5dd0f34ea500dc9dc2f00a4779c554b842523137a2c7bd0acee42ce"
+    },
+    "native-first": {
+      "path": "output/verification/book-typography-native-first.log",
+      "sha256": "e1c6b13937bddbdc2bfc49f54ed4357088acd5a661d8fbad8488a06a5ceccbf0"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/state.rs": "404a21ca7ec1f9c4b9954345ba8beb786eb9f353fce5adfad3d8e7ff1bae412f",
+    "crates/femto-reader/src/journal.rs": "734b758c6b5246aede29602e1b2ad3dd9f8d085f81bc0f7654caea58a02185fb",
+    "crates/femto-reader/src/controller.rs": "58cd4ca8d7a5d4ecfba0806cd2b081f6832ffab23ba8e4d48f309e54fcde0c52",
+    "crates/femto-reader/src/display.rs": "44ae40bd74529bcb08f0e2ebcfb71510d5e76e52bf9cdf0483f25f94cdb7eadd",
+    "crates/femto-reader/tests/book_typography.rs": "7adc03fb0a3ea66de86e867d0706298c71aba77105e9d90d58a419b67745734f",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "04cf3bf353a50d3178d14b2cfd26226f67c47aee9759193544ea37edea098c81"
+  }
+}

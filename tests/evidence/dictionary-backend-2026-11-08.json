@@ -1,0 +1,105 @@
+{
+  "feature": "Portable incremental StarDict dictionary backend and host JSON lookup command",
+  "commands": [
+    {
+      "command": "cargo test -p femto-reader --test dictionary",
+      "exit_code": 0,
+      "passed": 4
+    },
+    {
+      "command": "cargo test -p femto --test dictionary_cli",
+      "exit_code": 0,
+      "passed": 1
+    },
+    {
+      "command": "cargo fmt --all --check",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "Cargo.toml": "d62907f944484a8fffc4cb5d67bd775831b273cf1af3213b6b265c2b11ff16fd",
+    "Cargo.lock": "7040c9e05954fc95624ad2f6715bc6c2b9d18f6ae33cc634c65d3d67f7e355bb",
+    "crates/femto-reader/Cargo.toml": "9ef06fce3885a7154d7e13ae94d41d48a51abd957b6ad1337a70a96e61da7a36",
+    "crates/femto-reader/src/lib.rs": "f2a249399dd31612511789a59bd8ceae350afe27f193093a586f3244466be578",
+    "crates/femto-reader/src/dictionary.rs": "f9773b0a46872e356c5d94657c20b927f51f21a0adc9c15139273427437a5450",
+    "crates/femto-reader/tests/dictionary.rs": "72a5279d6c20660c6af71569c0b9f4fb743ef10664a6972379a92724a076835e",
+    "crates/femto/src/main.rs": "1c4e4f6d3a6e8d3c34f3a996d3eabd16fd81a509835ab84b413a065456246422",
+    "crates/femto/tests/dictionary_cli.rs": "9f6fc91b9cc62bd62ec91b429662c96f114b8b9291e2e25a5e98245d02f3c380",
+    "firmware/picco/Cargo.toml": "c87c89d4131dbe31245ff72f199a486a108641507aad40e10992a011d8eff3ff",
+    "firmware/picco/Cargo.lock": "dcab9958734dfecf18f142c9b159b9465e6d6736dc930d4cfb0b42d65f6299ca",
+    "vendor/quireink-stardict/Cargo.toml": "9f421fe8f8bb29ea53d03fefdce5370d3570deb4ddb7816f10507c8fe7162022",
+    "vendor/quireink-stardict/Cargo.lock": "3242e78f0c0ae87c97919fd8c4fc824a94b3df9a8d566aced7b01885681b30bc",
+    "vendor/quireink-stardict/LICENSE-APACHE.md": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+    "vendor/quireink-stardict/.cargo_vcs_info.json": "fa75281fede316fd3801878f208e1e28ce2ab0ddbcef6c6cda00058a9ef9bf60",
+    "vendor/quireink-stardict/Cargo.toml.orig": "2bef4e450ba6d1381b1a7254579200d82a8016032a272d1c114a839a51602819",
+    "vendor/quireink-stardict/src/dict.rs": "e93991bde185625b917fa05fe8d08a8c937e8e12ac39b7cc423885b8eb2e2566",
+    "vendor/quireink-stardict/src/text.rs": "8b78357cc1fa49ef8e17d39bd2f8806bd985e371d6e249dba54ec6f969394263",
+    "vendor/quireink-stardict/src/lib.rs": "7f2b2b03af8b80548a82c76a8db6d43707d24725d01bd582aad4b841781c9013",
+    "vendor/quireink-stardict/src/index.rs": "3aba1c0663a5db1d0fc8231d4196f7ecf76dcd9077c6bb9d3416e48f68b36507",
+    "vendor/quireink-stardict/tests/real.rs": "53443b38932123991a14c8f05d085e05058bb865d41a63adc24582fb53f2b59b",
+    "vendor/quireink-stardict/tests/lookup.rs": "63d500a1054c40f29b400c490368e1e6f8ec14631e0105a6a67701205d6f419d",
+    "tests/fixtures/dictionary/example.ifo": "b120f4a4ecdc805a8e846f9fed015c14a85d0238637efc7977173c53bf8f4126",
+    "tests/fixtures/dictionary/example.syn": "3dff49654be15b5fc90cc99ed5641c0ab401b4e245f306039024ec0c607f9c5e",
+    "tests/fixtures/dictionary/example.dict": "2a9fb38f3a55a1a527bc00e4d5c5b260441eb17f5f6845d8e0915a1a22545c55",
+    "tests/fixtures/dictionary/example.idx": "7080fbfc14aa9c04bf3f6c31a094905416a4cb7c83357e97c543e00bda35a74d"
+  },
+  "snapshot_at_completion": true,
+  "logs": {
+    "tests": {
+      "path": "output/verification/dictionary-tests.log",
+      "sha256": "003ed2c54ca4d74d95de0680a0e8923bb84dd3037ce700e1149c71fb20fc00d7"
+    },
+    "cli": {
+      "path": "output/verification/dictionary-cli.log",
+      "sha256": "5968def2d6688367531692df531ca466d57bc8d85f9dbe23e89be3cb46bacfb5"
+    },
+    "final-check": {
+      "path": "output/verification/dictionary-final-check.log",
+      "sha256": "fa585e6cf8fba9887fcb717f1c2985dce99cae7994e3009b45f4dcd361643f88"
+    },
+    "firmware": {
+      "path": "output/verification/dictionary-firmware.log",
+      "sha256": "308ede8333d5b9e82b3d9cd3b7028136ec2a09ef664b5a8cb5a18d7c277482e5"
+    },
+    "lock": {
+      "path": "output/verification/dictionary-lock.log",
+      "sha256": "416cfe2dcf9c0cd053f978dfc8fb76c2cc6588b34c0b19c3216fd5071507acf2"
+    }
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "8bb31ab9545d2a441fa659ffefb629373b895b74280ca6f1499b6e835e8f4e41",
+    "bytes": 5183472,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "checks": [
+    "Readiness gate and incremental preparation",
+    "ASCII case, Unicode lowercase fallback, synonym lookup and markup reduction",
+    "Missing headword returns no results",
+    "Query length bound and CLI failure without JSON",
+    "Declared missing synonym file rejected",
+    "Oversized and truncated plain definitions rejected",
+    "Private cache rebuild on same-size replacement and truncated index rejection",
+    "No dictionary-side cache files written"
+  ],
+  "limits": [
+    "Reader-menu lookup and dictionary discovery/configuration remain unfinished.",
+    "Upstream full tests, dictzip and 64-bit offset integration and independent real-dictionary corpus are not qualified.",
+    "Permissive metadata and typed-field parsing, ordering validation and compressed-stream integrity need further review.",
+    "Firmware compilation does not exercise dictionary lookup on physical hardware or establish heap/latency bounds.",
+    "No full workspace or native simulator suite rerun in this checkpoint."
+  ]
+}

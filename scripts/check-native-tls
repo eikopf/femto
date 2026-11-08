@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+if [[ "${FEMTO_NATIVE_TLS_SHELL:-}" != 1 ]]; then
+  exec nix-shell nix/native-tls.nix --run './scripts/check-native-tls'
+fi
+pkg-config --modversion mbedtls
+python -c 'import ssl; print(ssl.OPENSSL_VERSION)'
+femto_tls_fixtures=$(mktemp -d)
+trap 'rm -rf "$femto_tls_fixtures"' EXIT
+python tests/native-tls/fixtures.py "$femto_tls_fixtures"
+export FEMTO_TLS_FIXTURES="$femto_tls_fixtures"
+cargo test -p femto --features native-mbedtls-tests --test native_tailnet_tls

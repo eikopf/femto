@@ -1,0 +1,25 @@
+[package]
+name = "epub-stream"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+authors = ["Robby Horvath"]
+license = "MIT"
+repository = "https://github.com/h0rv/epub-stream"
+autobins = false
+
+[features]
+default = ["std"]
+std = ["dep:miniz_oxide", "dep:heapless", "dep:crc32fast", "dep:log"]
+layout = []
+async = ["std", "dep:tokio"]
+cli = ["std"]
+
+[dependencies]
+quick-xml = { version = "0.39", default-features = false }
+miniz_oxide = { version = "0.9", default-features = false, features = ["with-alloc"], optional = true }
+heapless = { version = "0.9", optional = true }
+crc32fast = { version = "1", default-features = false, optional = true }
+log = { version = "0.4", default-features = false, optional = true }
+tokio = { version = "1", features = ["fs"], optional = true }
+

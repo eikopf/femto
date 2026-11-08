@@ -1,0 +1,33 @@
+{
+  "feature": "Cooperative simulator startup library scan",
+  "workspace_clippy_passed": true,
+  "native_x11_smoke_passed": true,
+  "checks": [
+    "Restored reading page is displayed during startup scanning",
+    "Traversal advances one scanner step per window poll",
+    "Escape skips the scan and continues to reading",
+    "Saved reader state remains byte-for-byte unchanged after skipping",
+    "Existing library cache remains byte-for-byte unchanged after skipping",
+    "Subsequent reopening and existing navigation, typography, library, and preview checks pass"
+  ],
+  "limitations": [
+    "Font/state loading, metadata parsing, cache loading/saving, and sorting remain synchronous",
+    "Native test uses isolated X11, not Wayland or physical Picco",
+    "The smoke script success-message text was expanded after the successful run; its assertions were unchanged"
+  ],
+  "logs": {
+    "clippy": {
+      "path": "output/verification/simulator-startup-scan-clippy.log",
+      "sha256": "02d4172d823c46fef83284de8d478d444535e21b9c1c46cc0d057adc129c8591"
+    },
+    "native_x11": {
+      "path": "output/verification/simulator-startup-scan-native_x11.log",
+      "sha256": "54af155582ee6de88dae4231c00e72e2789d5b330d89f621d8daad641bd3b0d5"
+    }
+  },
+  "input_sha256": {
+    "crates/femto/src/simulator.rs": "57052a19e533d21e75e58866d337cb08ba7a271c3aa24a88b5ff27cd9cab700a",
+    "scripts/simulator-smoke.py": "44dd9cb61f52d644eae270168b73b4ef3f7b2701f8dec6e409ac8f307809d71f",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199"
+  }
+}

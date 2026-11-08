@@ -1,0 +1,36 @@
+{
+  "feature": "Key renewal after accepted transport egress, including raw packet callers",
+  "passed_microlink_tests": 199,
+  "workspace_clippy_desktop_tailnet_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "independent_peer_rerun": false,
+  "checks": [
+    "Would-block and failed callbacks do not trigger renewal",
+    "Accepted aged raw transport queues a paced renewal",
+    "Handshake output does not recursively request renewal",
+    "Replacement handshake completes and raw traffic survives original key expiry",
+    "Receive-only test bypasses egress scheduling to isolate its receive trigger"
+  ],
+  "limitations": [
+    "Relay acceptance can mean bounded queue admission rather than physical transmission",
+    "Complete keepalive timers and total attempt limits remain unfinished",
+    "Physical and independent-peer qualification of these new triggers remains outstanding"
+  ],
+  "logs": {
+    "validation": {
+      "path": "output/verification/egress-rekey-validation.log",
+      "sha256": "add2c0b7502697c3fb1c390cc3bf5d4865f893373fd292fa14703b915926aeff"
+    },
+    "firmware": {
+      "path": "output/verification/egress-rekey-firmware.log",
+      "sha256": "3248fa4a6767816fc075878ed02a249ad75f7668608bcec0512aba092e29a472"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/network.rs": "be505f240000baad0a30d4a6e8be987801a7e270d849d345b5355454756efdf0",
+    "crates/femto-microlink/src/transport.rs": "b31da4c23652c1f632f0f1bc038240a5d89bc0342d6ad06f27ed717ce24863b3",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "34b99fd66cedab2c3c14eb2e45665e491afc596b1f4c71d83b1b2e5ba2b34706"
+  }
+}

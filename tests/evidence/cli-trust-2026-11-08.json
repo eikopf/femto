@@ -1,0 +1,125 @@
+{
+  "feature": "Enrolled CLI trust configuration and independent one-shot HTTPS services",
+  "targeted_tests_passed": 49,
+  "suites": {
+    "cli_unit": 15,
+    "simulator_unit": 18,
+    "cli_integration": 15,
+    "rotation_cli": 1
+  },
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "commands": {
+    "relay": "FEMTO_HEADSCALE_CLI_ONLY=1 FEMTO_CLI_RELAY_ONLY=1 ./scripts/check-headscale",
+    "normal": "FEMTO_HEADSCALE_CLI_ONLY=1 ./scripts/check-headscale"
+  },
+  "reports": {
+    "normal": {
+      "cli_registration": true,
+      "coordinator_ca_rejection": true,
+      "cli_reconnect": true,
+      "cli_rotation": true,
+      "cli_https_acquisition": true,
+      "cli_certificate_rejection": true,
+      "cli_progress_create_and_download": true,
+      "request_counts": {
+        "feed": 1,
+        "book": 1,
+        "gets": 2,
+        "puts": 1
+      },
+      "relay_only": false,
+      "peer": "1.104.5",
+      "tls_failures": [
+        {
+          "mode": "wrong-name",
+          "reason": "TimeoutError"
+        },
+        {
+          "mode": "untrusted",
+          "reason": "TimeoutError"
+        }
+      ],
+      "hardware_verified": false
+    },
+    "relay": {
+      "cli_registration": true,
+      "coordinator_ca_rejection": true,
+      "cli_reconnect": true,
+      "cli_rotation": true,
+      "cli_https_acquisition": true,
+      "cli_certificate_rejection": true,
+      "cli_progress_create_and_download": true,
+      "request_counts": {
+        "feed": 1,
+        "book": 1,
+        "gets": 2,
+        "puts": 1
+      },
+      "relay_only": true,
+      "peer": "1.104.5",
+      "tls_failures": [
+        {
+          "mode": "wrong-name",
+          "reason": "TimeoutError"
+        },
+        {
+          "mode": "untrusted",
+          "reason": "TimeoutError"
+        }
+      ],
+      "hardware_verified": false
+    }
+  },
+  "implementation": [
+    "Separate coordinator, DERP and application trust connectors",
+    "Shared bounded no-follow/nonblocking DER file loader for CLI and simulator",
+    "Coordinator roots retained through reconnect and endpoint publication",
+    "Relay-only mode excludes UDP from both CLI packet loops and application runtime",
+    "Application TLS connector captured by catalog/progress transport"
+  ],
+  "fixture_notes": [
+    "Initial acquisition attempt used the device credential schema; fixture now writes the strict CLI credential schema without allow_http",
+    "Neither service certificate rejection changed HTTP request counts; server failure was TimeoutError after client-specific rejection"
+  ],
+  "limitations": [
+    "No interactive enrolled browser or independent CLI conflict/cancellation test",
+    "No independent UDP-mode relay-CA test; CLI service workflows exercise application runtime",
+    "No direct-packet counter; normal mode does not assert selected data path",
+    "No TLS alert delivery claim",
+    "No new physical hardware, firmware build, full workspace or full native regression this turn"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/cli-trust-tests.log",
+      "sha256": "7bedd1397bab862270c19f5a48fcc2d403f7ddb03fbc2f6a47ed2097338368f9"
+    },
+    "regression": {
+      "path": "output/verification/cli-trust-regression.log",
+      "sha256": "fa205a59260878b349262653e64ce7c665aac5bb3d0fc53e59ee16771065ae30"
+    },
+    "normal": {
+      "path": "output/verification/cli-trust-normal.log",
+      "sha256": "95d7e8c7f641ae23b688af4024960746f38817ba756d519b4c5a632a9cb6ba1b"
+    },
+    "relay": {
+      "path": "output/verification/cli-trust-relay.log",
+      "sha256": "69865007836ba4aef9d5c7c235d613dc626060411833e750c175afc8bcbe077f"
+    }
+  },
+  "input_sha256": {
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "crates/femto/src/main.rs": "2437b55fc6a2403a8f535316ebe4db8c8d5638487d6ec89f556b3e92c8fe37f5",
+    "crates/femto/src/simulator.rs": "1ef060e03ccf99c2475f5165fb4f2ab96b0614ae8e0df4c47b8e77c819dd4f3b",
+    "crates/femto/src/simulator_tailnet.rs": "e989893295247367dc5cc2742fd264cba8203145c89b6095e95f6ea999433d44",
+    "crates/femto/src/host_trust.rs": "0f4a23b0f48084765c17c5fb5ab2f29ca0653bc0f5d4e55c3b37f8b4d99d2b6a",
+    "crates/femto/src/tailnet.rs": "a3fdc1c42c34a68e673a4105606abc13c123cff76ff67c231a04a6a78ada0e2e",
+    "crates/femto/src/tailnet_catalog.rs": "a5d41667e308bc215e2edb840f7f0e61db25396e4d336895e4b9f20647eb5690",
+    "scripts/check-headscale": "15ba35a86641158bc20e96178aed44e71d0b5c04219eaad6e880c2b7bd1ff007",
+    "scripts/check-headscale.py": "e9c38da57d7ef585b205f6554304c93d89189b817cf3e19b9235a9ba931b8925",
+    "scripts/cli-headscale.py": "a39425a40988a89dce88225aa7614dabbce7835553b8400ddade9299fd370060",
+    "scripts/simulator_services.py": "93dd9b0216a1950fd8797410ddd8b61719901877040e75396a6d285acb8bfbaa"
+  },
+  "cli_binary_sha256": "1f2f9fec88e3364fb2357824360e32fe5982a466e476854b3482bb17ecc07563",
+  "hardware_verified": false
+}

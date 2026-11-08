@@ -1,0 +1,63 @@
+{
+  "feature": "Shared clipping menu with visible-page capture and excerpt viewing",
+  "targeted_tests_passed": 40,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "native_x11_smoke_passed": true,
+  "checks": [
+    "Shared button menu captures the exact first-to-last visible text source range",
+    "Repeated capture retains a single record",
+    "List and excerpt detail render distinct frames; Back restores list and reading",
+    "Source anchor and rendered reading pixels remain unchanged",
+    "Normal state save/reload retains the excerpt and reading position",
+    "Existing native reader/catalog/sync/tailnet lifecycle smoke workflows pass with the appended root-menu entry"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --test ui --test clippings && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco",
+    "./scripts/check-simulator"
+  ],
+  "input_sha256": {
+    "crates/femto-reader/src/controller.rs": "8ff76ff7b2727e37bee14c6c551fdf41d52ca58855f56494b0fe9980ba620c7a",
+    "crates/femto-reader/src/ui.rs": "9f54e0748413dfa4512772b51c0be7d15ec7005d0b96cc919f9aa3e4353e559e",
+    "crates/femto-reader/src/clipping.rs": "f346bcdd414932b81e93777c7b5def0dc5be148e9228f82b1f8b417cad3cc71a",
+    "crates/femto-reader/src/selection.rs": "f6befe5739313379530150e96f91db95135687bf672e5807243dfbeafa1fd7aa",
+    "crates/femto-reader/src/state.rs": "f0006c1de86e9c4fb3e46262618c9c1287806957adb059bc99ff751ba9db512c",
+    "crates/femto-reader/tests/ui.rs": "938739c42b6f79f6ae1e8fb54d57bccdd0b67fba0fd667ab277dde62adba4991",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54",
+    "scripts/simulator-smoke.py": "80d9a74515df47e0ef1626f7ddda61efefcd1a05bcae1b1b891c7922df4167c8"
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/clipping-menu-tests.log",
+      "sha256": "5032fd4fcbe9e7d07283a0986bcd54617e9281af56e6e67e9fae2931dd2e158c"
+    },
+    "picco": {
+      "path": "output/verification/clipping-menu-picco.log",
+      "sha256": "aa987ac77eb209a70e2a2ef67fce829e450d4a5e4179061b03e4d5dbccb23b2b"
+    },
+    "native": {
+      "path": "output/verification/clipping-menu-native.log",
+      "sha256": "989a7d7f2220dcb9e315f6f3240a9b3bb51ad6946b9287c00980bf3c8c9cdbd1"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "4d6b4c0b42243bd8bdbfc6be00697380fe538eb5094ad1ab2d5cfe622ee7198b",
+    "bytes": 5164896,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Native smoke checks existing workflows; the new clipping workflow is exercised through the shared UI test, not native window input.",
+    "Page-text capture is synchronous and does not supply arbitrary-range selection gestures.",
+    "Deletion, source navigation, highlight painting and export controls remain unfinished.",
+    "Physical input/display, interrupted SD writes and grayscale firmware are not qualified by this checkpoint."
+  ]
+}

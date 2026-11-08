@@ -1,0 +1,22 @@
+[package]
+name = "femto-catalog"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+url = "=2.5.8"
+httparse = "=1.10.1"
+base64 = "=0.22.1"
+zeroize = { version = "=1.9.1", features = ["serde"] }
+iri-string = { version = "=0.7.14", default-features = false }
+
+[features]
+tailnet = ["dep:femto-microlink"]
+
+[target.'cfg(all(unix, not(target_os = "espidf")))'.dependencies]
+femto-microlink = { path = "../femto-microlink", optional = true }

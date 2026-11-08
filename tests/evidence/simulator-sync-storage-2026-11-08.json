@@ -1,0 +1,35 @@
+{
+  "scope": "Native X11 sync completion persistence failure and recovery",
+  "command": "./scripts/check-simulator",
+  "exit_code": 0,
+  "checks": [
+    "Valid remote download response held until after the UI starts syncing",
+    "Private test state file moved to a backup and replaced by a nonempty directory",
+    "Completion-time state publication fails and simulator exits nonzero within five-second fixture bound",
+    "Error identifies sync state save failure and requires reopen",
+    "Prior saved file remains byte-for-byte unchanged and obstruction remains intact",
+    "Restored state reopens with prior position and checkpoint",
+    "Fresh explicit sync applies remote position and checkpoint after reopen",
+    "No additional remote PUT in download/failure/recovery sequence",
+    "Full existing native reader, catalog and sync fault smoke cases pass"
+  ],
+  "limitations": [
+    "Filesystem namespace/publication failure only; not disk-full, fsync failure or power-loss injection",
+    "No remote upload commit uncertainty exercised in this scenario",
+    "No new production Rust changes, firmware build, tailnet run or physical hardware test"
+  ],
+  "log": {
+    "path": "output/verification/simulator-sync-storage.log",
+    "sha256": "f9cb22c9787c08cc57c54d5f06edd8d7f49383c66527fc03c194d5dd7a72c88a"
+  },
+  "input_sha256": {
+    "scripts/simulator-smoke.py": "80a9a997d950c742387e6128767e1f945a29f1a78e19f070b0f7aaf1383f9cd7",
+    "crates/femto/src/simulator.rs": "051905586c38429609dae530c88b844202581b62bb148a993480cba88ce7a989",
+    "crates/femto/src/simulator_sync.rs": "fcc3d8c5540affbd3070712458c1bc32e6dd0509e5734cdf872aa01bc69e3f1a",
+    "crates/femto/src/state_file.rs": "e35e4fd5296da7bb966c6cfaefd3cdc6da50d744b8208034ff563fa563fd165b",
+    "crates/femto-reader/src/state.rs": "404a21ca7ec1f9c4b9954345ba8beb786eb9f353fce5adfad3d8e7ff1bae412f",
+    "crates/femto-sync/src/reader.rs": "d54d3a6292b8d68324256af3ddaac59a2ab4d7ddfb9309e1bb93a53d5b9fb6e8",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "target/debug/femto-simulator": "606dda80b33993a06e22e908893aba9656d61054219915c70bd566c89d3cd90d"
+  }
+}

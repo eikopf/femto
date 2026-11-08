@@ -1,0 +1,32 @@
+{
+  "feature": "Reusable host registration used by CLI",
+  "targeted_tests_passed": 225,
+  "test_suites": {
+    "microlink": 210,
+    "cli_unit": 15
+  },
+  "workspace_clippy_passed": true,
+  "checks": [
+    "CLI uses shared registration with bootstrap, TLS/Noise, authenticated outcomes and rotation commit",
+    "Invalid configuration and pre-cancellation leave rotation unprepared",
+    "Pending rotation reopens with same candidate",
+    "Pending rotation rejects ordinary identity access and another coordinator"
+  ],
+  "limitations": [
+    "New tests exercise preparation and pre-connect rejection, not live coordinator registration",
+    "No new independent-peer, native simulator, or Picco build qualification",
+    "Simulator enrollment worker and controls remain unfinished"
+  ],
+  "logs": {
+    "tests_and_clippy": {
+      "path": "output/verification/host-registration-tests.log",
+      "sha256": "5f44b1a31811fe05e043936e87a732d485891c578af771643e46afc837658c2f"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/host_registration.rs": "cd3653a5a6d63bc8a99607834ffc6c938f8fbd2759f9db56599ee13b24b77144",
+    "crates/femto-microlink/src/lib.rs": "040af812f78184f6865241cbebec6461e76d76e87956dff889b791dc74434517",
+    "crates/femto/src/tailnet.rs": "456ee059f6bdf5e6475453cd977e198168c6eaea077f97832732c7691b7d5cfe",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199"
+  }
+}

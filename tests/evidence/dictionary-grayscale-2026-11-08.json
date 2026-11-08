@@ -1,0 +1,63 @@
+{
+  "feature": "Dictionary discovery resource boundaries and current grayscale firmware",
+  "commands": [
+    {
+      "command": "cargo test --locked -p femto-reader --test dictionary",
+      "exit_code": 0,
+      "passed": 18
+    },
+    {
+      "command": "cargo clippy --locked -p femto-reader --test dictionary -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo fmt --all --check",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 FEMTO_PICCO_GRAYSCALE=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "4096 entries accepted with one dictionary and 4095 unrelated files; the next unrelated entry rejects the whole scan",
+    "255-byte filenames accepted; 256-byte filenames rejected for ASCII and multibyte UTF-8",
+    "Path separators, control characters, wrong-case suffix and empty basename rejected",
+    "Invalid UTF-8 .ifo filename rejects directory discovery"
+  ],
+  "tested_files_sha256": {
+    "crates/femto-reader/src/dictionary.rs": "3d7486483634c5b77159c54db1a788b3bcc884dcdc8e6cc6f4c2fd2b5abb70a1",
+    "crates/femto-reader/tests/dictionary.rs": "1862939e9760388b58495c8d8d3733568dc53a2cd959dd7a1559779bd150d955"
+  },
+  "logs_sha256": {
+    "output/verification/dictionary-bounds.log": "130e80ee3a162c687e249d5f2c3126072e1f93c113bfb17f93c01686d04afe48",
+    "output/verification/dictionary-bounds-clippy.log": "df98b6920372541dc5d53b1633e0ee9ffaf8ba867df7b5214517133f466b381c",
+    "output/verification/dictionary-grayscale.log": "bbc4a1bccefdf2d58a1655e050988bbfe10336dc54e156f1ca639183d1dd57d2"
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "7950b27879e9c81a516c38ff34f5969cee503ca385ea29e7496588bfcdc68e8c",
+    "bytes": 5230704,
+    "chip": "esp32s3",
+    "display_levels": 4,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "firmware_artifacts_sha256": {
+    "output/picco-grayscale/femto-picco.debug.elf": "8626adf6fb0101f0f225bd07d7070e37b8d5a88532addc45265419417e67f4f4",
+    "output/picco-grayscale/femto-picco.json": "ab08b184c5319fbf7c37f3e334cfe2af039641ccccf4b05497928bec362f448f",
+    "output/picco-grayscale/femto-picco.bin": "7950b27879e9c81a516c38ff34f5969cee503ca385ea29e7496588bfcdc68e8c",
+    "output/picco-grayscale/femto-picco.elf": "6401182455f09bb460a6e92b6a76419a7edb37621aa81d63f84b17edf4a7c079"
+  },
+  "input_manifest": "output/verification/dictionary-grayscale-inputs.json",
+  "input_manifest_sha256": "013db7c912807467f0be282c9cb761dedb22d1fc4e10654156ae03e47e57aaff",
+  "recorded_inputs_unchanged": 416,
+  "input_snapshot_timing": "During firmware build, verified unchanged at completion",
+  "limits": [
+    "Incremental build only; current clean-build reproducibility not established",
+    "No physical Picco display, SD latency or memory qualification",
+    "Full workspace gate not rerun for test-only additions; preceding runtime gate passed 999 tests"
+  ]
+}

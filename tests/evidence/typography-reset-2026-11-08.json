@@ -1,0 +1,44 @@
+{
+  "feature": "Cancellable per-book typography reset with atomic layout and raster transition",
+  "targeted_tests_passed": 56,
+  "workspace_clippy_passed": true,
+  "native_x11_smoke_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Menu reset restores built-in layout and raster defaults",
+    "Cancelled reset preserves state and pixels",
+    "Completed reset retains source anchor and persists book defaults",
+    "Already-default reset performs no reflow",
+    "Concurrent raster changes reject stale reflow completion",
+    "Invalid proposed raster and layout fail before reflow",
+    "Native pointer selection resets and saves book hyphenation without moving source anchor"
+  ],
+  "limitations": [
+    "Physical touch, display quality and panel calibration remain unqualified",
+    "Reset saves explicit defaults; it does not remove the book preference record"
+  ],
+  "logs": {
+    "final": {
+      "path": "output/verification/typography-reset-final.log",
+      "sha256": "f39d755a06cff3b255ec5c91beeee430acb998d93097ef884c3932744c593ad4"
+    },
+    "native": {
+      "path": "output/verification/typography-reset-native.log",
+      "sha256": "27b8b2dd9f8c066616a37c9eadb2c6390bb3aa843abfe56780a2d1b26528c272"
+    },
+    "firmware": {
+      "path": "output/verification/typography-reset-firmware.log",
+      "sha256": "7f99169a0b143f055ee7fd246eb7d6844675e5e80867dc03147c51335a26f992"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-reader/src/controller.rs": "3ba382a7429635227092e572d7874043719426f1bf4dbc536d029f97027e1e1a",
+    "crates/femto-reader/src/ui.rs": "24ef1de3083f11ef3d395cb5392f0aeba8b6f25629f36ee35d530f0b8a1f0851",
+    "crates/femto-reader/tests/ui.rs": "97ee6b20ed14662c222d41f23dd900b6bcbb22acc0b1b83a5430d3557366e63d",
+    "crates/femto-reader/tests/book_typography.rs": "a8fc918c8890a8627980e1b85faa5b9b23cc0aae90f2edfa2f9daf961c04bdbf",
+    "scripts/simulator-smoke.py": "f467c46a3b012c64d7ee2cb2b507c60f6ce472027cac22657d9310a6fe9e15ef",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "a38a272656320f0008a19091fb7bc0133eb8f1c11b6328f900794f244b08503e"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "feature": "Control heartbeat semantics and preservation of pending traffic",
+  "microlink_tests_passed": 206,
+  "workspace_clippy_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Heartbeat before initial map cannot authorize",
+    "Heartbeat ignores node, peer, policy and relay fields including incompatible field types",
+    "Malformed JSON and duplicate or mistyped KeepAlive revoke authorization",
+    "Local expiry remains enforced",
+    "Queued initiation, outbound ciphertext, inbound plaintext and retained delivery survive heartbeat",
+    "Non-heartbeat map invalidates retained delivery and policy revocation rejects traffic"
+  ],
+  "limitations": [
+    "No new independent Headscale/Tailscale run for this change",
+    "No physical hardware verification or grayscale rebuild",
+    "Optional PingRequest, ControlTime and PopBrowserURL handling not added",
+    "Persistent WireGuard keepalive is an optional extension, not a setting in the pinned coordinator peer contract"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/control-heartbeat-tests.log",
+      "sha256": "924f3458db576d8c12eb4aa7982a9c45d1ec6aad13c3012e4ad3ff4cd934e771"
+    },
+    "clippy": {
+      "path": "output/verification/control-heartbeat-clippy.log",
+      "sha256": "7d6498b564726083edaa7db456954e7131a77a98d32f2d2977a12bcef35e8042"
+    },
+    "firmware": {
+      "path": "output/verification/control-heartbeat-firmware.log",
+      "sha256": "c2a742d9a2ebd82047209728587478cc0a2f55ab28e846eaa802f15c2b8f4f18"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/coordinator.rs": "e98bd9f416a9b3063f87fd741ecabf7d37e09731ac4384047186e2acc7fbd43f",
+    "crates/femto-microlink/src/network.rs": "087e6ab34c0a8b94cd845a732186d6d8e67cbf031560373a4a1670fd26f101c2",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "08ca32848e286164aca9a0ca7c171930ac97967bfa490eeb0a96db0d6d1476fb"
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "feature": "Verify same-chapter highlights against the retained layout source without reparsing or cloning it",
+  "commands": [
+    {
+      "command": "cargo fmt --all",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p femto-reader --lib --test highlights --test ui",
+      "exit_code": 0,
+      "library_tests_passed": 40,
+      "highlight_tests_passed": 4,
+      "ui_tests_passed": 45
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "All byte-endpoint pairs in a Unicode two-paragraph fixture produce matching extraction results or errors for borrowed and document paths",
+    "Borrowed extraction rejects ranges outside the supplied chapter and output beyond 16 KiB",
+    "Same-chapter highlight pixels remain intact when a temporary backing TXT changes after opening",
+    "Reopening changed TXT assigns a different content identity and does not apply old highlights",
+    "Existing highlight persistence, reflow, overlap, invalid-source omission and selection UI regressions pass"
+  ],
+  "input_manifest": {
+    "path": "output/verification/highlight-chapter-inputs.json",
+    "sha256": "5deafd8904ad06d6a37aa59ed2d02c7c85b284e2f47d22bb84855aa048e2f571",
+    "files": 391,
+    "unchanged_at_completion": true
+  },
+  "artifacts": {
+    "tests": {
+      "path": "output/verification/highlight-chapter-tests.log",
+      "sha256": "6efc6a3af1bd1711df8be26c340609fa96592871136f26f05692dbdb1d05ac42"
+    },
+    "picco": {
+      "path": "output/verification/highlight-chapter-picco.log",
+      "sha256": "498795c145784b1f27553898b6bbf72d3bffa3abd034e12f9a294466c618064d"
+    },
+    "firmware": {
+      "path": "output/verification/highlight-chapter-firmware.json",
+      "sha256": "87dbe960de60b5be3ea5bc536813277081cfb5f7f516212c534767766059117d"
+    }
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "c377feaf219dffcdd0f5604a23fb13769fa9f87396a4023ef97be8c3e4b88949",
+    "bytes": 5178272,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Cross-chapter excerpt validation retains synchronous document parsing.",
+    "Each comparison still constructs a bounded quote; no successful-validation cache or physical latency bound is established.",
+    "Live backing-file change detection is not implemented; current layout and same-chapter highlight validation share the retained source snapshot.",
+    "Native smoke, independent network interoperability, grayscale firmware and clean reproducibility were not rerun in this checkpoint.",
+    "Physical Picco display, memory and timing remain unqualified."
+  ]
+}

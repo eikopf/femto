@@ -1,0 +1,46 @@
+{
+  "verified_at": "2026-11-08T04:02:59.776353+00:00",
+  "rust_tests_and_doctests_passed": 840,
+  "rust_test_batches": 65,
+  "rust_tests_failed": 0,
+  "rust_tests_ignored": 0,
+  "python_firmware_tests_passed": 7,
+  "format_check": true,
+  "workspace_check": true,
+  "workspace_clippy_desktop_tailnet": true,
+  "grayscale_picco_build": true,
+  "hardware_verified": false,
+  "independent_network_fixture_rerun": false,
+  "native_smoke_rerun": false,
+  "previous_native_smoke_evidence": "tests/evidence/cooperative-link-navigation-2026-11-08.json",
+  "fixed_regression": "Simulator keyboard unit test assumed synchronous navigation. It now polls pending navigation and checks Escape cancellation, retry and asynchronous Back.",
+  "commands": [
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "log": "output/verification/navigation-full-workspace.log",
+      "log_sha256": "63c2a38c41a1592c6bf56ca46b53d14e1d75e2dc42f367d813e93128c778248e"
+    },
+    {
+      "command": "FEMTO_PICCO_GRAYSCALE=1 ./scripts/build-picco",
+      "exit_code": 0,
+      "log": "output/verification/navigation-full-grayscale.log",
+      "log_sha256": "ce8bcd8a317db552130167c6be753870503083cb6b7832f0de42bd1025d13bca"
+    }
+  ],
+  "input_sha256": {
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "scripts/check": "1ea673906c8e21d9cc2f55fcc73b746d0cf4f5e32127edf67c5a83cda6c8719b",
+    "scripts/build-picco": "12234af5eed7c3d6a56474eb66115d291ae0c61a955e16a8bfd9d225cdc4764f",
+    "crates/femto/src/simulator.rs": "a169b0930cfc9acfa9c07210c168871d142cf50639ec50094fd9efcbfbf3f5c0",
+    "crates/femto-reader/src/controller.rs": "596e9c0152703ca7c697eeb5b0f83fabd00d8447cfc26c5f0bb170a691be7df6",
+    "crates/femto-reader/src/ui.rs": "b5e679cb5b146ec011685f119e6b0d92fef9342a0f4daee9e7b7538b7dd779ee",
+    "crates/femto-reader/src/layout.rs": "2055fea3cbea346b4dbf1125fa941c15099d11c77c4001c65da46c6976c1f048",
+    "crates/femto-reader/src/scripts.rs": "e7d6dcd3a7fb2668adf0fca662d9d047ddfb3ae76dd3fc9e0a8966b9a25a2966",
+    "vendor/epub-stream/src/css.rs": "a3b75d61cf91dd7a7ca97533f94bcd9c4991b6df9677e9f2544a208ad90b81cd",
+    "vendor/epub-stream/src/render_prep.rs": "b47c351fc040d87cccafd4d9f1564c3d5c35bf51f31af61d58269d6cd301aed2",
+    "firmware/picco/src/main.rs": "c44fcaf4b0c406f074bbb47187bdd2ddf68489b675c18e2e60be521f2a94f163",
+    "output/picco-grayscale/femto-picco.bin": "69543bb45f5761ada7708fb62cdd83907911c7061488d2e2eb0da522a7f5f1be",
+    "output/picco-grayscale/femto-picco.json": "45c3614a3b9965177ee231dfaf87642a80c1cc1f1bfc1e187f78c64917ca4563"
+  }
+}

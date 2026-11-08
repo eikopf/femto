@@ -1,0 +1,42 @@
+{
+  "feature": "Authenticated receive-triggered WireGuard initiator renewal",
+  "receive_age_threshold_ms": 165000,
+  "threshold_comparison": "strictly greater than",
+  "reference": "https://github.com/WireGuard/wireguard-go/blob/master/device/receive.go",
+  "passed_microlink_tests": 197,
+  "workspace_clippy_desktop_tailnet_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "independent_peer_rerun": false,
+  "checks": [
+    "No renewal at threshold; accepted keepalive immediately after threshold queues renewal",
+    "Responder does not initiate receive-age renewal",
+    "Tampered and replayed ciphertext cannot schedule renewal",
+    "Accepted UDP payload remains deliverable when output queue prevents renewal",
+    "Later authenticated packet retries after queue pressure clears",
+    "Replacement handshake completes and traffic survives original key expiry"
+  ],
+  "limitations": [
+    "No idle background renewal scan",
+    "Total attempt limits and complete keepalive timers remain unfinished",
+    "Explicit low-level initiation remains caller-paced",
+    "Physical and independent-peer receive-dominated workload qualification remains outstanding"
+  ],
+  "logs": {
+    "validation": {
+      "path": "output/verification/receive-rekey-validation.log",
+      "sha256": "0e37f5a865f2f13be3756be362d6cf9447d355ba7c27c44289b40a733b00f53e"
+    },
+    "firmware": {
+      "path": "output/verification/receive-rekey-firmware.log",
+      "sha256": "288fdf55e84b1a2de801dd830f5d00e1949359cc16da3a043bac43da98feb629"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/transport.rs": "d361dac6141110acf4164e4c2b1947137af9a37740697aa1acfadfc67cb205bb",
+    "crates/femto-microlink/src/plane.rs": "12a7df1cde80a7d2ed7096fb3848a48503496e95eb2af35e31d0f949d399378d",
+    "crates/femto-microlink/src/network.rs": "8dbc5f4a4dd276a3e24cf407858681adb238d7b953b7f99974b0ae3539da80da",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "16772505fb8e410cee82245e97a70bf57e510a6fb41be19de25d0181518f45ba"
+  }
+}

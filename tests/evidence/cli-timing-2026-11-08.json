@@ -1,0 +1,142 @@
+{
+  "feature": "Independent enrolled CLI service timing",
+  "commands": {
+    "normal": "FEMTO_HEADSCALE_CLI_ONLY=1 ./scripts/check-headscale",
+    "relay": "FEMTO_HEADSCALE_CLI_ONLY=1 FEMTO_CLI_RELAY_ONLY=1 ./scripts/check-headscale"
+  },
+  "reports": {
+    "normal": {
+      "cli_registration": true,
+      "coordinator_ca_rejection": true,
+      "cli_reconnect": true,
+      "cli_rotation": true,
+      "cli_https_acquisition": true,
+      "cli_interactive_details_refresh_and_download": true,
+      "cli_interactive_destination_guards": true,
+      "cli_certificate_rejection": true,
+      "cli_progress_create_and_download": true,
+      "cli_progress_conflict_preserves_both_sides": true,
+      "cli_progress_conflict_retry": true,
+      "cli_progress_convergence_without_write": true,
+      "cli_progress_cancel_preserves_state": true,
+      "cli_progress_retry_after_cancel": true,
+      "cancellation_seconds": 0.06121103744953871,
+      "service_timing": {
+        "acquisition_total_seconds": 6.2718392591923475,
+        "acquisition_first_feed_seconds": 6.11321666277945,
+        "browser_total_seconds": 12.519396898336709,
+        "browser_first_feed_seconds": 11.72352509945631,
+        "browser_refresh_feed_seconds": 12.48352610412985
+      },
+      "request_counts": {
+        "feed": 3,
+        "book": 2,
+        "gets": 7,
+        "puts": 1
+      },
+      "relay_only": false,
+      "peer": "1.104.5",
+      "tls_failures": [
+        {
+          "mode": "wrong-name",
+          "reason": "TimeoutError"
+        },
+        {
+          "mode": "untrusted",
+          "reason": "TimeoutError"
+        }
+      ],
+      "hardware_verified": false
+    },
+    "relay": {
+      "cli_registration": true,
+      "coordinator_ca_rejection": true,
+      "cli_reconnect": true,
+      "cli_rotation": true,
+      "cli_https_acquisition": true,
+      "cli_interactive_details_refresh_and_download": true,
+      "cli_interactive_destination_guards": true,
+      "cli_certificate_rejection": true,
+      "cli_progress_create_and_download": true,
+      "cli_progress_conflict_preserves_both_sides": true,
+      "cli_progress_conflict_retry": true,
+      "cli_progress_convergence_without_write": true,
+      "cli_progress_cancel_preserves_state": true,
+      "cli_progress_retry_after_cancel": true,
+      "cancellation_seconds": 0.08373451791703701,
+      "service_timing": {
+        "acquisition_total_seconds": 1.218617582693696,
+        "acquisition_first_feed_seconds": 1.0552394753322005,
+        "browser_total_seconds": 12.976256707683206,
+        "browser_first_feed_seconds": 11.98172012064606,
+        "browser_refresh_feed_seconds": 12.844826425425708
+      },
+      "request_counts": {
+        "feed": 3,
+        "book": 2,
+        "gets": 7,
+        "puts": 1
+      },
+      "relay_only": true,
+      "peer": "1.104.5",
+      "tls_failures": [
+        {
+          "mode": "wrong-name",
+          "reason": "TimeoutError"
+        },
+        {
+          "mode": "untrusted",
+          "reason": "TimeoutError"
+        }
+      ],
+      "hardware_verified": false
+    }
+  },
+  "preliminary_relay_timing": {
+    "acquisition_total_seconds": 1.2176147159188986,
+    "acquisition_first_feed_seconds": 1.054546250961721,
+    "browser_total_seconds": 12.560258100740612,
+    "browser_first_feed_seconds": 11.594408859498799,
+    "browser_refresh_feed_seconds": 12.458911870606244
+  },
+  "preliminary_run_note": "Passed before service_timing was added to the saved report; timings were emitted to the log. Final normal and relay runs include the saved report field.",
+  "assertions": [
+    "First feed and refresh times are ordered between process launch and completion",
+    "Exactly three authenticated feeds",
+    "Existing acquisition, destination guards, trust rejection, progress conflict/convergence/cancellation/retry assertions pass"
+  ],
+  "analysis": "The delay occurs before the service receives the initial browser feed. Planner inspection does not support the hypothesis that a busy dialer consumes a plan or adds a failure cooldown. No transport-level cause is established.",
+  "limitations": [
+    "Durations include registration, maps, TCP, TLS and request delivery; handshake stages are not measured separately",
+    "Individual observations are not latency bounds",
+    "Normal-mode selected path is not asserted",
+    "No runtime behavior change, full workspace regression, native simulator run, firmware build or physical hardware qualification in this change"
+  ],
+  "python_compile_passed": true,
+  "input_sha256": {
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "scripts/cli-headscale.py": "ad9f6ca6a616a6ddb2ac7bef09cfdd0ab8d0c90bb36b7c2d898d4b67b7eaa28f",
+    "scripts/simulator_services.py": "c550ea345dcf56318005195d5166d1728630d4e13309e829cdee1ae39bc86fc6",
+    "scripts/check-headscale.py": "e9c38da57d7ef585b205f6554304c93d89189b817cf3e19b9235a9ba931b8925",
+    "crates/femto/src/tailnet_catalog.rs": "4ce0e83a5103d1c47096ee1d9f1694d4f23871999a9285f6b85e64467c3e2df4",
+    "crates/femto-microlink/src/host_runtime.rs": "278b0cf81b8110db4b449a3495ea02c57777124bbc864c898cdba351f27ea30b",
+    "crates/femto-microlink/src/relay_worker.rs": "e906f1f42f5d31457a70c1de7f034409ee2b95824ce942e9ab1ab23a5d3f0779",
+    "crates/femto-microlink/src/relay_pool.rs": "1fcc2de21ade0b5af4bd8746993861c78ae3e2281c9e2d545dcc3f98cf3f3a3d"
+  },
+  "cli_binary_sha256": "2c9a768946b32482a27a68a8bf2d4970ee5047f38192295bb73efd328f7fbe64",
+  "logs": {
+    "normal": {
+      "path": "output/verification/cli-timing-normal.log",
+      "sha256": "9b3d02bf37e9be5e073f092972cc387901f51f43f290e4516fb4e1e01b372dcc"
+    },
+    "relay": {
+      "path": "output/verification/cli-timing-relay.log",
+      "sha256": "74f3c7258813932383199ec5635c8c954fcbbf41c99b351f9afd3d9e3299a05e"
+    },
+    "relay-first": {
+      "path": "output/verification/cli-timing-relay-first.log",
+      "sha256": "920be7888dd0aeabf50370334da1639af727c9e7697b61fc706c924fd1c1c733"
+    }
+  },
+  "hardware_verified": false
+}

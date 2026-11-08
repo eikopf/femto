@@ -1,0 +1,55 @@
+{
+  "feature": "Native X11 pointer word selection, cancellation, save and reopen",
+  "command": "./scripts/check-simulator",
+  "exit_code": 0,
+  "checks": [
+    "Explicit selection mode entered through native menu keys",
+    "Pointer tap at fixture word opens preview without inserting a clipping",
+    "Default Cancel leaves clipping list empty",
+    "Second pointer selection and explicit Save retain exact word text and source range",
+    "Quit/reopen preserves saved word, reading position and bookmark",
+    "Existing page-clipping, typography, library, catalog, progress and tailnet lifecycle smoke checks pass"
+  ],
+  "observed_word": "when",
+  "observed_range": {
+    "chapter": 0,
+    "block": 4,
+    "start_byte": 259,
+    "end_byte": 263
+  },
+  "input_manifest": {
+    "path": "output/verification/native-word-selection-inputs.json",
+    "sha256": "d1dce0f00d00618a6043ec685be96ebfc6218d7c886d4a1275ecb42280466ee9",
+    "files": 390,
+    "unchanged_at_completion": true
+  },
+  "artifacts": {
+    "log": {
+      "path": "output/verification/native-word-selection-log.log",
+      "sha256": "ac0ef9bd51f5a2dd7c5558fd8c8fae92547ec875f29c6ddeb8babc36d829c898"
+    },
+    "mode": {
+      "path": "output/verification/native-word-selection-mode.png",
+      "sha256": "173e96870408cd58630683a8d5689ed6aa9fda5e250f2826cf44dd65df5e43f3"
+    },
+    "preview": {
+      "path": "output/verification/native-word-selection-preview.png",
+      "sha256": "c45f8d3fac51909854a36cdf8b8ffd515db6d10bb90cdccba91a27a84b3e5a19"
+    },
+    "record": {
+      "path": "output/verification/native-word-selection-record.json",
+      "sha256": "b2166d49b905466d99ce9847114238ab8490d44f7c1be22c7c6ca01df6211a47"
+    }
+  },
+  "screenshots_inspected_at_original_resolution": true,
+  "visual_findings": [
+    "Page text remains visible above the instruction footer",
+    "Preview shows Cancel selected, a separate Save action, and the tapped word"
+  ],
+  "limits": [
+    "One Latin fixture word in portrait X11; native RTL, rotation and grapheme variants are not exercised here.",
+    "Physical Picco touch, Wayland and device storage durability remain unqualified.",
+    "Footer occlusion, multi-word range adjustment, highlighting and button-only targeting remain unfinished.",
+    "No firmware rebuild or independent network interoperability rerun in this checkpoint."
+  ]
+}

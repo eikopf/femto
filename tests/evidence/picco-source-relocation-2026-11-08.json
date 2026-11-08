@@ -1,0 +1,61 @@
+{
+  "verified_at": "2026-11-08T01:48:46.945473+00:00",
+  "platform": "x86_64-linux",
+  "profile": "release",
+  "display_levels": 2,
+  "source_relocation_verified": true,
+  "source_roots": [
+    "/home/oliver/projects/femto",
+    "/home/oliver/projects/femto/output/source-relocation/source"
+  ],
+  "clean_target_directories": [
+    "output/repro-namespace-a-target",
+    "output/source-relocation/source/output/namespace-b-target"
+  ],
+  "artifact_directories": [
+    "output/repro-namespace-a",
+    "output/source-relocation/source/output/namespace-b"
+  ],
+  "identical_copied_input_files": 366,
+  "copied_inputs_sha256": "1d4b14e3ea63bdd08081c92510bd7c31300e16a60162b05a95f41b5e1aeadd21",
+  "copied_inputs_hash_algorithm": "Sorted walk, excluding output/target/.embuild/__pycache__ and sdkconfig/sdkconfig.old; concatenate relative UTF-8 path, NUL, SHA-256 file digest.",
+  "artifacts": {
+    "femto-picco.elf": {
+      "bytes": 4950936,
+      "sha256": "2565ff8093a01124cbe19a27ab47f7c3bccb585c48ad2f6710c7fce419ebf5f2",
+      "equal": true
+    },
+    "femto-picco.bin": {
+      "bytes": 4840448,
+      "sha256": "d942dcd4045b294cb89a2f9e2e5112ad18f72cd9324069bbb2fc4415476a5967",
+      "equal": true
+    },
+    "femto-picco.json": {
+      "bytes": 414,
+      "sha256": "d11c9b88a6f6758aaa71ae141247b54415b1c0c170b9f748d50b978149b294ef",
+      "equal": true
+    },
+    "femto-picco.debug.elf": {
+      "bytes": 37706380,
+      "sha256": "26ddcba0af7d7e685d75ac9a0b2881cea070475324132825ea8d5c473c9c290c",
+      "equal": true
+    }
+  },
+  "input_sha256": {
+    "scripts/build-picco": "12234af5eed7c3d6a56474eb66115d291ae0c61a955e16a8bfd9d225cdc4764f",
+    "scripts/picco-image-manifest.py": "da51ec9f5ca908e5d3b9c962c2a50bcb68a9be62077a2aa819477ebcb2a2ee1e",
+    "nix/firmware.nix": "93de271e4978f9b6bf8e44ff15bd41633b75e52bc3987833d8bdc63cecbf8476",
+    "flake.lock": "16d754d3d5e9cea8fe9c0cc2cdc766f3867d2b46a561c082139b995d217f278d",
+    "firmware/picco/Cargo.lock": "9e7d65482f01b1428683bd230dcd42fabf44087871222fd33c503a892f744fe3",
+    "firmware/picco/.cargo/config.toml": "a39107d36122c84ddd3c7b00ce46988b90625342dd2f7808bc66b228db1fefc9",
+    "firmware/picco/sdkconfig.defaults": "11d7c7ad7c499cc25c590b0afdd1859f1ec166c3c37109ccd4520749492ad344"
+  },
+  "namespace_source": "/tmp/femto-source",
+  "namespace_target": "/tmp/femto-target",
+  "rust_remapped_source": "/femto",
+  "firmware_planner_tests_passed": 7,
+  "other_host_verified": false,
+  "grayscale_verified": false,
+  "hardware_verified": false,
+  "normal_incremental_output_matches": true
+}

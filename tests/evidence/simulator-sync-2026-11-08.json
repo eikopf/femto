@@ -1,0 +1,59 @@
+{
+  "feature": "Native simulator progress sync using shared device worker and locked state-file persistence",
+  "targeted_tests_passed": 33,
+  "test_suites": {
+    "simulator": 13,
+    "device_progress_sync": 7,
+    "femto_sync": 13
+  },
+  "workspace_clippy_passed": true,
+  "native_x11_smoke_passed": true,
+  "picco_monochrome_build_passed": true,
+  "hardware_verified": false,
+  "checks": [
+    "Shared configuration and exchange worker extracted for both frontends",
+    "Explicit menu start/cancel/local and remote choices/history reset",
+    "Stable progress timestamp while persisting menu/settings changes",
+    "Native authenticated create and divergent conflict without writes",
+    "Native remote choice after timestamp-second delay, reopen and history reset",
+    "Exact remote PUT count remains one across choice and reset",
+    "Existing device worker cancellation, conflict and journal tests pass"
+  ],
+  "limitations": [
+    "No native HTTPS trust or tailnet qualification",
+    "Native cancellation and storage-failure workflows need broader coverage",
+    "No physical hardware qualification",
+    "Worker document operations and final commit remain synchronous within their owning threads"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/simulator-sync-tests.log",
+      "sha256": "624ab3e7d831c0e8a2235dff46fe89812d82576c37567e9cf0cc2e7c1c83896d"
+    },
+    "clippy": {
+      "path": "output/verification/simulator-sync-clippy.log",
+      "sha256": "2fcdfbc130d0743b64bc7fd53cdd94f41acdee985b107df1bbda6f0dea2bf20f"
+    },
+    "native": {
+      "path": "output/verification/simulator-sync-native.log",
+      "sha256": "ac6597785574a2a0c05ec5a9de36db635a8f63474b8ef6ce61b6a48c17ec72f5"
+    },
+    "firmware": {
+      "path": "output/verification/simulator-sync-firmware.log",
+      "sha256": "6a4b102410a28383cd21e38235d0f4bf922205e6125b46879465534545ae18be"
+    }
+  },
+  "screenshot": {
+    "path": "output/simulator-smoke/sync-conflict.png",
+    "sha256": "a704618fa366caea12b13286e083873918d8387595ea55837d8a658217679a55"
+  },
+  "input_sha256": {
+    "crates/femto/src/simulator.rs": "051905586c38429609dae530c88b844202581b62bb148a993480cba88ce7a989",
+    "crates/femto/src/simulator_sync.rs": "fcc3d8c5540affbd3070712458c1bc32e6dd0509e5734cdf872aa01bc69e3f1a",
+    "firmware/picco/src/progress_service.rs": "83f4cb07a2a206cc2bddfd14cad5fe709e4813d3547403fd37d7dcce912fa20a",
+    "firmware/picco/src/progress_sync.rs": "95a142a94bdfa7773a4f6fb4d01daa230f2e7f82284e9494d89701772a422b24",
+    "scripts/simulator-smoke.py": "7ed9f5c863bd0d8db97ed241070663c384b16a17ad2b022a4a0336c95305ca2d",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "2136a213cf4fec89b5c5dc541ce6e675bfd29a14c7c935bcaab36b9ecccb3675"
+  }
+}

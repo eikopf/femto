@@ -1,0 +1,36 @@
+{
+  "feature": "Source-verified CLI clipping export",
+  "targeted_tests_passed": 18,
+  "test_batches": 2,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "command": "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto --test clippings_export --test cli && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+  "checks": [
+    "Actual binary exports exact Unicode clipping records, metadata and version",
+    "State bytes unchanged after success or validation failure",
+    "Forged second excerpt suppresses all stdout, including the valid first excerpt",
+    "Empty/missing host state exports an empty list without creating state JSON",
+    "Malformed state and missing book fail with empty stdout",
+    "Held state lock refuses export; releasing lock permits it",
+    "Existing CLI reader, progress, catalog and cancellation regressions pass"
+  ],
+  "input_sha256": {
+    "crates/femto/src/main.rs": "2e0f1ae21f6e3cda907fdccb0df0dafc5b9773a337b37c197a4320d35d8ae89e",
+    "crates/femto/src/clippings.rs": "1434313d92badcb7db303e47df86034b1b073d430ce3c1044c3f566355651c8c",
+    "crates/femto/src/state_file.rs": "e35e4fd5296da7bb966c6cfaefd3cdc6da50d744b8208034ff563fa563fd165b",
+    "crates/femto/tests/clippings_export.rs": "b51c731de5862492e0eba0bfad000c144f5ab0b8196351f4e6881a4467511da2",
+    "crates/femto-reader/src/clipping.rs": "f346bcdd414932b81e93777c7b5def0dc5be148e9228f82b1f8b417cad3cc71a",
+    "crates/femto-reader/src/selection.rs": "f6befe5739313379530150e96f91db95135687bf672e5807243dfbeafa1fd7aa",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e"
+  },
+  "log": {
+    "path": "output/verification/clipping-export-tests.log",
+    "sha256": "13eecf7164bf123c6fd6882eb81085a1419104093388c41d56851d0977ee1b25"
+  },
+  "limits": [
+    "Export reads host JSON state; direct device-journal export, device menu export and import remain unfinished.",
+    "All source validation precedes output, but output I/O failure can leave partial JSON.",
+    "Synchronous verification can repeatedly parse chapters; no CPU or peak-heap measurement.",
+    "Only host CLI code changed; no firmware build, native window or independent-network rerun in this checkpoint."
+  ]
+}

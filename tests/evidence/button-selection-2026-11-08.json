@@ -1,0 +1,74 @@
+{
+  "feature": "Button-only source word selection with preview, extension, cancellation and save",
+  "commands": [
+    {
+      "command": "cargo fmt --all",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p femto-reader --test ui",
+      "exit_code": 0,
+      "passed": 48
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "Combining marks and Hebrew use complete source words in source order",
+    "Repeated words retain distinct source offsets",
+    "Cancel leaves state unchanged; save captures the exact source range",
+    "Reverse extension spans paragraphs without changing state before save",
+    "Word-menu scrolling reaches entry 25 without moving the reading anchor",
+    "Reading pixels remain unchanged after unhighlighted capture",
+    "Stale page before pick or save reports an error without inserting a clipping",
+    "Existing touch selection and all shared UI regressions pass"
+  ],
+  "tested_files_sha256": {
+    "crates/femto-reader/src/controller.rs": "2a2de33507208f256e8553583014ba069afbc1eea2a1af33b875ab18fd3760a4",
+    "crates/femto-reader/src/ui.rs": "618f0b66058dfc6b2d20e4478f364409668076e9775833f5846d718ecf6cfb07",
+    "crates/femto-reader/tests/ui.rs": "0a56227cd75cce01862951f449f9bc1a7a0c983ecbcda62ecec0c7f0fbf74c18",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e"
+  },
+  "snapshot_at_completion": true,
+  "logs": [
+    {
+      "path": "output/verification/button-selection-tests.log",
+      "sha256": "388050994c1d96225d4b6a778b9b8551a2b81ba9911fdd839a8fd186dbd3166d"
+    },
+    {
+      "path": "output/verification/button-selection-firmware.log",
+      "sha256": "d67d95d1ffa3979eb3327129ec90aeb681ec89252563a27e8bbd2f6773932ddd"
+    }
+  ],
+  "artifacts": {
+    "output/picco/femto-picco.debug.elf": {
+      "sha256": "605e4380ae88b919724fc57e92e42726017333b465d8dcde2572258d2a6a3ba3",
+      "bytes": 39835024
+    },
+    "output/picco/femto-picco.json": {
+      "sha256": "8bf51d740bc673df599fb5852d0eb3a04389a5962962e0718f0c6d567792241c",
+      "bytes": 414
+    },
+    "output/picco/femto-picco.bin": {
+      "sha256": "d5167d229eaf30ac5c2ac61cd86f32b43f1e02299acf7f8fa6c40c6b05ac1412",
+      "bytes": 5182480
+    },
+    "output/picco/femto-picco.elf": {
+      "sha256": "1bc25b1be89fce525c6c1ebf727c4a7d6676cbe3e8c29f0a90952386f8bfe1a2",
+      "bytes": 5290904
+    }
+  },
+  "limits": [
+    "Native window input and physical button input for this workflow are not qualified.",
+    "Dense-page memory use, synchronous scanning latency, the 1,024-entry rejection and split-page word behavior are not separately tested here.",
+    "Word labels truncate at 32 Unicode scalar values and may split a combining sequence; source ranges preserve whole words.",
+    "Cross-page extension and draggable or shrinkable handles remain unfinished.",
+    "This incremental monochrome build does not refresh clean-build reproducibility or grayscale evidence. No firmware was flashed."
+  ]
+}

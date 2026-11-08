@@ -1,0 +1,41 @@
+{
+  "feature": "Native X11 multi-word selection, save and reopen",
+  "command": "./scripts/check-simulator",
+  "result": "Passed; final smoke completion marker present",
+  "checks": [
+    "Two pointer taps with Extend selection produce when the font",
+    "Preview leaves existing clippings and reading position unchanged",
+    "Save retains chapter 0, block 4, half-open bytes 259..272",
+    "Quit/reopen preserves both the previous word clipping and new range clipping",
+    "Reading position and bookmark remain unchanged",
+    "Complete existing native smoke suite passes"
+  ],
+  "input_manifest": {
+    "path": "output/verification/native-range-selection-inputs.json",
+    "sha256": "14e22ee7b8e15872fb30d9dc12c8236c692485a1695fc6dbb33d5703be43d5c9",
+    "files": 390,
+    "unchanged_at_completion": true
+  },
+  "artifacts": {
+    "log": {
+      "path": "output/verification/native-range-selection-log.log",
+      "sha256": "2d99aaf3b2ac5aee70599b9b9009db1a70a8d9a15838f713080b3df0e5c855de"
+    },
+    "preview": {
+      "path": "output/verification/native-range-selection-preview.png",
+      "sha256": "f2b902b95804f59bd1463fb081d0c4ac137c7aea20b983374709cc139f0f13ee"
+    },
+    "record": {
+      "path": "output/verification/native-range-selection-record.json",
+      "sha256": "c047885a59fd1c8c40531a4cd55958b5eacfa6de15efa6d8552749103b5381bc"
+    }
+  },
+  "visual_findings": [
+    "Preview displays Cancel as the default, Save selection, Extend selection and the complete selected phrase"
+  ],
+  "limits": [
+    "One portrait Latin phrase tested through X11; physical touch, rotated selection and native RTL extension remain unqualified.",
+    "Cross-page extension, draggable or shrinkable handles and highlighting remain unfinished.",
+    "No firmware rebuild or independent network interoperability rerun in this checkpoint."
+  ]
+}

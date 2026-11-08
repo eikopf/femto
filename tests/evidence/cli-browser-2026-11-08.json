@@ -1,0 +1,133 @@
+{
+  "feature": "Independent enrolled terminal browser controls",
+  "targeted_tests_passed": 31,
+  "suites": {
+    "cli_unit": 16,
+    "cli_integration": 15
+  },
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "commands": {
+    "normal": "FEMTO_HEADSCALE_CLI_ONLY=1 ./scripts/check-headscale",
+    "relay": "FEMTO_HEADSCALE_CLI_ONLY=1 FEMTO_CLI_RELAY_ONLY=1 ./scripts/check-headscale"
+  },
+  "reports": {
+    "normal": {
+      "cli_registration": true,
+      "coordinator_ca_rejection": true,
+      "cli_reconnect": true,
+      "cli_rotation": true,
+      "cli_https_acquisition": true,
+      "cli_interactive_details_refresh_and_download": true,
+      "cli_interactive_destination_guards": true,
+      "cli_certificate_rejection": true,
+      "cli_progress_create_and_download": true,
+      "cli_progress_conflict_preserves_both_sides": true,
+      "cli_progress_conflict_retry": true,
+      "cli_progress_convergence_without_write": true,
+      "cli_progress_cancel_preserves_state": true,
+      "cli_progress_retry_after_cancel": true,
+      "cancellation_seconds": 0.059145853854715824,
+      "request_counts": {
+        "feed": 3,
+        "book": 2,
+        "gets": 7,
+        "puts": 1
+      },
+      "relay_only": false,
+      "peer": "1.104.5",
+      "tls_failures": [
+        {
+          "mode": "wrong-name",
+          "reason": "TimeoutError"
+        },
+        {
+          "mode": "untrusted",
+          "reason": "TimeoutError"
+        }
+      ],
+      "hardware_verified": false
+    },
+    "relay": {
+      "cli_registration": true,
+      "coordinator_ca_rejection": true,
+      "cli_reconnect": true,
+      "cli_rotation": true,
+      "cli_https_acquisition": true,
+      "cli_interactive_details_refresh_and_download": true,
+      "cli_interactive_destination_guards": true,
+      "cli_certificate_rejection": true,
+      "cli_progress_create_and_download": true,
+      "cli_progress_conflict_preserves_both_sides": true,
+      "cli_progress_conflict_retry": true,
+      "cli_progress_convergence_without_write": true,
+      "cli_progress_cancel_preserves_state": true,
+      "cli_progress_retry_after_cancel": true,
+      "cancellation_seconds": 0.07257136516273022,
+      "request_counts": {
+        "feed": 3,
+        "book": 2,
+        "gets": 7,
+        "puts": 1
+      },
+      "relay_only": true,
+      "peer": "1.104.5",
+      "tls_failures": [
+        {
+          "mode": "wrong-name",
+          "reason": "TimeoutError"
+        },
+        {
+          "mode": "untrusted",
+          "reason": "TimeoutError"
+        }
+      ],
+      "hardware_verified": false
+    }
+  },
+  "assertions": [
+    "Actual opds-browse binary receives scripted UTF-8 stdin",
+    "Publication details, Unicode filename acquisition, refresh and graceful quit",
+    "Exact EPUB output bytes",
+    "Duplicate and escaping destinations cause two expected errors without extra book fetches",
+    "Output directory contains only the completed book",
+    "Existing enrollment/renewal, certificate rejection, progress conflict/convergence/cancellation/retry checks still pass"
+  ],
+  "change": "Enrolled browser feed allowance increased from 10 to 30 seconds, retaining the overall run-seconds cap",
+  "failure_observed": "Two DERP-only initial-feed attempts timed out at the 10-second allowance before any browser feed reached the service. The preceding one-shot acquisition succeeded. The 30-second allowance passes; the underlying initial connection latency remains unmeasured.",
+  "limitations": [
+    "Scripted stdin is not terminal-emulator qualification",
+    "No multi-feed navigation/search or idle-time coordinator-change test",
+    "No browser-specific Ctrl-C recovery test",
+    "No selected data-path assertion in normal mode or direct-packet counter in relay-only mode",
+    "No new full workspace/native suite or firmware build; physical Picco unqualified"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/cli-browser-tests.log",
+      "sha256": "74e739c72f7055ef4cdb311de1b5df68fc74a27102a971b3bfa71cfa03036581"
+    },
+    "normal": {
+      "path": "output/verification/cli-browser-normal.log",
+      "sha256": "e58ddf7d88e79c422115cf661dac11abf4cd4eaad1e89f924fc6e61f59b1e58a"
+    },
+    "relay": {
+      "path": "output/verification/cli-browser-relay.log",
+      "sha256": "d751f9289777703ea557f1aec0729bdeb3656117583273a208f94c1b73553d7c"
+    },
+    "initial_timeout": {
+      "path": "output/verification/cli-browser-initial-timeout.log",
+      "sha256": "c2361c2b4795245334c09445528724822eb91eb3aef36a2482085e30b7846e0f"
+    }
+  },
+  "input_sha256": {
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "crates/femto/src/tailnet_catalog.rs": "4ce0e83a5103d1c47096ee1d9f1694d4f23871999a9285f6b85e64467c3e2df4",
+    "crates/femto/src/catalog.rs": "fee852fa5a488aab8952fd243ebd14c1ad92c5005894869e47de07b0613f0962",
+    "scripts/cli-headscale.py": "1049e0c50a211b7712ddde93a2ab396f3aef347502a48951daa0b73181e0f55b",
+    "scripts/check-headscale.py": "e9c38da57d7ef585b205f6554304c93d89189b817cf3e19b9235a9ba931b8925",
+    "scripts/simulator_services.py": "211af2a404e58318665ea1479f15119368202439a6948b5b1d8b65d5dba58e08"
+  },
+  "cli_binary_sha256": "2c9a768946b32482a27a68a8bf2d4970ee5047f38192295bb73efd328f7fbe64",
+  "hardware_verified": false
+}

@@ -1,0 +1,65 @@
+{
+  "feature": "Bounded GATT input report routing and atomic reader installation",
+  "commands": [
+    {
+      "command": "cargo fmt --all",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --locked -p femto-remote",
+      "exit_code": 0,
+      "passed": 28
+    },
+    {
+      "command": "cargo test --locked -p femto-reader --test remote",
+      "exit_code": 0,
+      "passed": 10
+    },
+    {
+      "command": "cargo clippy --locked -p femto-remote -p femto-reader --all-targets -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "crates/femto-remote/src/gatt.rs": "022c8de1ab9004acf24f2220ea9958b55579a807de29d62462030fd34a990078",
+    "crates/femto-remote/src/lib.rs": "59557696141baa0321484983d33b78c2f86ab505c5a008a15db126e3537122e1",
+    "crates/femto-remote/src/input.rs": "a05c0e03d40d002601518afa56099479d6972b3c0fd97ac3cb82c5bf5c5dd32a",
+    "crates/femto-reader/src/remote.rs": "7585f0eb5f6664434e93e2406b59af88fadf67f6f2eca753f2fe3320ff54652e",
+    "crates/femto-reader/tests/remote.rs": "9794547511c224528db13d847e90357c22d2c409fcf0aa2b14d6b86e0c8a3d99",
+    "Cargo.lock": "444efe35c3058a3342bcdace09a9d3785eee9905386ea2a2c04aaa1bf67be53e",
+    "firmware/picco/Cargo.lock": "e1dc1064ec9c76145634eeaa94ccc4106b5b3c219a6d2988e91d9ab611cbdcb9"
+  },
+  "logs_sha256": {
+    "output/verification/remote-gatt.log": "8c0a91578ce7e1ac54e8aacfde3cef22d52943392f7da6b39a38481373a1b4be",
+    "output/verification/remote-gatt-firmware.log": "8925eea51dfa8bc5dbf301d2308b8710ebd447363d26ff808d35a5c896b3d04f"
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "31698bda6c6ccf5ab9b8ae249ec18a4e8190adfddf762e2d642ed96acb0a555b",
+    "bytes": 5238048,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "verified": [
+    "Numbered and unnumbered reports route by characteristic handle using the map-declared Report Reference",
+    "Missing, duplicate, unknown and non-input references and conflicting handles reject installation",
+    "Invalid replacement preserves previous session and functioning page turns",
+    "Stale callbacks and disconnects cannot affect replacement session",
+    "Unknown current handle discards queued turns",
+    "Raw input session clears previous GATT routes"
+  ],
+  "limits": [
+    "No BLE radio backend, pairing, subscription, bond storage or hardware input exercised",
+    "Backend must verify UUIDs, service membership, characteristic properties and descriptor ownership",
+    "Platform must serialize callbacks and dispatch and preserve correct callback generations",
+    "Full workspace gate, grayscale, native simulator and clean reproducibility not rerun for this change"
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "feature": "Strict sequential typed-definition decoding with bounded output",
+  "commands": [
+    {
+      "command": "cargo test -p femto-reader --test dictionary --test ui",
+      "exit_code": 0,
+      "passed": 65
+    },
+    {
+      "command": "cargo test -p femto --test dictionary_cli",
+      "exit_code": 0,
+      "passed": 1
+    },
+    {
+      "command": "cargo test --locked --manifest-path vendor/quireink-stardict/Cargo.toml --config 'patch.crates-io.miniz_oxide.path=\"vendor/miniz_oxide\"'",
+      "exit_code": 0,
+      "passed": 6,
+      "ignored": 1
+    },
+    {
+      "command": "python scripts/check-dictionary-corpus.py output/dictionary-corpus",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "Declared and dynamic fields decode with required framing",
+    "Framed binary fields skipped without interpreting arbitrary bytes as UTF-8",
+    "Lowercase text fields require UTF-8",
+    "Missing terminators, hidden suffix data, invalid identifiers and truncated binary headers/payloads rejected",
+    "Binary size arithmetic checked before slicing",
+    "Decoded output expansion beyond 64 KiB rejected",
+    "Malformed later fields fail the whole lookup without partial text",
+    "Published WikDict sample remains compatible in plain and derived compressed forms"
+  ],
+  "tested_files_sha256": {
+    "vendor/quireink-stardict/src/text.rs": "31cb43e461cded629ad1a4476612739a57f87f16292ded8f0758c61288b72679",
+    "vendor/quireink-stardict/src/lib.rs": "64ce4891ca29768e85f3498f72909b38865396fd1b19a74018bc675fab68fb42",
+    "crates/femto-reader/tests/dictionary.rs": "7f42bdf886955434bbcf5b73428937d5d9c2acc72948fd1e2287a31787f32feb",
+    "crates/femto-reader/src/dictionary.rs": "f9773b0a46872e356c5d94657c20b927f51f21a0adc9c15139273427437a5450",
+    "Cargo.lock": "7040c9e05954fc95624ad2f6715bc6c2b9d18f6ae33cc634c65d3d67f7e355bb",
+    "firmware/picco/Cargo.lock": "dcab9958734dfecf18f142c9b159b9465e6d6736dc930d4cfb0b42d65f6299ca"
+  },
+  "snapshot_at_completion": true,
+  "logs": {
+    "tests": {
+      "path": "output/verification/dictionary-fields-tests.log",
+      "sha256": "f48cd7ad9ab39c0e9bd4b709b306a6b5587000f9c5199ba8bd1f8e41af079dd2"
+    },
+    "firmware": {
+      "path": "output/verification/dictionary-fields-firmware.log",
+      "sha256": "65a20c2847d64f2789ee5f114108a0aafd5894dda23ea5c83622ad8d27ffaaba"
+    }
+  },
+  "corpus_report": {
+    "source": "https://download.wikdict.com/dictionaries/stardict/wikdict-en-de.zip",
+    "date": "2026-06-23",
+    "entries": 72413,
+    "synonyms": 57492,
+    "sample_queries": 4675,
+    "reports": {
+      "published_plain": {
+        "definitions": 5483,
+        "lookup_ms": 637,
+        "name": "English-Deutsch FreeDict+WikDict dictionary (en-de)",
+        "prepare_ms": 52,
+        "prepare_steps": 294,
+        "queries": 4675
+      },
+      "derived_dictzip": {
+        "definitions": 5483,
+        "lookup_ms": 2931,
+        "name": "English-Deutsch FreeDict+WikDict dictionary (en-de)",
+        "prepare_ms": 50,
+        "prepare_steps": 294,
+        "queries": 4675
+      }
+    },
+    "sha256": {
+      "wikdict-en-de.zip": "c1d141f39b08893d8e1fdce6e06b6acdaa91b343b4982623de9867a855b4db79",
+      "stardict.ifo": "ab0d3f46a059b8789d57d491fa34478f06ff8f4ec57bcba009c90a9b92ecdb4e",
+      "stardict.idx": "e3d9f7279b3877d3465455cec352439a771a0c2af14c96c24dbc5a8addcaa27d",
+      "stardict.dict": "35404844c12f292acf2e3b424559d9a7f4a84750d8a706cbd8188c1882eb805a",
+      "stardict.syn": "d06acb5e89386722a2cd9cbd2a8468eaa61b8d1666afcc21e3cc1e898e116ca4",
+      "cases.jsonl": "3a0e06dfbe46de7297fdd0a61cd549bd0f30e5aba9db12c3b30e2210afc3e60d",
+      "stardict.dict.dz": "089a6c5358142fb8b97c110d64e3125fd9c32f9725db7cf2e25c7c45b0534408"
+    }
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "1d85a8c750fceafadc27a74d50e92b17ca10cff914b3508498abec4f250104d8",
+    "bytes": 5218944,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "No complete gzip CRC verification or full HTML/XDXF/Pango validation.",
+    "Legacy locale-encoded fields require valid UTF-8; no transcoding added.",
+    "One temporary field string and result-vector allocations remain; no whole-process heap proof.",
+    "No physical device, native UI, full workspace, grayscale or clean reproducibility rerun."
+  ]
+}

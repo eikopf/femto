@@ -1,0 +1,66 @@
+{
+  "feature": "Simulator private coordinator CA and independent native enrollment/renewal",
+  "targeted_tests_passed": 229,
+  "test_suites": {
+    "microlink": 211,
+    "simulator": 18
+  },
+  "workspace_clippy_passed": true,
+  "independent_command": "FEMTO_HEADSCALE_SIMULATOR_ONLY=1 ./scripts/check-headscale",
+  "independent_passed": true,
+  "independent_report": {
+    "native_enrollment": true,
+    "untrusted_coordinator_rejected": true,
+    "streaming_node_online": true,
+    "explicit_disconnect": true,
+    "existing_identity_reconnect": true,
+    "node_key_renewed": true,
+    "coordinator_node_continuity": true,
+    "rotation_committed": true,
+    "quit_releases_identity_lock": true,
+    "coordinator": "headscale version 0.29.7\ncommit: v0.29.7\nbuild time: unknown\nbuilt with: go1.27.3 linux/amd64",
+    "hardware_verified": false
+  },
+  "checks": [
+    "Explicit bounded regular DER CA file, with default Mozilla trust preserved",
+    "Wrong private CA rejected without coordinator node registration",
+    "Native keyboard enrollment produces an online streaming node",
+    "Disconnect releases store lock and existing-identity reconnect preserves keys and addresses",
+    "Renewal changes node key while preserving node ID, machine key and addresses",
+    "Authenticated renewal removes pending rotation journal",
+    "Quit releases identity lock",
+    "Connected and renewed screenshots show assigned IPv4 address; original-resolution inspection passed"
+  ],
+  "limitations": [
+    "Browser approval and follow-up behavior not qualified",
+    "No new simulator peer UDP/TCP/DERP, catalog or progress traffic check",
+    "No new complete native reader regression run in this turn",
+    "No new Picco build or physical hardware qualification"
+  ],
+  "logs": {
+    "tests": {
+      "path": "output/verification/simulator-headscale-tests.log",
+      "sha256": "b82e1e836ef31e5d9e0522d479ab31777543fcf15c1173d5301f144ae37514ec"
+    },
+    "independent": {
+      "path": "output/verification/simulator-headscale-independent.log",
+      "sha256": "56ba5ce2d4e520009acd45fd6fad4c82bcef7dbc83029e2acafe07a954e687c0"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/host_tls.rs": "a4ecf11cd9165a3afc66c5af5282e5b6b1b5f306a70b49b6a219411d08f352dd",
+    "crates/femto/src/simulator.rs": "bc4de219e9f962ff4a0ef4a6960a26e17b9adbed12bda174d49bf56de2fda4e1",
+    "crates/femto/src/simulator_tailnet.rs": "e1ab55fae990fbd8f1a492fe8010422f9370ff45fda524e3aaf780faf7469849",
+    "scripts/simulator-headscale.py": "088908069cdc87658d01eb894b20874b610805c9d5ddee7665f45d85ee58eb7f",
+    "scripts/check-headscale": "a20356a7ecdee9f40afc4b2d24915fd93df04edf5e50d7071c130a61f223370c",
+    "scripts/check-headscale.py": "e60153c36fc3d8bdec0d1d3eac78583b746ded48db5f470a5e7d0a4efe84d2f9",
+    "nix/headscale.nix": "db2f1fdcc9786fdb4e63ec85669aff4bc48f9a81d682a0cf5d2fa006485e1354",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199"
+  },
+  "simulator_binary_sha256": "852fc358f434291a8a38ff3470435064a279aabc72841cd44076cf9f72e6b9c2",
+  "screenshots": {
+    "output/simulator-headscale/renewed.png": "7e936ac752c69e539971d9385d04f51bd5c936c692a107266368bcc0b7445d5e",
+    "output/simulator-headscale/untrusted.png": "6ec7672a19163fdc488650799596cee3eec7e15b4f778b97d657bc6d4d7bc80f",
+    "output/simulator-headscale/connected.png": "7e936ac752c69e539971d9385d04f51bd5c936c692a107266368bcc0b7445d5e"
+  }
+}

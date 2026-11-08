@@ -1,0 +1,47 @@
+{
+  "feature": "Native X11 keyboard word selection, extension, cancellation and persistence",
+  "command": "./scripts/check-simulator",
+  "exit_code": 0,
+  "checks": [
+    "Keyboard opens the numbered source-word list",
+    "Cancel after selecting the second word leaves saved excerpts and reading pixels unchanged",
+    "Keyboard extends the second word to the third and previews the font without saving early",
+    "Save records chapter 0, block 4, bytes 264 through 272 as the font",
+    "Quit/reopen preserves all three exact clipping records, reading position and bookmark",
+    "Reading pixels remain byte-identical after cancellation, save and reopen",
+    "Complete native reader, catalog, sync fault and tailnet lifecycle suite passes"
+  ],
+  "input_manifest": {
+    "path": "output/verification/native-buttons-inputs.json",
+    "sha256": "932c43a9b54c82673710174e8b873c450ffcac30198888eb1c51767cf093d756",
+    "files": 391,
+    "unchanged_at_completion": true
+  },
+  "artifacts": {
+    "log": {
+      "path": "output/verification/native-buttons-log.log",
+      "sha256": "3b31cac9313d248180f91af3a8e8159b0a353dfeba9fd8966b52b8974c90b1e3"
+    },
+    "list": {
+      "path": "output/verification/native-buttons-list.png",
+      "sha256": "da2f88de786464090fb0ae951e6fde45469b376cefca8a01f843531711f80cab"
+    },
+    "preview": {
+      "path": "output/verification/native-buttons-preview.png",
+      "sha256": "2087b0934bbb30ec5f96df2518ad000d7d7e50d88bbc2068aad5be17bac5f7b5"
+    },
+    "record": {
+      "path": "output/verification/native-buttons-record.json",
+      "sha256": "cd92da8e1b5a228ba6b40cf124794aa13b117462a599263c441f3c4ff1850be2"
+    }
+  },
+  "visual_findings": [
+    "Original-resolution screenshots show numbered words in the list with the first row selected and page 1 of 19",
+    "The preview shows Cancel, Save selection, Extend selection and the font"
+  ],
+  "limits": [
+    "This covers a portrait Latin phrase on X11; native RTL, rotation, long-list traversal and Wayland are not qualified by this fixture.",
+    "Physical Picco button input, dense-page memory and latency remain unqualified.",
+    "No production code changed and no firmware rebuild was needed for this fixture change."
+  ]
+}

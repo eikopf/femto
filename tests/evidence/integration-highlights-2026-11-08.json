@@ -1,0 +1,67 @@
+{
+  "scope": "Integrated reader, service and firmware checks after packed selection coverage, persistent highlights, retained-chapter verification and source-fragment comparison",
+  "commands": [
+    "./scripts/check",
+    "./scripts/check-simulator",
+    "FEMTO_PICCO_GRAYSCALE=1 ./scripts/build-picco"
+  ],
+  "exit_codes": [
+    0,
+    0,
+    0
+  ],
+  "rust_tests_and_doctests_passed": 968,
+  "rust_test_batches": 71,
+  "python_firmware_tests_passed": 7,
+  "formatting_passed": true,
+  "workspace_compilation_passed": true,
+  "workspace_clippy_passed": true,
+  "input_manifest": {
+    "path": "output/verification/integration-highlights-inputs.json",
+    "sha256": "286dd3e54fb0b4ca75f6977636e0d5ceb0b23ac569b8b2def709bcbed31b611c",
+    "files": 391,
+    "unchanged_at_completion": true
+  },
+  "artifacts": {
+    "workspace": {
+      "path": "output/verification/integration-highlights-workspace.log",
+      "sha256": "0ec2e31abd66fd3ea070d410fcdc022a2899441c3b4303c0c6696f6b2993ad20"
+    },
+    "grayscale": {
+      "path": "output/verification/integration-highlights-grayscale.log",
+      "sha256": "fbd62ed1b6ef2f2cbb698f0835d805f17eac5ef4a321d8efa2705cacfff938af"
+    },
+    "native": {
+      "path": "output/verification/integration-highlights-native.log",
+      "sha256": "2113bea890f6a5b005f6a7abf2d0f4f99578f7ecfe332b55ad812a93e788596a"
+    },
+    "highlight": {
+      "path": "output/verification/integration-highlights-highlight.png",
+      "sha256": "4891e872293c9aba580ca79e2ced801b72c0355fd1eca08a6646bab0b89cc3f6"
+    },
+    "highlight-record": {
+      "path": "output/verification/integration-highlights-highlight-record.json",
+      "sha256": "1cf5a6e549e838863ce7ef0a25be40af0bdff3e462ff46cd4a62280a370b36cd"
+    }
+  },
+  "grayscale_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "f021e64cdad2d4a628ac65ff45529623824aa1cf2e908bb01fcdcf6831132e58",
+    "bytes": 5179856,
+    "chip": "esp32s3",
+    "display_levels": 4,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "visual_findings": [
+    "Original-resolution native screenshot shows the saved word highlighted in the reading page without a selection footer; surrounding text remains intact."
+  ],
+  "limits": [
+    "Incremental grayscale build does not establish a fresh clean-build reproducibility pair.",
+    "Native X11 tests do not establish physical Picco display, touch, memory, latency or Wayland behavior.",
+    "Independent Headscale interoperability was not rerun in this checkpoint.",
+    "Other documented goal requirements and extensions remain unfinished or unqualified."
+  ]
+}

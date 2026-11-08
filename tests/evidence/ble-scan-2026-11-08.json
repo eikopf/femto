@@ -1,0 +1,117 @@
+{
+  "feature": "Opt-in Picco legacy BLE diagnostic discovery",
+  "commands": [
+    {
+      "command": "cargo test --locked -p femto-remote",
+      "exit_code": 0,
+      "passed": 31
+    },
+    {
+      "command": "cargo clippy --locked -p femto-remote --all-targets -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "rust_passed": 1061,
+      "rust_batches": 81,
+      "rust_ignored": 1,
+      "python_passed": 7
+    },
+    {
+      "command": "cargo fmt --manifest-path firmware/picco/Cargo.toml --check",
+      "exit_code": 0
+    },
+    {
+      "command": "bash -n scripts/build-picco",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 FEMTO_PICCO_BLUETOOTH=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "crates/femto-remote/src/lib.rs": "f3fb0618deb8549b5a7af5efa6d38d2fa26b9f880eaf10375ec80d3ff83fd096",
+    "crates/femto-remote/src/scan.rs": "0d1cd2d148bc96444b48427e58ad70ebd727a43260fc4d79ef1ef5869f143d1a",
+    "firmware/picco/src/bluetooth.rs": "91bc28773bf5eab2279b36fccd7de119d7d43d202f4f516bf77e0cc672adabe7",
+    "firmware/picco/src/panel.rs": "96e8dc4ac8af3d7218f417b130520346527a10ab538f2964d5c1d48c1147ecc2",
+    "firmware/picco/src/wifi.rs": "58fdf92683e441d5df505840d81d07d09e3364964f21d33076dd437d7f5df670",
+    "firmware/picco/src/main.rs": "88430c06c10e63b95f1c5812e3c0028623f35739e35e5a862437a7495c58fa7b",
+    "firmware/picco/build.rs": "525e8d2e1e4536bebc0433d1f9f3d1cc177d60de326c7d0fee45b8cd38ce7489",
+    "firmware/picco/sdkconfig.defaults": "11d7c7ad7c499cc25c590b0afdd1859f1ec166c3c37109ccd4520749492ad344",
+    "firmware/picco/sdkconfig.bluetooth": "0df97fe9c92a982d0e554c87140512e4be80c89fc355b5de779369fd2c102bf4",
+    "firmware/picco/Cargo.toml": "8f051d49aa2843ab8fbac57fa6e47407412384712d7ec1c9b1eb1fa2618fb22a",
+    "firmware/picco/Cargo.lock": "04c806505d0a9ca8b0a35f9a7eb5915b32122742c7c5085e001e0d74b3e1ddb0",
+    "Cargo.lock": "444efe35c3058a3342bcdace09a9d3785eee9905386ea2a2c04aaa1bf67be53e",
+    "scripts/build-picco": "c6f23f8b4a642ee01672a0cfe5abfc4921cbff4d0779960d9de137594fbf1ec1",
+    ".gitignore": "4771dc5d98db74835ac3e82983d01f7e138cd5f6e268bee57c521af39335ad2b"
+  },
+  "logs_sha256": {
+    "output/verification/ble-scan-host.log": "431a5e4d2f5317781ce612f5a4722dfebecb7a61525affc10997ede9022128bc",
+    "output/verification/ble-scan-workspace.log": "bc9a7a1b414f290bfff01e7674b59ca9391794e61539bd4c6702eb5edda7cba9",
+    "output/verification/ble-scan-firmware-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output/verification/ble-scan-default-firmware.log": "5b80068c6fcf798b99bce535b8bf4e6c9646c68e9c13ceded4c529de70480540",
+    "output/verification/ble-scan-firmware.log": "2634de02739aae4cec55f0d53b7eeb04ddb6481220e650bca6ee73fdad35ff56",
+    "output/verification/ble-scan-firmware-legacy-api-failure.log": "186a4120519628b36ec7be8fbd33a28b26ba40f2be9a1654fb63475d433111f1"
+  },
+  "sdk_config": {
+    "BT_ENABLED": true,
+    "BT_BLUEDROID_ENABLED": true,
+    "BT_BLE_ENABLED": true,
+    "BT_BLE_42_FEATURES_SUPPORTED": true,
+    "BT_BLE_42_SCAN_EN": true,
+    "BT_BLE_50_FEATURES_SUPPORTED": false,
+    "BT_GATTC_ENABLE": true,
+    "BT_GATTC_CACHE_NVS_FLASH": false,
+    "BT_BLE_SMP_BOND_NVS_FLASH": false,
+    "BT_ACL_CONNECTIONS": 1
+  },
+  "sdk_config_sha256": {
+    "firmware/picco/target-bluetooth/xtensa-esp32s3-espidf/release/build/esp-idf-sys-d2246cd4a5e2f38f/out/build/config/sdkconfig.json": "fedc28262e1e3ee75932e7c1813b4d56d3ca50b2911f8b225407f4bcd396d074"
+  },
+  "firmware": {
+    "picco": {
+      "image": "femto-picco.bin",
+      "sha256": "272a78823a1a36874f6b1a242f445eb1854cdea2039973973533022d606393dd",
+      "bytes": 5238080,
+      "chip": "esp32s3",
+      "display_levels": 2,
+      "reference_app_offset": "0xE0000",
+      "reference_app_size": "0xE70000",
+      "hardware_verified": false,
+      "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+    },
+    "picco-bluetooth": {
+      "image": "femto-picco.bin",
+      "sha256": "0f8c9f85a1297eb5ccddffd3acbb7d136829fb3f9aa98facef7f9a0653fdff3d",
+      "bytes": 5635424,
+      "chip": "esp32s3",
+      "display_levels": 2,
+      "reference_app_offset": "0xE0000",
+      "reference_app_size": "0xE70000",
+      "hardware_verified": false,
+      "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+    }
+  },
+  "corrected_failure": "Initial Bluetooth link lacked legacy scan symbols under the SDK default BLE 5 feature configuration. The Bluetooth defaults now explicitly select BLE 4.2 scanning; the full link passes. The original failure log is retained.",
+  "verified": [
+    "Fixed inventory retains at most 16 address/type pairs and 31 bytes each of advertising and scan response",
+    "Repeated observations merge metadata, update RSSI and preserve address-type distinctions",
+    "Malformed records do not mutate existing entries; invalid UTF-8 and control-character names are omitted",
+    "Overflow preserves existing entries while counting dropped observations",
+    "Full host workspace gate and both target variants compile and package successfully"
+  ],
+  "limits": [
+    "No hardware executed or flashed",
+    "No radio, Wi-Fi coexistence, controller memory, power, callback-thread or teardown qualification",
+    "No peer chooser, pairing, persistent bonds, GATT discovery/subscriptions or frontend page-turn notification input yet",
+    "The fixed inventory does not bound SDK internal buffers or allocations",
+    "SDK deinitialization remains synchronous and can panic on SDK failure",
+    "No grayscale, clean reproducibility, native GUI or independent tailnet fixture rerun for this change"
+  ]
+}

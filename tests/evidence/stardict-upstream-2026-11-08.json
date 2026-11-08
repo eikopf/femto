@@ -1,0 +1,49 @@
+{
+  "feature": "Adapted upstream StarDict compression fixture and locked standalone test gate",
+  "command": "cargo test --locked --manifest-path vendor/quireink-stardict/Cargo.toml --config 'patch.crates-io.miniz_oxide.path=\"vendor/miniz_oxide\"'",
+  "exit_code": 0,
+  "passed": 6,
+  "ignored": 1,
+  "ignored_reason": "External real_dictionary test requires QUIREINK_STARDICT corpus path",
+  "checks": [
+    "Four upstream unit tests pass",
+    "Two upstream integration tests pass for plain/compressed lookup and partial-cache rebuilding",
+    "Generated dictzip fixture uses full flushes within one deflate stream, finish bytes and CRC/size trailer",
+    "Fixture validates complete gzip decoding before StarDict lookup",
+    "scripts/check includes locked standalone test invocation",
+    "Vendored build output is ignored",
+    "Runtime reader and decoder sources and both normal dependency lockfiles unchanged from prior checkpoint",
+    "Workspace formatting check passes"
+  ],
+  "logs": {
+    "upstream": {
+      "path": "output/verification/stardict-upstream.log",
+      "sha256": "3440064e7f0cc7da921a4ce87efe72fc3275f42847645525f6ccb7ab9577bce3"
+    },
+    "upstream-standalone": {
+      "path": "output/verification/stardict-upstream-standalone.log",
+      "sha256": "4a113e65ce3aa89661bcbe924f132c40131b60a2e1682cfa11fa3fb0ba8440fb"
+    },
+    "upstream-locked": {
+      "path": "output/verification/stardict-upstream-locked.log",
+      "sha256": "866fa56ac64f638bfaaf402772aa06bbabc8578e7d1c780ba2639a05e4938e81"
+    }
+  },
+  "tested_files_sha256": {
+    ".gitignore": "3e6b3a2e73cf01efbf9b6dc6fd131975eb173bcd7d7c356831ef6dfda9e358d2",
+    "scripts/check": "41e771765079ff25a4b217f2ce1f5ff7a8f80a7bfed9818d1322e4487d8d4f4a",
+    "vendor/quireink-stardict/Cargo.toml": "8cad717db261781a476504f1473f847ad926df8da716983f3ef98b55a04fc2fc",
+    "vendor/quireink-stardict/Cargo.lock": "98d185b3c91263191fc4e02331f472d874754b843f73562e796f71daf75d31fd",
+    "vendor/quireink-stardict/tests/lookup.rs": "b990f235bf81ee296fbcb162fa8269b4e728f9775f62a9e17870a9004914fa88",
+    "vendor/quireink-stardict/src/dict.rs": "45d77bfad72e0934c658268b243e57013d4fc0a206d0714513bca7decb986ee9",
+    "Cargo.lock": "7040c9e05954fc95624ad2f6715bc6c2b9d18f6ae33cc634c65d3d67f7e355bb",
+    "firmware/picco/Cargo.lock": "dcab9958734dfecf18f142c9b159b9465e6d6736dc930d4cfb0b42d65f6299ca"
+  },
+  "snapshot_at_completion": true,
+  "limits": [
+    "No independent real-dictionary corpus tested.",
+    "Fixture gzip CRC validation does not add CRC verification to production random-access lookup.",
+    "No production code changes or firmware rebuild in this checkpoint.",
+    "Full scripts/check was not rerun; its newly appended test command was executed successfully."
+  ]
+}

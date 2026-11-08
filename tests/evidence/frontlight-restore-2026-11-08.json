@@ -1,0 +1,58 @@
+{
+  "feature": "Bounded frontlight restoration after partial I2C update failure",
+  "board_tests_passed": 38,
+  "test_batches": 9,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "implementation": "Remember the last successfully applied setting. After a bus failure, invalidate chip configuration and attempt that setting once. Return the original Bus error after successful restoration, or Restore containing both failures and discard the remembered setting after failed restoration. Initial failures without a successful setting retain the previous no-restoration behavior.",
+  "assertions": [
+    "Failure at every operation of active-light changes, Off and activation from a known off state",
+    "Restoration recovers prior channel registers or standby and preserves unrelated bits",
+    "At most one restoration sequence, bounded by 16 additional register operations in tested cases",
+    "Failure at each operation of full nonzero restoration returns both errors and stops",
+    "Next request after failed restoration reconfigures and succeeds",
+    "Invalid ranges perform no I2C operations and preserve the last successful setting",
+    "Existing table, panel, input, battery, sleep and Wi-Fi board tests pass"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-picco-board && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco"
+  ],
+  "input_sha256": {
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "crates/femto-picco/src/frontlight.rs": "b3163449d5ce9f885e958ec51e6839b779250576e47803cb00fbdbb19c34aa90",
+    "crates/femto-picco/src/frontlight/table.rs": "78a106c1c2165968b2d8f2280d05ed5ba22f041a237c093844ef84ab24e0aef8",
+    "firmware/picco/src/input.rs": "b0e94421672d5d4696a088620a5e127e03c390ad3eb5574a76d12c43ad13c553",
+    "firmware/picco/src/main.rs": "ae200e703c37c16cfbca46c6317ba11b3ca4caf0f84a7d1df03653253f23b9c0",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54"
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/frontlight-restore-tests.log",
+      "sha256": "19c907232d2c7b7c33e577716905dc806c6a94b1478d56e1e6283991bcd0f459"
+    },
+    "picco": {
+      "path": "output/verification/frontlight-restore-picco.log",
+      "sha256": "6341601d60a30a3614994f98a5f46c42d16624a36a9cc9d4a41fb740d15dc6e4"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "457146ebd800bf554989408b57b9c2ceb551723bf3e9cee0c7ef69a2935132dc",
+    "bytes": 5145888,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limitations": [
+    "Register simulation and firmware build do not establish physical brightness, warmth, current draw or recovery",
+    "Command timeout can still leave physical light state unknown",
+    "No physical shared-I2C/touch latency qualification",
+    "No new full workspace/native/network suite or grayscale build"
+  ],
+  "hardware_verified": false
+}

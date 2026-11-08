@@ -1,0 +1,54 @@
+{
+  "feature": "Source-word hit testing through shaped glyph clusters",
+  "controller_tests_passed": 24,
+  "workspace_clippy_passed": true,
+  "format_check_passed": true,
+  "monochrome_picco_build_passed": true,
+  "checks": [
+    "Actual Latin ligatures resolve to the complete source word",
+    "Decomposed accents and Hebrew source ranges survive all four logical rotations",
+    "Fixture verifies descending RTL visual cluster order",
+    "Whitespace/punctuation and out-of-viewport points do not select words",
+    "Hit testing preserves reader state and reading anchor",
+    "A word continued across lines and pages resolves to its full source text and passes selection extraction"
+  ],
+  "commands": [
+    "nix-shell --run 'cargo fmt --all && cargo test --locked -p femto-reader --test controller && cargo clippy --workspace --all-targets --features desktop,femto-catalog/tailnet --locked -- -D warnings && cargo fmt --all --check'",
+    "./scripts/build-picco"
+  ],
+  "input_sha256": {
+    "crates/femto-reader/src/controller.rs": "53eb6cd94a39107f67c4b42cfbb3d307079f504ea0fc24e6caea622eb216d0ea",
+    "crates/femto-reader/tests/controller.rs": "15d80ec2c49fad3142a28446adeaba59dddfbe151b75a2fcaf7e27f2f57da73f",
+    "crates/femto-reader/src/layout.rs": "ebbe322c4dcf7d1ba65523fa7ec1e4f31c9daae0bd1a236924217254b1c9651a",
+    "crates/femto-reader/src/selection.rs": "f6befe5739313379530150e96f91db95135687bf672e5807243dfbeafa1fd7aa",
+    "Cargo.lock": "2baec3d9529031bfdf7744749b4af37f6d881f5701cbf9f4d8b9581fc0013a8e",
+    "firmware/picco/Cargo.lock": "b40dfd6df9344d79f26fde2aa3ea2add9ff0eb3c984c0c0068a5990d4463fb54"
+  },
+  "logs": {
+    "tests": {
+      "path": "output/verification/word-hit-tests.log",
+      "sha256": "cffacf4a24fbde57e5177f35e0f77e9e40d5907ff08a338e2521d423a03b70e3"
+    },
+    "picco": {
+      "path": "output/verification/word-hit-picco.log",
+      "sha256": "755e585de042454a15ea49de6ae5262668f419a3129abc627950a9a10164a30b"
+    }
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "870dd0b4dec26528cc63e613a6f46f832ab9ac5e4977d9ae0d927aa8faf805f1",
+    "bytes": 5169344,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Positive-advance cells and line ascent/descent are not exact outline hit targets; overhangs and offsets require further qualification.",
+    "Unicode word boundaries do not supply dictionary-based segmentation for all languages.",
+    "Selection gestures, range adjustment and highlight painting remain unfinished.",
+    "No native simulator, full workspace, independent network or physical touch rerun in this checkpoint."
+  ]
+}

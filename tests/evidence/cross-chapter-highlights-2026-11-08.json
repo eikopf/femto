@@ -1,0 +1,41 @@
+{
+  "feature": "Cross-chapter saved-highlight verification, navigation and removal",
+  "commands": [
+    {
+      "command": "cargo fmt --all",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p femto-reader --test highlights",
+      "exit_code": 0,
+      "passed": 5
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "A saved excerpt spanning both sample EPUB chapters paints text in each chapter",
+    "Repeated rendering and highlight toggle preserve reading anchor",
+    "Chapter navigation and Back restore exact previously observed highlighted pixels",
+    "Forged quote suffix from the second chapter suppresses highlighting while the first chapter is visible, proving verification covers the whole excerpt",
+    "Restoring the exact record restores highlighted pixels",
+    "Removing the saved clipping restores exact unhighlighted pixels in both chapters"
+  ],
+  "input_manifest": {
+    "path": "output/verification/cross-chapter-highlights-inputs.json",
+    "sha256": "3f600cc13fb78551a65ea5d69ceb68112c923c747f45ae886b2eb59080b26a96",
+    "files": 391,
+    "unchanged_at_completion": true
+  },
+  "log": {
+    "path": "output/verification/cross-chapter-highlights-tests.log",
+    "sha256": "13e04fd36223d71e6b4f4087c577132a9548d36e90845e4c3c1f1c5a761f3177"
+  },
+  "limits": [
+    "This tests stored ranges and synchronous controller navigation, not cross-page touch selection or native window gestures.",
+    "No runtime implementation changes, firmware rebuild, native smoke or independent network interoperability rerun in this checkpoint.",
+    "Cross-chapter extraction remains synchronous; physical Picco latency and memory remain unqualified."
+  ]
+}

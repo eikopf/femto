@@ -1,0 +1,70 @@
+{
+  "feature": "Compare clipping source fragments without allocating a temporary quote",
+  "commands": [
+    {
+      "command": "cargo fmt --all",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p femto-reader --lib --test highlights --test clippings",
+      "exit_code": 0,
+      "passed": 52
+    },
+    {
+      "command": "cargo test -p femto --test clippings_export",
+      "exit_code": 0,
+      "passed": 5
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --features desktop,tailnet -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "checks": [
+    "Capture and comparison share grapheme validation, separators, range ordering, chapter span and output bounds",
+    "Direct comparisons accept exact Unicode fragments and reject missing separators, normalization differences and shorter or longer stored quotes",
+    "Exact 16 KiB source matches and overflow remains an error even after a prior mismatch",
+    "Early text mismatch still visits later chapters and propagates their errors",
+    "Existing single/cross-chapter highlights, persistence, source verification and CLI export tests pass"
+  ],
+  "input_manifest": {
+    "path": "output/verification/quote-comparison-inputs.json",
+    "sha256": "286dd3e54fb0b4ca75f6977636e0d5ceb0b23ac569b8b2def709bcbed31b611c",
+    "files": 391,
+    "unchanged_at_completion": true
+  },
+  "artifacts": {
+    "tests": {
+      "path": "output/verification/quote-comparison-tests.log",
+      "sha256": "f39268dc3be5f0ff246b5754278ef57ab02a0be5885dd2253e548df603e476ef"
+    },
+    "picco": {
+      "path": "output/verification/quote-comparison-picco.log",
+      "sha256": "1091f5b5345926015b063922b8834002b8e24c5de43fed8a8bbb09057b9cdd67"
+    },
+    "firmware": {
+      "path": "output/verification/quote-comparison-firmware.json",
+      "sha256": "8c5ac529ce763273d714582875d39d6713049af4f9662ed1fadbff74839e97ca"
+    }
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "403e3ffd22df41d3cb769666d251c788f212fd404e5cb4c408840cb67ecc045c",
+    "bytes": 5179616,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "limits": [
+    "Eliminates the comparison quote buffer, not parser, saved-text, coverage-mask or error allocations.",
+    "Cross-chapter parsing and verification remain synchronous; no physical memory or latency measurements.",
+    "Native smoke, independent network interoperability, grayscale firmware and clean reproducibility were not rerun in this checkpoint."
+  ]
+}

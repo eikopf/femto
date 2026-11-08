@@ -1,0 +1,44 @@
+{
+  "feature": "Bounded autonomous WireGuard handshake retries",
+  "series_lifetime_ms": 90000,
+  "maximum_series": 256,
+  "maximum_initiations_per_series": 18,
+  "maximum_due_retry_attempts_per_tick": 1,
+  "passed_microlink_tests": 203,
+  "workspace_clippy_desktop_tailnet_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "independent_peer_rerun": false,
+  "checks": [
+    "Dropped initiation and response recover using tick without repeated application demand",
+    "New session installation cancels retry series",
+    "Retries preserve the original expiry",
+    "Exhausted series produces no more automatic initiations",
+    "Fresh demand may start another bounded series",
+    "Output queue pressure defers retries without extending expiry",
+    "Revocation removes series and queued output"
+  ],
+  "limitations": [
+    "Budget uses elapsed time rather than upstream WireGuard retry-count accounting",
+    "Timing begins at queue acceptance rather than physical send",
+    "Explicit low-level initiate remains caller-paced",
+    "Persistent-keepalive configuration and independent-peer loss qualification remain outstanding",
+    "Firmware build preceded the final test-only dropped-response assertion; production code was unchanged"
+  ],
+  "logs": {
+    "validation": {
+      "path": "output/verification/autonomous-handshake-retries-validation.log",
+      "sha256": "48d500da0e35fed0a6bf6ff05dc0cd3691fae4ea77c6aa439bdffa8c18a02122"
+    },
+    "firmware": {
+      "path": "output/verification/autonomous-handshake-retries-firmware.log",
+      "sha256": "63a95f17d8fd74e993a8e33150f74428b79a463c466c6de328f6b3eafbcefcf5"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/network.rs": "8c484c23df48e525ed864ba74aa416f9182034449ca27801a0e59d3b753d09ee",
+    "crates/femto-microlink/src/handshake.rs": "3e79ae9d5da1af6bcf701c15229279b9e672187b86afa0d98e5db13dae222442",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "bcbfcd6cb338f67927579984dcfd0ff85fbbb6235a07682b6a366cc62bbbdb1a"
+  }
+}

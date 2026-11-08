@@ -1,0 +1,48 @@
+{
+  "feature": "Bounded unanswered-data WireGuard handshake timer",
+  "delay_ms": {
+    "minimum": 15000,
+    "maximum": 15333
+  },
+  "maximum_timers": 256,
+  "maximum_due_handshake_attempts_per_tick": 1,
+  "passed_microlink_tests": 201,
+  "workspace_clippy_desktop_tailnet_passed": true,
+  "picco_build_passed": true,
+  "hardware_verified": false,
+  "independent_peer_rerun": false,
+  "checks": [
+    "Only accepted nonempty transport output arms the timer",
+    "Repeated sends preserve the first deadline",
+    "Authenticated input cancels the timer; forged and replayed input cannot",
+    "Blocked output does not arm a timer",
+    "Output capacity defers the handshake without losing the timer",
+    "Expiry requests a paced handshake while current keys are young",
+    "Successful handshake replaces the session",
+    "Peer revocation clears pending timer state"
+  ],
+  "limitations": [
+    "Autonomous handshake retry series and total attempt limits remain unfinished",
+    "Persistent-keepalive configuration remains unfinished",
+    "Timer allocation after accepted egress is best effort",
+    "Egress acceptance can precede physical relay transmission",
+    "Independent-peer timer behavior and physical-device qualification remain outstanding"
+  ],
+  "logs": {
+    "validation": {
+      "path": "output/verification/unanswered-data-handshake-validation.log",
+      "sha256": "dc7ca40a3dc3cec73fa04a9214209e3a8e4ddcba31f46e6c25c2c5a0ae3c3fee"
+    },
+    "firmware": {
+      "path": "output/verification/unanswered-data-handshake-firmware.log",
+      "sha256": "7f71a75ccf4d64fd64e0f2bcd6b582e26ac15e34dd0b59b497300a91664f811c"
+    }
+  },
+  "input_sha256": {
+    "crates/femto-microlink/src/network.rs": "2718234813ed8ca17c975d1240c4fb96abb5ed84928893fabd71400cb3f2054b",
+    "crates/femto-microlink/src/plane.rs": "12a7df1cde80a7d2ed7096fb3848a48503496e95eb2af35e31d0f949d399378d",
+    "crates/femto-microlink/src/transport.rs": "b31da4c23652c1f632f0f1bc038240a5d89bc0342d6ad06f27ed717ce24863b3",
+    "Cargo.lock": "bd56c37fe97f51dff1a781c704a9631a8cd4c76480427be1a767638eb4e70199",
+    "output/picco/femto-picco.bin": "4e18b5eba685318dbbe4f813988418fe8a9b4f8d03ecedc0231bd27d2a23714b"
+  }
+}

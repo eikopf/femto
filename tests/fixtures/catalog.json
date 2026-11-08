@@ -1,0 +1,19 @@
+{
+  "metadata": {"title": "Femto catalog specimen"},
+  "links": [
+    {"rel": "self", "href": "catalog.json", "type": "application/opds+json"},
+    {"rel": "next", "href": "?page=2", "type": "application/opds+json"},
+    {"rel": "search", "href": "search{?query}", "type": "application/opds+json", "templated": true}
+  ],
+  "navigation": [{"title": "Recent books", "href": "recent.json", "type": "application/opds+json"}],
+  "publications": [{
+    "metadata": {"title": {"en": "A specimen", "de": "Ein Beispiel"}, "identifier": "urn:femto:catalog:1", "author": ["First Author", {"name": "Second Author"}]},
+    "links": [
+      {"rel": ["download", "alternate"], "href": "../books/sample.epub", "type": "application/epub+zip"},
+      {"rel": "preview", "href": "preview.epub", "type": "application/epub+zip"}
+    ],
+    "images": [{"href": "covers/sample.png", "type": "image/png"}]
+  }],
+  "groups": [{"metadata": {"title": "Collections"}, "navigation": [{"title": "Science", "href": "/science", "type": "application/opds+json"}]}],
+  "facets": [{"metadata": {"title": "Language"}, "links": [{"title": "English", "href": "?language=en"}, {"title": "German", "href": "?language=de"}]}]
+}

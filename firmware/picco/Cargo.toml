@@ -1,0 +1,43 @@
+[package]
+name = "femto-picco"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+
+[workspace]
+
+[features]
+grayscale = []
+bluetooth = []
+
+[dependencies]
+esp-idf-svc = "=0.53.0"
+log = "=0.4.29"
+zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
+femto-reader = { path = "../../crates/femto-reader" }
+femto-remote = { path = "../../crates/femto-remote" }
+femto-picco-board = { path = "../../crates/femto-picco" }
+femto-catalog = { path = "../../crates/femto-catalog" }
+femto-sync = { path = "../../crates/femto-sync" }
+femto-microlink = { path = "../../crates/femto-microlink" }
+
+[patch.crates-io]
+hidreport = { path = "../../vendor/hidreport" }
+quireink-stardict = { path = "../../vendor/quireink-stardict" }
+epub-stream = { path = "../../vendor/epub-stream" }
+swash = { path = "../../vendor/swash" }
+miniz_oxide = { path = "../../vendor/miniz_oxide" }
+
+[build-dependencies]
+embuild = { version = "=0.33.7", features = ["espidf"] }
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+debug = 1
+
+[package.metadata.esp-idf-sys]
+esp_idf_version = "v5.5.2"
+esp_idf_sdkconfig_defaults = ["sdkconfig.defaults"]

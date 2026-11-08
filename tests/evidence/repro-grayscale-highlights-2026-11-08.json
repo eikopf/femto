@@ -1,0 +1,124 @@
+{
+  "feature": "Current grayscale firmware reproducibility across relocated sources and clean targets",
+  "platform": "x86_64-linux",
+  "display_levels": 4,
+  "profile": "release",
+  "builds": [
+    {
+      "name": "a",
+      "source": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/source-a",
+      "target": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/gray-target-a",
+      "artifacts": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/gray-artifacts-a",
+      "target_absent_before_build": true,
+      "status": "finished",
+      "started_at": 1794141521.445663,
+      "exit_code": 0,
+      "finished_at": 1794141629.44654
+    },
+    {
+      "name": "b",
+      "source": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/source-b",
+      "target": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/gray-target-b",
+      "artifacts": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/gray-artifacts-b",
+      "target_absent_before_build": true,
+      "status": "interrupted",
+      "started_at": 1794141629.4469051,
+      "observed_session_exit_code": 143,
+      "remaining_build_processes": false,
+      "cause": "Unresolved"
+    },
+    {
+      "name": "c",
+      "source": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/source-b",
+      "target": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/gray-target-c",
+      "artifacts": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/gray-artifacts-c",
+      "target_absent_before_build": true,
+      "status": "interrupted",
+      "started_at": 1794141689.8019202,
+      "observed_session_exit_code": 143,
+      "remaining_build_processes": false,
+      "cause": "Unresolved"
+    },
+    {
+      "name": "d",
+      "source": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/source-b",
+      "target": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/gray-target-d",
+      "artifacts": "/home/oliver/projects/femto/output/repro-highlights-hybwic0m/gray-artifacts-d",
+      "target_absent_before_build": true,
+      "cargo_build_jobs": 1,
+      "status": "finished",
+      "started_at": 1794141832.9938326,
+      "exit_code": 0,
+      "finished_at": 1794142283.6675513
+    }
+  ],
+  "successful_comparison_builds": [
+    "a",
+    "d"
+  ],
+  "command_template": "CARGO_TARGET_DIR=<fresh target> FEMTO_PICCO_OUTPUT=<artifact directory> FEMTO_PICCO_GRAYSCALE=1 [CARGO_BUILD_JOBS=1 for d] ./scripts/build-picco",
+  "artifacts": {
+    "femto-picco.elf": {
+      "sha256": "9650663598d9bb8e13e2cf89ca31afc9c14a6b8d34d14842b63b6e67769f04d6",
+      "bytes": 5290904,
+      "equal": true,
+      "matches_incremental": true
+    },
+    "femto-picco.bin": {
+      "sha256": "f021e64cdad2d4a628ac65ff45529623824aa1cf2e908bb01fcdcf6831132e58",
+      "bytes": 5179856,
+      "equal": true,
+      "matches_incremental": true
+    },
+    "femto-picco.json": {
+      "sha256": "8502ac11f4bc78b3ffebbb45576b53965f9caad3459b9880684600976134cca8",
+      "bytes": 414,
+      "equal": true,
+      "matches_incremental": true
+    },
+    "femto-picco.debug.elf": {
+      "sha256": "c55369a8b4bfaa3d572213724de935e991d81da0573ba1615edd1efdbd3c5dd7",
+      "bytes": 39770924,
+      "equal": true,
+      "matches_incremental": true
+    }
+  },
+  "monochrome_artifacts_unchanged": {
+    "femto-picco.debug.elf": "1c3cf37c209f2fcf4280418916036c815e525af4d656e411dd1350c85f487d46",
+    "femto-picco.json": "8c5ac529ce763273d714582875d39d6713049af4f9662ed1fadbff74839e97ca",
+    "femto-picco.bin": "403e3ffd22df41d3cb769666d251c788f212fd404e5cb4c408840cb67ecc045c",
+    "femto-picco.elf": "b531d9c663b9e107bcbe78acfb3b95b7f26cea2ff3939077a5130337be0ec967"
+  },
+  "grayscale_image_differs_from_monochrome": true,
+  "input_manifest": {
+    "path": "output/verification/repro-highlights-inputs.json",
+    "sha256": "286dd3e54fb0b4ca75f6977636e0d5ceb0b23ac569b8b2def709bcbed31b611c",
+    "files": 391,
+    "live_and_both_copies_unchanged_at_completion": true
+  },
+  "logs": {
+    "a": {
+      "path": "output/repro-highlights-hybwic0m/gray-build-a.log",
+      "sha256": "f8e02bac92115465f32f5e3009cd6846458736b12a88da50ee5d25a7a31e7e28"
+    },
+    "b": {
+      "path": "output/repro-highlights-hybwic0m/gray-build-b.log",
+      "sha256": "bed0377d42a3ebe656128d78088409a6a7cf16eac2d76850be2158f9cf5ac8ca"
+    },
+    "c": {
+      "path": "output/repro-highlights-hybwic0m/gray-build-c.log",
+      "sha256": "781f891bb86e45da5121eeb23f63b8579a8ca7ffc8382668485b131b28c124c3"
+    },
+    "d": {
+      "path": "output/repro-highlights-hybwic0m/gray-build-d.log",
+      "sha256": "27c9be691b9e6b1f6b20aea2aa9d4252487402dfae73030fcc1015846e01704a"
+    }
+  },
+  "limits": [
+    "Two earlier attempts ended with observed session exit 143; no build processes remained. Cause remains unresolved and logs are retained.",
+    "The successful replacement used one Cargo build job and a fresh target directory; its artifacts match the first successful default-parallel build.",
+    "Same pinned x86_64 Linux host toolchain and dependency stores; does not qualify another host or toolchain.",
+    "Structural image validation and identical bytes do not establish physical Picco boot, display, memory or recovery.",
+    "No flashing or hardware writes were performed."
+  ]
+}

@@ -1,0 +1,1 @@
+{"address":"192.200.0.107:443","bootstrap":"Rust verified HTTPS","capability_version":142,"elapsed_ms":81,"host":"controlplane.tailscale.com","result":"passed","tailnet_enrolled":false,"unix_seconds":1794057562,"verified":"TLS, Noise IK, EarlyNoise challenge, HTTP2 settings"}

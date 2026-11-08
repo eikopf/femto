@@ -1,0 +1,72 @@
+{
+  "feature": "Configured-peer Bluetooth reconnect after complete stack release",
+  "commands": [
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "rust_passed": 1091,
+      "rust_batches": 81,
+      "rust_ignored": 1,
+      "python_passed": 15,
+      "embedded_rust_harness_tests": 4
+    },
+    {
+      "command": "cargo test --locked -p femto-remote",
+      "exit_code": 0,
+      "passed": 55
+    },
+    {
+      "command": "FEMTO_PICCO_BLUETOOTH=1 CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "crates/femto-remote/src/reconnect.rs": "e5060caa56ed5cfed2a5ac90dead2a6562b1ffbee95bd5c79da1d19270ae31ad",
+    "crates/femto-remote/src/lib.rs": "45bb9ef941d00304d537fde006b04fd66b9c6c214ce7e9fb967396596784a912",
+    "firmware/picco/src/bluetooth.rs": "1dd8980cd6ad971f64b488b4712de738e10f4aa9352d176107b1f35f235a825a",
+    "firmware/picco/src/bluetooth/probe.rs": "63a72a6f3f0d893f793acb95b5b2fff1b1b48bf2d728c2c955c8ae9747611c6c",
+    "firmware/picco/src/bluetooth/reconnect.rs": "fa49cf977bdfbfbe5d48ff24c8d2dfdc324c31950db9c0f350e0d54c3322b810",
+    "tests/firmware/test_ble_reconnect.py": "41506a803263b52a326a0c57e59a7b5246361d5acce81b6037369ecc78744573",
+    "vendor/esp-idf-svc/src/bt.rs": "ec40584aa9338b2244288c4d319d09e7847b2960e7089c820bc286ed96ac5bc9",
+    "vendor/esp-idf-svc/src/bt/ble/gatt/client.rs": "e9bd4e75b1490267dc3331c7cad48651cfba1380246d673ca60f710beb5d534f"
+  },
+  "logs_sha256": {
+    "output/verification/ble-reconnect-workspace.log": "d8ecdc253cb9e20e1268405e1d830d25b809745bc612b60e22777324500a67be",
+    "output/verification/ble-reconnect-targeted.log": "4084889090d5957fb4dc8edf9ea205e4b0085a6b90c923cdc468d67c5ac0eb22",
+    "output/verification/ble-reconnect-owner.log": "27f0eb853438582ac34b3d90976c70e3bac15019d08c68703f84da2c9d9d7ca2",
+    "output/verification/ble-reconnect-firmware.log": "588c54bb72cdfdb7412682a5d034ca94c95c5d5f3fe0e11eb1b01f83d4dc0ad0"
+  },
+  "sdk_sources_sha256": {
+    "components/bt/host/bluedroid/api/esp_bt_main.c": "48fe60ffa357caa1d3fe0a9f6aad4c84c8aa2fbcf118cf88497451d933697957",
+    "components/bt/common/btc/core/btc_task.c": "de360194bf14666c56f18b3e89f8586819440a310f7311f729e75b4985bbcbd1",
+    "components/bt/common/osi/thread.c": "83d67efbcf663500eb8fdbd0a40264a7266d2cbe4cdf81fbc96dc73a6ae96c1d"
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "735b08c4501bddbba8371129fff4d5a1f614389139766b9cce7532f517a3f7e4",
+    "bytes": 5702400,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "bluetooth": true,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "behavior": [
+    "One probe/driver at a time; acknowledged shutdown and final driver destruction precede retries",
+    "SDK host/controller must report uninitialized/idle before scheduling and starting a retry",
+    "Fresh callback/discovery/input state per attempt after SDK callback thread and queues are destroyed",
+    "Backoff starts at two seconds and doubles to a sixty-second cap; thirty seconds observed ready resets delay",
+    "Sleep clears retries before draining active attempt",
+    "Cleanup errors, shutdown deadlines, occupied SDK status, and initialization failure stop retries for this startup"
+  ],
+  "host_model_scope": "Production reconnect supervisor is compiled with mock Probe, modem, and SDK status functions; portable retry code is unchanged. Tests assert driver destruction before modem reuse and terminal failure/cancellation behavior. SDK code and radio scheduling are not executed.",
+  "limits": [
+    "Physical reconnect, callback scheduling, repeated SDK restart memory use, radio and Wi-Fi coexistence unverified",
+    "SDK startup/destruction are synchronous and not bounded by asynchronous shutdown deadline",
+    "Failed SDK initialization rollback remains unqualified",
+    "Pairing, persistent bonds, rotating-address resolution and peer chooser unfinished",
+    "Grayscale firmware and clean reproducibility not rerun for this source change"
+  ]
+}

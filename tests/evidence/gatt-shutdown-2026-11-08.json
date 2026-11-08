@@ -1,0 +1,70 @@
+{
+  "feature": "Acknowledged single-attempt GATT shutdown and null unregister-event handling",
+  "commands": [
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "rust_passed": 1088,
+      "rust_batches": 81,
+      "rust_ignored": 1,
+      "python_passed": 14
+    },
+    {
+      "command": "cargo test --locked -p femto-remote",
+      "exit_code": 0,
+      "passed": 52
+    },
+    {
+      "command": "FEMTO_PICCO_BLUETOOTH=1 CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "crates/femto-remote/src/shutdown.rs": "f12346ff210017ceb0eaa97b9599afb435d5f1b22cfdfffeea897d6e83403399",
+    "crates/femto-remote/src/lib.rs": "754f82b841c75bae3a5e51b6bf254a0bcb4a4e078c5e42a74092e7deff346388",
+    "firmware/picco/src/bluetooth.rs": "752a8c1a5e531ad6dd3a10b77622c7aaa2b3b10f075b7b250febde4c01eac027",
+    "firmware/picco/src/bluetooth/probe.rs": "1327b956c36b6f50d86a7ab8bae8dd741e29ec5f9e1a1e8a4da0f027b3d80862",
+    "firmware/picco/src/panel.rs": "67e524ab258500df6fae414b46deb394206f2ef901484b078d3dba3eb9599537",
+    "vendor/esp-idf-svc/src/bt/ble/gatt/client.rs": "e9bd4e75b1490267dc3331c7cad48651cfba1380246d673ca60f710beb5d534f",
+    "tests/firmware/test_gatt_callback.py": "81c5ccb8cb85fdee5050594875ca324c666c931d7893184f056f3fcc2c1e0394"
+  },
+  "logs_sha256": {
+    "output/verification/gatt-shutdown-workspace.log": "47770189ae6d315507c3094bc4de066477501a81dea9226b5bf963eba89d04ce",
+    "output/verification/gatt-shutdown-targeted.log": "c381fd7e8d6915066a445d8d6ac091402ecc59fec90745b38cc4befa5144d0e5",
+    "output/verification/gatt-shutdown-callback.log": "828acb017815652ea181037f09d48bef8d7918535d7a6cd784eee89cfc4169ab",
+    "output/verification/gatt-shutdown-patched-firmware.log": "9d81731705e4a1aff6d4665ce23dc1c2667df11d1d65b83d4f34a2e5fe808ffa",
+    "output/verification/gatt-shutdown-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "sdk_sources_sha256": {
+    "components/bt/host/bluedroid/btc/profile/std/gatt/btc_gattc.c": "e8c4efa74638b0ae0c1785c43e3d14056904eb70ed600326b376d21d2ec7f88c",
+    "components/bt/host/bluedroid/bta/gatt/bta_gattc_act.c": "6b3ff9c787e96dd380c58d1d5b648ff1badd06eaf1c31a63c31ab9e3fff3420c"
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "d83308491b10ca815ca115b8fa4bcdf3de180af50a15936df7838ae285004889",
+    "bytes": 5701920,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "bluetooth": true,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "behavior": [
+    "Input invalidated before asynchronous shutdown",
+    "Pending registration/open completion retained for cleanup even after discovery cancellation",
+    "Close/disconnect acknowledgement precedes application unregister; matching unregister acknowledgement precedes owner release",
+    "Each shutdown command issued once; wrong handles and failed close acknowledgements cannot advance shutdown",
+    "15-second shutdown deadline; sleep waits up to five seconds and retains pending service for normal polling",
+    "Synchronous SDK rejection or deadline expiry uses best-effort destructor fallback"
+  ],
+  "callback_evidence": "Pinned btc_gattc.c forwards ESP_GATTC_UNREG_EVT with NULL; patched production callback body delivers unregister without dereference, converts ordinary payload, and ignores unexpected null ordinary payload in host regression",
+  "limits": [
+    "Single connection attempt only; reconnect event generations, pairing and bonds unfinished",
+    "Physical callbacks, teardown timing, sleep, memory and radio behavior unverified",
+    "Host regression models the SDK callback contract; it does not execute SDK scheduling",
+    "Grayscale and clean reproducibility not rerun",
+    "An initial patch build failed for a missing warn macro import; the recorded final build includes the import"
+  ]
+}

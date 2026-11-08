@@ -28,6 +28,7 @@ use femto_remote::{
     gatt::{
         Descriptor, DescriptorKind, InputReport, MAX_DESCRIPTORS, ReportDescriptors, ReportRoutes,
     },
+    shutdown::{Command as ShutdownCommand, Shutdown},
     subscriptions::{Command as SubscribeCommand, Subscriptions},
 };
 use std::{
@@ -74,9 +75,11 @@ pub struct Probe {
     deadline: Instant,
     plan: Option<ReadPlan>,
     peer: Peer,
+    stop_deadline: Option<Instant>,
 }
 
 struct State {
+    shutdown: Shutdown,
     discovery: Discovery,
     remote: RemoteControl,
     token: Option<SessionToken>,
@@ -134,6 +137,7 @@ impl Probe {
         let driver = Arc::new(BtDriver::new(modem, None).map_err(|e| e.to_string())?);
         let client = Client::new(driver).map_err(|e| e.to_string())?;
         let state = Arc::new(Mutex::new(State {
+            shutdown: Shutdown::default(),
             discovery: Discovery::new(peer),
             remote: RemoteControl::default(),
             token: None,
@@ -145,6 +149,41 @@ impl Probe {
         client
             .subscribe(move |(interface, event)| {
                 let mut state = callbacks.lock().unwrap_or_else(|error| error.into_inner());
+                match &event {
+                    GattcEvent::ClientRegistered { status, app_id } if *app_id == APP_ID => state
+                        .shutdown
+                        .registered(interface, *status == GattStatus::Ok),
+                    GattcEvent::Open {
+                        status, conn_id, ..
+                    } => state.shutdown.opened(
+                        Connection {
+                            interface,
+                            id: *conn_id,
+                        },
+                        *status == GattStatus::Ok,
+                    ),
+                    GattcEvent::Close {
+                        status, conn_id, ..
+                    } => state.shutdown.closed(
+                        Connection {
+                            interface,
+                            id: *conn_id,
+                        },
+                        *status == GattStatus::Ok,
+                    ),
+                    GattcEvent::Disconnected { conn_id, .. } => state.shutdown.closed(
+                        Connection {
+                            interface,
+                            id: *conn_id,
+                        },
+                        true,
+                    ),
+                    GattcEvent::ClientUnregistered => state.shutdown.unregistered(interface),
+                    _ => {}
+                }
+                if state.shutdown.is_stopping() {
+                    return;
+                }
                 match event {
                     GattcEvent::ClientRegistered { status, app_id } if app_id == APP_ID => {
                         state
@@ -320,6 +359,7 @@ impl Probe {
             deadline: Instant::now() + Duration::from_secs(15),
             plan: None,
             peer,
+            stop_deadline: None,
         };
         probe
             .client
@@ -328,7 +368,53 @@ impl Probe {
         Ok(probe)
     }
 
+    pub fn is_ready(&self) -> bool {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).ready()
+    }
+
+    pub fn stop(&mut self) {
+        if self.stop_deadline.is_none() {
+            self.stop_deadline = Some(Instant::now() + Duration::from_secs(15));
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            state.abort("GATT stopping");
+            state.shutdown.stop();
+        }
+    }
+
     pub fn poll(&mut self) -> Result<bool, String> {
+        if self.stop_deadline.is_none() {
+            match self.poll_active() {
+                Ok(result) => return Ok(result),
+                Err(error) => {
+                    log::warn!("Bluetooth stopping: {error}");
+                    self.stop();
+                }
+            }
+        }
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.shutdown.is_done() {
+            return Ok(true);
+        }
+        if self
+            .stop_deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            return Err("GATT shutdown acknowledgement deadline expired".into());
+        }
+        let command = state.shutdown.take_command();
+        drop(state);
+        match command {
+            Some(ShutdownCommand::Close(connection)) => {
+                self.client.close(connection.interface, connection.id)
+            }
+            Some(ShutdownCommand::Unregister(interface)) => self.client.unregister_app(interface),
+            None => return Ok(false),
+        }
+        .map_err(|e| format!("GATT shutdown rejected: {e}"))?;
+        Ok(false)
+    }
+
+    fn poll_active(&mut self) -> Result<bool, String> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if let Some(error) = state.error() {
             return Err(error.into());
@@ -341,6 +427,11 @@ impl Probe {
             return Err("GATT discovery deadline expired".into());
         }
         let command = state.discovery.take_command();
+        if let Some(Command::Open { interface, .. }) = command {
+            if !state.shutdown.opening(interface) {
+                return Err("GATT open outside active lifecycle".into());
+            }
+        }
         let response = state.discovery.take_read().map_err(str::to_owned)?;
         let subscription = state
             .subscriptions
@@ -351,9 +442,8 @@ impl Probe {
         if let Some(command) = command {
             self.deadline = Instant::now() + Duration::from_secs(15);
             match command {
-                Command::Open { interface, peer } => self
-                    .client
-                    .open(
+                Command::Open { interface, peer } => {
+                    if let Err(error) = self.client.open(
                         interface,
                         &BdAddr::from_bytes(peer.address()),
                         match peer.address_type() {
@@ -361,8 +451,15 @@ impl Probe {
                             AddressType::Random => BleAddrType::Random,
                         },
                         true,
-                    )
-                    .map_err(|e| e.to_string())?,
+                    ) {
+                        self.state
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .shutdown
+                            .open_rejected();
+                        return Err(error.to_string());
+                    }
+                }
                 Command::SearchHid(connection) => self
                     .client
                     .search_service(connection.interface, connection.id, Some(&HID))
@@ -405,10 +502,16 @@ impl Probe {
         allow_turn: bool,
     ) -> Result<Option<PageTurn>, String> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if state.shutdown.is_stopping() {
+            return Ok(None);
+        }
         state.input_ready = true;
         state.synchronize();
         if let Some(error) = state.error() {
-            return Err(error.into());
+            log::warn!("Bluetooth stopping: {error}");
+            drop(state);
+            self.stop();
+            return Ok(None);
         }
         if !state.ready() {
             return Ok(None);
@@ -417,7 +520,10 @@ impl Probe {
             Ok(action) => Ok(action),
             Err(error) => {
                 state.abort("HID input decode failed");
-                Err(error.to_string())
+                drop(state);
+                log::warn!("Bluetooth input: {error}");
+                self.stop();
+                Ok(None)
             }
         }
     }
@@ -668,8 +774,13 @@ impl Drop for Probe {
     fn drop(&mut self) {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         state.abort("GATT discovery stopped");
-        let connection = state.discovery.connection();
-        let interface = state.discovery.interface();
+        if state.shutdown.is_done() {
+            drop(state);
+            let _ = self.client.unsubscribe();
+            return;
+        }
+        let connection = state.shutdown.connection();
+        let interface = state.shutdown.interface();
         let subscribed = state.subscriptions.is_some();
         drop(state);
         if subscribed && let (Some(interface), Some(plan)) = (interface, self.plan.as_ref()) {

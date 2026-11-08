@@ -8,7 +8,9 @@ pub mod discovery;
 pub mod gatt;
 pub mod inbox;
 pub mod input;
+pub mod reconnect;
 pub mod scan;
+pub mod shutdown;
 pub mod subscriptions;
 
 pub use bindings::{Bindings, PageTurn};

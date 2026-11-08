@@ -1,0 +1,119 @@
+{
+  "feature": "Pinned ESP-IDF GATT destructor correction and reproducibility runner hardening",
+  "commands": [
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "rust_passed": 1081,
+      "rust_batches": 81,
+      "rust_ignored": 1,
+      "python_passed": 12
+    },
+    {
+      "command": "FEMTO_PICCO_BLUETOOTH=1 CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    },
+    {
+      "command": "rustfmt --edition 2021 --check vendor/esp-idf-svc/src/bt/ble/gatt/client.rs",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo build --locked --features desktop --bin femto-simulator && python scripts/simulator-remote-smoke.py",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "firmware/picco/Cargo.toml": "efd1761d4b16f168713832354caceaceac76ac84e95f7e2298c97481dc65f7bd",
+    "firmware/picco/Cargo.lock": "eb32970f55245bf1b510052cbe57a455b35e9f729273694c6ee067570272bae1",
+    "vendor/esp-idf-svc/src/bt/ble/gatt/client.rs": "010c831e6ccb4a1a64251d594473516a1a2d7ff9e412fd69d9cc8576a3ea7c3d",
+    "vendor/esp-idf-svc/src/bt.rs": "ec40584aa9338b2244288c4d319d09e7847b2960e7089c820bc286ed96ac5bc9",
+    "tests/firmware/test_gatt_drop.py": "6bbb27672f8f15a2aac981d142745c19f23b732c79c8affee1d3676cc6360e20",
+    "tests/firmware/test_repro.py": "5809d8543bc445db60b99d428d0936aec604ee6d43dd8bd3087288b6c099c1cb",
+    "scripts/picco-repro.py": "2e4418e52c5a854d6ab6a99307d0dd35db0705fdeb6c2e24a90794ed204d9abb",
+    "scripts/check-picco-repro": "07383569c1a7a2e0063515cbd0d511894bba679d34bdcc48ebfdc9f680de21cd",
+    "scripts/simulator-remote-smoke.py": "1453c0aa3dc3a4eabf789e411d47eb5e7961bcf5e6a5ff2c742b0225f74007ff",
+    "scripts/check-simulator": "b6a0af9347e27badabc78e485f4cb4c481d36aecd78ef30cf6acd47d28a27398",
+    "crates/femto-reader/src/ui.rs": "e7c98eca6b7ff16e9880c4ea3ababeda8448a2ab8e2216eb7f624f9a47d14809"
+  },
+  "sdk_version": "ESP-IDF 5.5.2 pinned Nix source",
+  "sdk_files_sha256": {
+    "components/bt/host/bluedroid/api/esp_gattc_api.c": "a786ebf04c10662339fa70ea1fded600f99d31236e1ab854b9b2b8cc9be29ee3",
+    "components/bt/host/bluedroid/api/esp_gap_ble_api.c": "e879f654f4893a5905aa176178ac7216808627e050b0c1989547edb6891a98e8",
+    "components/bt/common/btc/core/btc_manage.c": "4e723d6e3a2019d37840fa70a6cb521d7672d5e03e2b8051dd6a784e0e54a0ba"
+  },
+  "logs_sha256": {
+    "output/verification/gatt-drop-native-menu.log": "276a621c5ac26aba33be198f68a24e70f10c43edfab0f1e97081d7ee2a3464d4",
+    "output/verification/gatt-drop-firmware.log": "cbb856b70195dd140f85bf5b077ee7dae6a5c951690f7ef5ac3f7871ceb38e5f",
+    "output/verification/gatt-drop-workspace.log": "1780f0d370db034f847d52217c2e45dda86788584d5bd4c3d92f2c8e59b37662",
+    "output/verification/gatt-drop-host.log": "864b9b8b4919e9cd1626fa0171518fcdee518a8ba90aa523e4fa9215e613181e",
+    "output/verification/gatt-drop-firmware-before-heading.log": "791d3fada24b1705248a8ad97b3d0507ea2671b73e750f45dc0d0ecec85dbb5c",
+    "output/verification/gatt-drop-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "5e91a4d71ae4ad1406e69a36990dfd7401a733aaddc7c3ee7fffbb6c78fde2e8",
+    "bytes": 5697728,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "native_menu": {
+    "status": "passed",
+    "volume_opt_in_cycles_previous_next_off": true,
+    "mapping_persisted_after_quit_reopen": true,
+    "reopened_menu_pixels_identical": true,
+    "disable_and_defaults_work": true,
+    "position_bookmarks_clippings_and_layout_unchanged": true,
+    "physical_device_test": false
+  },
+  "screenshots_sha256": {
+    "output/remote-editor-native/volume-reopened.png": "f52f38ef1905bb77f51187cdab02a7b6c36b6af061a5db2ca47164077132177f",
+    "output/remote-editor-native/volume-previous.png": "f52f38ef1905bb77f51187cdab02a7b6c36b6af061a5db2ca47164077132177f"
+  },
+  "source_findings": [
+    "esp_ble_gattc_register_callback rejects null with ESP_FAIL",
+    "esp-idf-svc 0.53.0 Drop passes null and unwraps the failure",
+    "GAP forwards null to btc_profile_cb_set, which accepts it; GAP is unchanged",
+    "Patched GATT Drop unsubscribes application state, replaces callback with a static no-op, releases singleton, then releases owned driver"
+  ],
+  "regression_scope": "The test compiles the actual vendored destructor body against host stand-ins. It reproduces the original failure, checks teardown order, and invokes the late no-op without owner or event data. It does not execute ESP-IDF scheduling.",
+  "repro_runner": [
+    "Explicit Bluetooth feature selection independent of ambient environment",
+    "Clears inherited SDK configuration overrides",
+    "Final source inventory detects added, removed and changed paths",
+    "Ignore rules apply without Git metadata; source file and directory symlinks are rejected"
+  ],
+  "cancelled_repro": {
+    "status": "cancelled",
+    "run": "/home/oliver/projects/femto/output/repro-current-aqlvoxb8",
+    "builds": [
+      {
+        "levels": 2,
+        "bluetooth": true,
+        "source": "/home/oliver/projects/femto/output/repro-current-aqlvoxb8/source-a",
+        "target": "/home/oliver/projects/femto/output/repro-current-aqlvoxb8/target-2-a",
+        "artifacts": "/home/oliver/projects/femto/output/repro-current-aqlvoxb8/artifacts-2-a",
+        "log": "/home/oliver/projects/femto/output/repro-current-aqlvoxb8/build-2-a.log",
+        "target_absent_before_build": true,
+        "started_at": 1794156333.7135677
+      }
+    ],
+    "comparisons": {},
+    "bluetooth": true,
+    "inputs_sha256": "01c344ef56972a29ea1155fac4a177cfa5abc8837814f4f1b2476f8bbef85c44",
+    "input_count": 621,
+    "finished_at": 1794156737.7524242,
+    "reason": "Stopped after source audit found deterministic GATT Drop panic in pinned esp-idf-svc: SDK rejects null callback. No reproducibility conclusion.",
+    "observed_exit_code": 143
+  },
+  "limits": [
+    "No physical Bluetooth shutdown or asynchronous unregister qualification",
+    "No automatic reconnect or new callback generation guarantees",
+    "Other SDK errors can still panic during destruction",
+    "Full native suite passed before the heading-only correction; focused native binding test passed after it",
+    "Normal and grayscale firmware and clean reproducibility not yet qualified for this patch"
+  ]
+}

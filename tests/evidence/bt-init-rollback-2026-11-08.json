@@ -1,0 +1,60 @@
+{
+  "feature": "Guarded rollback of owned Bluetooth initialization stages",
+  "commands": [
+    {
+      "command": "cargo fmt --all --check",
+      "exit_code": 0
+    },
+    {
+      "command": "python -m unittest discover -s tests/firmware -v",
+      "exit_code": 0,
+      "passed": 16
+    },
+    {
+      "command": "FEMTO_PICCO_BLUETOOTH=1 CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "files_sha256": {
+    "vendor/esp-idf-svc/src/bt.rs": "5445f342e562e5a980374e975bb55dee4dec15ea9ceb1084278b5f95c04c1f86",
+    "tests/firmware/test_bt_init.py": "050a1cc4f5884a7ff1fa206bb6086c0085cb40952c808b2bbefeb3eef4d306a5"
+  },
+  "logs_sha256": {
+    "output/verification/bt-init-final-host.log": "0843def3a6d0d38449d8fd5f2259b3b9654e7cf44fbc369a15d0851e648509f1",
+    "output/verification/bt-init-firmware.log": "92e63a95ca8008bd61148d7e732d32c159aac3b93be8ed9bb0fb68a5beef53bb"
+  },
+  "sdk_sources_sha256": {
+    "components/bt/host/bluedroid/api/esp_bt_main.c": "48fe60ffa357caa1d3fe0a9f6aad4c84c8aa2fbcf118cf88497451d933697957"
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "2278c08aa7897fb136d18ce939f346f0b9a5ec0e85e15fa062b9cc77c142ae76",
+    "bytes": 5703616,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "bluetooth": true,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "coverage": [
+    "Production initialization sequence and rollback guard compiled into a stateful host SDK model",
+    "Fault at each of four initialization stages",
+    "Reverse-order release after controller-enable and host-enable failure",
+    "Original initialization error retained through cleanup failures",
+    "Cleanup stops at host-disable, host-deinit, controller-disable, or controller-deinit failure without releasing live dependencies",
+    "Successful initialization retains resources for ordinary driver ownership",
+    "Failed controller initialization does not clean up pre-existing owner",
+    "Failed host initialization retains uncertain internal tasks and controller rather than falsely reporting cleanup",
+    "Unexpected SDK statuses stop cleanup"
+  ],
+  "limits": [
+    "Model does not execute ESP-IDF allocation or scheduling",
+    "Failure inside esp_bluedroid_init can leave workers with uninitialized public status; public deinit rejects that state, so restart is required",
+    "Synchronous SDK cleanup calls are not bounded by the application shutdown deadline",
+    "Normal driver destructor can still panic on SDK deinitialization failure",
+    "No physical hardware, grayscale firmware, or new clean reproducibility run",
+    "Portable Rust workspace unchanged; its prior full gate is recorded in ble-reconnect-2026-11-08.json and was not rerun"
+  ]
+}

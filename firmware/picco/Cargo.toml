@@ -23,6 +23,7 @@ femto-sync = { path = "../../crates/femto-sync" }
 femto-microlink = { path = "../../crates/femto-microlink" }
 
 [patch.crates-io]
+esp-idf-svc = { path = "../../vendor/esp-idf-svc" }
 hidreport = { path = "../../vendor/hidreport" }
 quireink-stardict = { path = "../../vendor/quireink-stardict" }
 epub-stream = { path = "../../vendor/epub-stream" }

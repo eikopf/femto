@@ -6,7 +6,8 @@ compile_error!("The Bluetooth scanner requires the BLE 4.2 legacy scan APIs");
 compile_error!("The scan backend requires GATT cache and bond NVS persistence disabled");
 
 mod probe;
-use probe::Probe;
+mod reconnect;
+use reconnect::Reconnecting;
 
 use esp_idf_svc::{
     bt::{
@@ -25,15 +26,32 @@ type Gap = EspBleGap<'static, Ble, Arc<BtDriver<'static, Ble>>>;
 
 pub enum Service {
     Scan(Scanner),
-    Probe(Probe),
+    Probe(Reconnecting),
 }
 
 impl Service {
     pub fn open(modem: BluetoothModem<'static>) -> Result<Option<Self>, String> {
         if let Some(peer) = probe::load_peer()? {
-            return Probe::open(modem, peer).map(|probe| Some(Self::Probe(probe)));
+            return Reconnecting::open(modem, peer).map(|probe| Some(Self::Probe(probe)));
         }
         Scanner::open(modem).map(|scanner| scanner.map(Self::Scan))
+    }
+
+    pub fn stop_and_wait(&mut self, timeout: Duration) -> Result<bool, String> {
+        let Self::Probe(probe) = self else {
+            return Ok(true);
+        };
+        probe.stop();
+        let deadline = Instant::now() + timeout;
+        loop {
+            if probe.poll()? {
+                return Ok(true);
+            }
+            if Instant::now() >= deadline {
+                return Ok(false);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     pub fn poll(&mut self) -> Result<bool, String> {

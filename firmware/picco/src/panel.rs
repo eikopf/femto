@@ -211,7 +211,18 @@ pub struct Screen {
 impl Screen {
     pub fn prepare_sleep(&mut self) -> Result<(), String> {
         #[cfg(feature = "bluetooth")]
-        drop(self.bluetooth.take());
+        {
+            if let Some(bluetooth) = &mut self.bluetooth {
+                match bluetooth.stop_and_wait(Duration::from_secs(5)) {
+                    Ok(true) => {}
+                    Ok(false) => return Err("Bluetooth still stopping; retry sleep".into()),
+                    Err(error) => {
+                        log::warn!("Bluetooth shutdown fallback: {error}");
+                    }
+                }
+            }
+            drop(self.bluetooth.take());
+        }
         if !self.tailnet.close_and_wait(Duration::from_secs(5)) {
             return Err("Tailnet still stopping; retry sleep".into());
         }

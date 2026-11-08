@@ -178,7 +178,12 @@ fn run() -> Result<(), String> {
     loop {
         std::thread::sleep(Duration::from_millis(10));
         screen.poll_wifi();
-        if let Some(event) = screen.event() {
+        let event = screen.event().or_else(|| {
+            screen
+                .remote_turn(&reader.state, !ui.is_open())
+                .map(input::Event::Turn)
+        });
+        if let Some(event) = event {
             idle.activity(idle_epoch.elapsed().as_millis().min(u64::MAX as u128) as u64);
             ui.set_device_status(&format!(
                 "{} | {}",

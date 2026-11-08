@@ -40,6 +40,15 @@ impl RemoteControl {
         reports: &[InputReport],
     ) -> Result<SessionToken> {
         let input = RemoteInput::new(descriptor).map_err(remote_error)?;
+        self.connect_gatt_input(input, reports)
+    }
+
+    /// Installs an already-parsed map without parsing inside a platform callback lock.
+    pub fn connect_gatt_input(
+        &mut self,
+        input: RemoteInput,
+        reports: &[InputReport],
+    ) -> Result<SessionToken> {
         let routes = ReportRoutes::new(&input, reports).map_err(remote_error)?;
         self.begin(input, Some(routes))
     }
@@ -90,25 +99,39 @@ impl RemoteControl {
 
     /// Processes one event. Call under the same serialization as submit/disconnect.
     pub fn poll(&mut self, reader: &mut Reader, ui: &mut ReaderUi) -> Result<Effect> {
-        match self.inbox.poll() {
+        match self.poll_action(&reader.state, !ui.is_open())? {
+            Some(PageTurn::Next) => ui.turn(reader, true),
+            Some(PageTurn::Previous) => ui.turn(reader, false),
             None => Ok(Effect::Unchanged),
+        }
+    }
+
+    /// Commits at most one action under the platform's input lock. The caller may
+    /// render it after unlocking; a later disconnect cannot retract that action.
+    pub fn poll_action(
+        &mut self,
+        state: &crate::state::ReaderState,
+        allow_turn: bool,
+    ) -> Result<Option<PageTurn>> {
+        match self.inbox.poll() {
+            None => Ok(None),
             Some(Event::Reset(ResetReason::SessionChanged)) => {
                 if let Some((_, input)) = self.session.as_mut() {
                     input.reset();
                 }
-                Ok(Effect::Unchanged)
+                Ok(None)
             }
             Some(Event::Reset(_)) => {
                 self.session = None;
                 self.routes = None;
-                Ok(Effect::Unchanged)
+                Ok(None)
             }
             Some(Event::Input(notification)) => {
                 let Some((token, input)) = self.session.as_mut() else {
-                    return Ok(Effect::Unchanged);
+                    return Ok(None);
                 };
                 if *token != notification.token || !self.inbox.is_current(*token) {
-                    return Ok(Effect::Unchanged);
+                    return Ok(None);
                 }
                 let presses = match input.accept(&notification.reference, notification.payload()) {
                     Ok(presses) => presses,
@@ -119,19 +142,15 @@ impl RemoteControl {
                         return Err(remote_error(error));
                     }
                 };
-                let bindings = match &reader.state.remote_bindings {
+                let bindings = match &state.remote_bindings {
                     Some(saved) => saved.bindings()?,
                     None => Bindings::default(),
                 };
                 let action = bindings.resolve(&presses);
-                if ui.is_open() {
-                    return Ok(Effect::Unchanged);
+                if !allow_turn {
+                    return Ok(None);
                 }
-                match action {
-                    Some(PageTurn::Next) => ui.turn(reader, true),
-                    Some(PageTurn::Previous) => ui.turn(reader, false),
-                    None => Ok(Effect::Unchanged),
-                }
+                Ok(action)
             }
         }
     }

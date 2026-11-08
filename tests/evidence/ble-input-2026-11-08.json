@@ -1,0 +1,98 @@
+{
+  "feature": "Configured BLE HID subscriptions and reader page-turn dispatch",
+  "commands": [
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "rust_passed": 1079,
+      "rust_batches": 81,
+      "rust_ignored": 1,
+      "python_passed": 7
+    },
+    {
+      "command": "cargo test --locked -p femto-remote",
+      "exit_code": 0,
+      "passed": 48
+    },
+    {
+      "command": "cargo test --locked -p femto-reader --test remote",
+      "exit_code": 0,
+      "passed": 11
+    },
+    {
+      "command": "rustfmt --edition 2024 --check firmware/picco/src/{main,panel,bluetooth,bluetooth/probe}.rs",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    },
+    {
+      "command": "FEMTO_PICCO_BLUETOOTH=1 CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "crates/femto-reader/src/remote.rs": "167898935b383603c4c01e4a691adbad344e7d1b7919c8a008a0feb1c7e04177",
+    "crates/femto-reader/tests/remote.rs": "0f103926b4d17d0c8daa3a59d46b81ccf2ce4ac5b371823bfc56ee5114ddb398",
+    "crates/femto-remote/src/discovery.rs": "c396cf58cbdd413ba8ca18bfa58d3eb6b1f3cc546cea2c13b94d6c1b177206ee",
+    "crates/femto-remote/src/discovery/characteristics.rs": "5d5b467801efb311167497a4a18671cc96789c7a928432990d36254120db8846",
+    "crates/femto-remote/src/discovery/reads.rs": "4ca887e778379bd22a068fa6b62ad1ba552986255cdd571d99d303603ef14632",
+    "crates/femto-remote/src/gatt.rs": "ec369a480ffc46c8193ea4eb967913bf9d20000125730da970f1b368415b300b",
+    "crates/femto-remote/src/lib.rs": "c7c8545b3f548e5f2dc2fafa8417849b17abd6b798c36c7a4f2e26edcbcc5a07",
+    "crates/femto-remote/src/subscriptions.rs": "c86e4acdb97c496498cdda17931aad10de5d8e51a3de89ef227b8ee48b783e97",
+    "firmware/picco/sdkconfig.bluetooth": "5427a72f2bb69266c1781a0ff9cc9054cd05b67909ab6fbe6a6d17e73467d289",
+    "firmware/picco/src/bluetooth.rs": "4584deb4ada8b21e13348004951531a4202132c80fa99b23a61e66e7a3ad23be",
+    "firmware/picco/src/bluetooth/probe.rs": "fdf62009115c5939019638587f572432dbeab8290dcfe2c6022d97ac41faa5f2",
+    "firmware/picco/src/main.rs": "c62c78edf44532e6e23bb519da9ce95e2facd62ea062697783ce7ffb1680d81a",
+    "firmware/picco/src/panel.rs": "4b65d36b7ef339f00ba7d837d2601eefd0a5899a34dadfe355d5019feee77452"
+  },
+  "logs_sha256": {
+    "output/verification/ble-input-workspace.log": "760e98f96428ff678d8c22d8e473f406c211f94fc3bc7323efe899cc183dc50d",
+    "output/verification/ble-input-host.log": "9f2727e886a2dfdb5ead8ea0b49b5b5356f8b11de579c305cbb4f55b00018323",
+    "output/verification/ble-input-firmware-default.log": "b9ec28784745445cba25abc7d80cf732bd66d92c3d631e430c4302ee97e8295a",
+    "output/verification/ble-input-firmware-api-failure.log": "740a2e9dcda2798c1c2a0565a18fc220daefd028e156b1ae2c7998fdb68fb2ed",
+    "output/verification/ble-input-firmware.log": "0a162eca1c30ca96ac530c1570cf89d53e625910156a4272e87d2efd438ef617",
+    "output/verification/ble-input-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "firmware": {
+    "picco": {
+      "image": "femto-picco.bin",
+      "sha256": "7221373922cc7bbadf216cc50b97919e864cf994e71fd79ff6ebe0eda4aad99f",
+      "bytes": 5238096,
+      "chip": "esp32s3",
+      "display_levels": 2,
+      "reference_app_offset": "0xE0000",
+      "reference_app_size": "0xE70000",
+      "hardware_verified": false,
+      "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+    },
+    "picco-bluetooth": {
+      "image": "femto-picco.bin",
+      "sha256": "fc5da700f1775e68b604e2c70092fe212291446e12c835db5611cc6151ec86da",
+      "bytes": 5696352,
+      "chip": "esp32s3",
+      "display_levels": 2,
+      "reference_app_offset": "0xE0000",
+      "reference_app_size": "0xE70000",
+      "hardware_verified": false,
+      "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+    }
+  },
+  "verified": [
+    "Serial notification registration and acknowledged CCCD writes for all routes before input activation",
+    "Eight-route boundary, unexpected acknowledgements, cancellation and failure tests",
+    "Completed discovery remains revocable on disconnect",
+    "Reader action authorization under the input mutex with rendering after unlock; disconnect discards pending input",
+    "SDK notification registration capacity is eight",
+    "Both monochrome firmware variants compile, link and pass image packaging validation"
+  ],
+  "limits": [
+    "No physical Picco or BLE remote qualification",
+    "No pairing, persistent bonds, on-screen peer selection or automatic reconnect",
+    "One connection attempt per owner; future reconnect needs callback generation handling",
+    "Already-authorized actions may finish after disconnect; pending input is discarded",
+    "Grayscale, clean reproducibility, native GUI and independent tailnet fixtures not rerun"
+  ],
+  "build_correction": "Initial Bluetooth compile failed on GattWriteType::WithResponse; corrected to pinned API RequireResponse and rebuilt successfully."
+}

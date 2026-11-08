@@ -5,6 +5,9 @@ compile_error!("The Bluetooth scanner requires the BLE 4.2 legacy scan APIs");
 #[cfg(any(esp_idf_bt_gattc_cache_nvs_flash, esp_idf_bt_ble_smp_bond_nvs_flash))]
 compile_error!("The scan backend requires GATT cache and bond NVS persistence disabled");
 
+mod probe;
+use probe::Probe;
+
 use esp_idf_svc::{
     bt::{
         Ble, BtDriver, BtStatus,
@@ -19,6 +22,38 @@ use std::{
 };
 
 type Gap = EspBleGap<'static, Ble, Arc<BtDriver<'static, Ble>>>;
+
+pub enum Service {
+    Scan(Scanner),
+    Probe(Probe),
+}
+
+impl Service {
+    pub fn open(modem: BluetoothModem<'static>) -> Result<Option<Self>, String> {
+        if let Some(peer) = probe::load_peer()? {
+            return Probe::open(modem, peer).map(|probe| Some(Self::Probe(probe)));
+        }
+        Scanner::open(modem).map(|scanner| scanner.map(Self::Scan))
+    }
+
+    pub fn poll(&mut self) -> Result<bool, String> {
+        match self {
+            Self::Scan(scanner) => scanner.poll(),
+            Self::Probe(probe) => probe.poll(),
+        }
+    }
+
+    pub fn poll_input(
+        &mut self,
+        reader: &femto_reader::state::ReaderState,
+        allow_turn: bool,
+    ) -> Result<Option<femto_reader::remote::PageTurn>, String> {
+        match self {
+            Self::Scan(_) => Ok(None),
+            Self::Probe(probe) => probe.poll_input(reader, allow_turn),
+        }
+    }
+}
 
 #[derive(Default)]
 struct State {

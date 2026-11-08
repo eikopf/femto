@@ -1,0 +1,86 @@
+{
+  "feature": "Configured-peer GATT connection and bounded HID characteristic discovery",
+  "commands": [
+    {
+      "command": "cargo test --locked -p femto-remote",
+      "exit_code": 0,
+      "passed": 38
+    },
+    {
+      "command": "cargo clippy --locked -p femto-remote --all-targets -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "rust_passed": 1068,
+      "rust_batches": 81,
+      "rust_ignored": 1,
+      "python_passed": 7
+    },
+    {
+      "command": "cargo fmt --manifest-path firmware/picco/Cargo.toml --check",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 FEMTO_PICCO_BLUETOOTH=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "crates/femto-remote/src/lib.rs": "ba0368c6372e071e841f801baf34af55baad1ca865ceb5ced0ff0038341cbcde",
+    "crates/femto-remote/src/discovery.rs": "38a580c14f29f3d61b8422d0d1e79a2fd446975ab95e61b803075d5f75695750",
+    "crates/femto-remote/src/discovery/characteristics.rs": "5d5b467801efb311167497a4a18671cc96789c7a928432990d36254120db8846",
+    "firmware/picco/src/bluetooth.rs": "b61f609724f27da933dd8c7bde8a535c70c9d06b243d147675443996ed90eb74",
+    "firmware/picco/src/bluetooth/probe.rs": "2bf1699e8223e64a08d93735fc912d5275e9d804ac91aa288157b171c509de75",
+    "firmware/picco/src/panel.rs": "860daaa838779b75e388bffe7d3b48860ddda235436ae5c7ee40f4d60825953d",
+    "firmware/picco/sdkconfig.bluetooth": "55c8bf89d21d43191c2291f4559248adb8a1b110f9edfb3d6d3b14b147df3e9b",
+    "Cargo.lock": "444efe35c3058a3342bcdace09a9d3785eee9905386ea2a2c04aaa1bf67be53e",
+    "firmware/picco/Cargo.lock": "04c806505d0a9ca8b0a35f9a7eb5915b32122742c7c5085e001e0d74b3e1ddb0"
+  },
+  "logs_sha256": {
+    "output/verification/ble-discovery-host.log": "997e722427a3bbee078369d97916d43fec2f63ca40b9cba7eef224626883a567",
+    "output/verification/ble-discovery-workspace.log": "15cd63cdc9545e6fb3085fffc8a42a67433b0dfcb01565a30dfe4aeb3403558d",
+    "output/verification/ble-discovery-firmware.log": "07c795c459f51a26bf2c676843c763ce8c40ca2b5390bc530889f66007b2d8e5",
+    "output/verification/ble-discovery-firmware-format.log": "c396befd6782051de120a82f4c6b4900cc7968f179eb50db0aa1d43937793211"
+  },
+  "sdk_config": {
+    "BT_BLE_42_SCAN_EN": true,
+    "BT_GATTC_ENABLE": true,
+    "BT_GATTC_CONNECT_RETRY_COUNT": 0,
+    "BT_BLE_ESTAB_LINK_CONN_TOUT": 10,
+    "BT_GATTC_CACHE_NVS_FLASH": false,
+    "BT_BLE_SMP_BOND_NVS_FLASH": false,
+    "BT_ACL_CONNECTIONS": 1
+  },
+  "sdk_config_sha256": {
+    "firmware/picco/target-bluetooth/xtensa-esp32s3-espidf/release/build/esp-idf-sys-d2246cd4a5e2f38f/out/build/config/sdkconfig.json": "2836472fb97c177102cdea54a38387cd02228de278de7e9da9153f90c3be4135"
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "c9634c35abb257511c05c01a92acab3fe0060e3309a1992346ff30093e30b031",
+    "bytes": 5659456,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "verified": [
+    "Bounded peer parser accepts public/random colon-separated addresses and rejects malformed or extra input",
+    "Discovery sequences registration, open, search and inspection once per attempt",
+    "Wrong interfaces, connection IDs and out-of-order callbacks cannot advance discovery",
+    "Disconnect, service changes, missing/ambiguous HID services and operation failures clear pending work",
+    "Cleanup handles survive active-session failure",
+    "Characteristic validator accepts 32 entries and eight notifying reports at the limits, rejects overflow, missing/duplicate/unreadable maps and invalid handles",
+    "Bluetooth target compiles, links and passes image packaging validation"
+  ],
+  "limits": [
+    "No physical hardware, connection or radio operation executed",
+    "No peer authentication, pairing, bonds, Report Map or Report Reference reads, CCCD subscriptions or input dispatch",
+    "No automatic reconnect or generation handling for a reused SDK connection in a reconnect loop",
+    "SDK calls and destruction can block; deinitialization errors can panic in the pinned wrapper",
+    "Normal non-Bluetooth firmware, grayscale, clean reproducibility, native GUI and independent tailnet fixture not rerun for this change"
+  ]
+}

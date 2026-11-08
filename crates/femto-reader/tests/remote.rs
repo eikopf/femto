@@ -13,6 +13,42 @@ const MAP: &[u8] = &[
 const NEXT: &[u8] = &[0x4e, 0, 0, 0, 0, 0];
 
 #[test]
+fn committed_action_can_render_after_unlock_while_disconnect_discards_pending_input() {
+    use femto_reader::remote::PageTurn;
+    use std::sync::{Arc, Mutex};
+    let mut reader = reader();
+    let mut ui = ReaderUi::default();
+    let remote = Arc::new(Mutex::new(RemoteControl::default()));
+    let token;
+    let action;
+    {
+        let mut input = remote.lock().unwrap();
+        token = input.connect(MAP).unwrap();
+        assert_eq!(input.poll_action(&reader.state, true).unwrap(), None);
+        input.submit(token, [0, 1], NEXT);
+        input.submit(token, [0, 1], &[0; 6]);
+        input.submit(token, [0, 1], &[0x4b, 0, 0, 0, 0, 0]);
+        action = input.poll_action(&reader.state, true).unwrap();
+    }
+    assert_eq!(action, Some(PageTurn::Next));
+    let callbacks = remote.clone();
+    std::thread::spawn(move || callbacks.lock().unwrap().disconnect(token))
+        .join()
+        .unwrap();
+    let before = reader.position();
+    assert_eq!(
+        ui.turn(&mut reader, action == Some(PageTurn::Next))
+            .unwrap(),
+        Effect::Redraw
+    );
+    assert_ne!(reader.position(), before);
+    let mut input = remote.lock().unwrap();
+    assert_eq!(input.poll_action(&reader.state, true).unwrap(), None);
+    assert_eq!(input.poll_action(&reader.state, true).unwrap(), None);
+    assert!(!input.is_active());
+}
+
+#[test]
 fn gatt_routes_are_installed_atomically_and_bound_to_the_session() {
     use femto_reader::remote::InputReport;
     let mut reader = reader();

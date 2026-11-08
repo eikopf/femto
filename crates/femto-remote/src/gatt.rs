@@ -2,6 +2,72 @@
 
 use crate::RemoteInput;
 
+pub const MAX_DESCRIPTORS: usize = 16;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DescriptorKind {
+    ReportReference,
+    ClientConfiguration,
+    #[default]
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Descriptor {
+    pub handle: u16,
+    pub kind: DescriptorKind,
+}
+
+pub struct ReportDescriptors {
+    reference: u16,
+    configuration: u16,
+}
+
+impl ReportDescriptors {
+    /// The backend supplies descriptors owned by this characteristic, in handle order.
+    pub fn new(
+        value_handle: u16,
+        last_handle: u16,
+        descriptors: &[Descriptor],
+    ) -> Result<Self, &'static str> {
+        if value_handle == 0
+            || last_handle <= value_handle
+            || descriptors.is_empty()
+            || descriptors.len() > MAX_DESCRIPTORS
+        {
+            return Err("GATT descriptor bounds");
+        }
+        let mut reference = None;
+        let mut configuration = None;
+        let mut previous = value_handle;
+        for descriptor in descriptors {
+            if descriptor.handle <= previous || descriptor.handle > last_handle {
+                return Err("GATT descriptor handle order or range");
+            }
+            previous = descriptor.handle;
+            let slot = match descriptor.kind {
+                DescriptorKind::ReportReference => &mut reference,
+                DescriptorKind::ClientConfiguration => &mut configuration,
+                DescriptorKind::Other => continue,
+            };
+            if slot.replace(descriptor.handle).is_some() {
+                return Err("duplicate GATT report descriptor");
+            }
+        }
+        Ok(Self {
+            reference: reference.ok_or("missing Report Reference")?,
+            configuration: configuration.ok_or("missing Client Configuration")?,
+        })
+    }
+
+    pub fn reference_handle(&self) -> u16 {
+        self.reference
+    }
+    pub fn configuration_handle(&self) -> u16 {
+        self.configuration
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InputReport {
     pub value_handle: u16,
@@ -62,6 +128,64 @@ impl ReportRoutes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn descriptors_must_be_unique_and_belong_to_the_characteristic_range() {
+        let reference = Descriptor {
+            handle: 11,
+            kind: DescriptorKind::ReportReference,
+        };
+        let configuration = Descriptor {
+            handle: 12,
+            kind: DescriptorKind::ClientConfiguration,
+        };
+        let valid = ReportDescriptors::new(10, 20, &[reference, configuration]).unwrap();
+        assert_eq!(valid.reference_handle(), 11);
+        assert_eq!(valid.configuration_handle(), 12);
+        for entries in [
+            vec![],
+            vec![reference],
+            vec![configuration],
+            vec![configuration, reference],
+            vec![
+                reference,
+                Descriptor {
+                    handle: 11,
+                    ..configuration
+                },
+            ],
+            vec![
+                reference,
+                Descriptor {
+                    handle: 21,
+                    ..configuration
+                },
+            ],
+            vec![
+                reference,
+                configuration,
+                Descriptor {
+                    handle: 13,
+                    ..reference
+                },
+            ],
+        ] {
+            assert!(ReportDescriptors::new(10, 20, &entries).is_err());
+        }
+        let mut entries = vec![reference, configuration];
+        entries.extend((13..27).map(|handle| Descriptor {
+            handle,
+            ..Default::default()
+        }));
+        assert!(ReportDescriptors::new(10, 30, &entries).is_ok());
+        entries.push(Descriptor {
+            handle: 27,
+            ..Default::default()
+        });
+        assert!(ReportDescriptors::new(10, 30, &entries).is_err());
+        assert!(ReportDescriptors::new(11, 20, &[reference, configuration]).is_err());
+        assert!(ReportDescriptors::new(10, 10, &[reference, configuration]).is_err());
+    }
 
     const ARRAY: &[u8] = &[
         0x05, 7, 0x19, 0, 0x29, 255, 0x15, 0, 0x26, 255, 0, 0x75, 8, 0x95, 6, 0x81, 0,

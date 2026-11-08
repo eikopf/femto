@@ -205,7 +205,7 @@ pub struct Screen {
     fast_count: u8,
     wifi: Option<crate::wifi::Station>,
     #[cfg(feature = "bluetooth")]
-    bluetooth: Option<crate::bluetooth::Scanner>,
+    bluetooth: Option<crate::bluetooth::Service>,
 }
 
 impl Screen {
@@ -236,7 +236,7 @@ impl Screen {
             let finished = match bluetooth.poll() {
                 Ok(finished) => finished,
                 Err(error) => {
-                    log::warn!("Bluetooth scan: {error}");
+                    log::warn!("Bluetooth: {error}");
                     true
                 }
             };
@@ -262,6 +262,35 @@ impl Screen {
 
     pub fn event(&self) -> Option<crate::input::Event> {
         self.input.next()
+    }
+
+    pub fn remote_turn(
+        &mut self,
+        state: &femto_reader::state::ReaderState,
+        allow_turn: bool,
+    ) -> Option<femto_picco_board::input::Turn> {
+        #[cfg(feature = "bluetooth")]
+        {
+            let bluetooth = self.bluetooth.as_mut()?;
+            match bluetooth.poll_input(state, allow_turn) {
+                Ok(action) => action.map(|action| match action {
+                    femto_reader::remote::PageTurn::Previous => {
+                        femto_picco_board::input::Turn::Previous
+                    }
+                    femto_reader::remote::PageTurn::Next => femto_picco_board::input::Turn::Next,
+                }),
+                Err(error) => {
+                    log::warn!("Bluetooth input: {error}");
+                    self.bluetooth = None;
+                    None
+                }
+            }
+        }
+        #[cfg(not(feature = "bluetooth"))]
+        {
+            let _ = (state, allow_turn);
+            None
+        }
     }
 
     pub fn present_oriented(
@@ -413,7 +442,7 @@ pub fn open() -> Result<Screen, String> {
     #[cfg(not(feature = "bluetooth"))]
     let wifi_modem = p.modem;
     #[cfg(feature = "bluetooth")]
-    let bluetooth = match crate::bluetooth::Scanner::open(bluetooth_modem) {
+    let bluetooth = match crate::bluetooth::Service::open(bluetooth_modem) {
         Ok(scanner) => scanner,
         Err(error) => {
             log::warn!("Bluetooth unavailable: {error}");

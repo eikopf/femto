@@ -1,0 +1,95 @@
+{
+  "feature": "Bounded HID Report Map and Report Reference reads with validated descriptor routes",
+  "commands": [
+    {
+      "command": "cargo test --locked -p femto-remote",
+      "exit_code": 0,
+      "passed": 44
+    },
+    {
+      "command": "cargo clippy --locked -p femto-remote --all-targets -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "rust_passed": 1074,
+      "rust_batches": 81,
+      "rust_ignored": 1,
+      "python_passed": 7
+    },
+    {
+      "command": "rustfmt --edition 2024 --check firmware/picco/src/bluetooth.rs firmware/picco/src/bluetooth/probe.rs",
+      "exit_code": 0
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 FEMTO_PICCO_BLUETOOTH=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "crates/femto-remote/src/discovery.rs": "17514c0e81a69d3236f2d16c7926b7e423690d99cb9587387510f1698fbcf7aa",
+    "crates/femto-remote/src/discovery/reads.rs": "4ca887e778379bd22a068fa6b62ad1ba552986255cdd571d99d303603ef14632",
+    "crates/femto-remote/src/discovery/characteristics.rs": "5d5b467801efb311167497a4a18671cc96789c7a928432990d36254120db8846",
+    "crates/femto-remote/src/gatt.rs": "ec369a480ffc46c8193ea4eb967913bf9d20000125730da970f1b368415b300b",
+    "crates/femto-remote/src/lib.rs": "ba0368c6372e071e841f801baf34af55baad1ca865ceb5ced0ff0038341cbcde",
+    "firmware/picco/src/bluetooth.rs": "b61f609724f27da933dd8c7bde8a535c70c9d06b243d147675443996ed90eb74",
+    "firmware/picco/src/bluetooth/probe.rs": "e7bf6aac6dc758d1576a34e52aea9dc980cfa95040d1539ebe3b90b3b5782d81",
+    "firmware/picco/src/panel.rs": "860daaa838779b75e388bffe7d3b48860ddda235436ae5c7ee40f4d60825953d",
+    "firmware/picco/sdkconfig.bluetooth": "55c8bf89d21d43191c2291f4559248adb8a1b110f9edfb3d6d3b14b147df3e9b",
+    "Cargo.lock": "444efe35c3058a3342bcdace09a9d3785eee9905386ea2a2c04aaa1bf67be53e",
+    "firmware/picco/Cargo.lock": "04c806505d0a9ca8b0a35f9a7eb5915b32122742c7c5085e001e0d74b3e1ddb0"
+  },
+  "logs_sha256": {
+    "output/verification/ble-reads-host.log": "dbc1029de35d03ff71f2ccfce0cf5bfa7e6a1dc16dbfc7a034a929c807d74ce8",
+    "output/verification/ble-reads-workspace.log": "78c1fd2ecbd09cfbb6aa749eb211a637bad178c82f1b4239bc40234b90843913",
+    "output/verification/ble-reads-firmware.log": "b94f5120b50be617c5b044df9bf9f8ad28935b75dca67ade30309b9ec07fe9f0",
+    "output/verification/ble-reads-firmware-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "5cac4d13848e50f36c612da157ac20563a75e3c5cdde905b773e0d0510307f82",
+    "bytes": 5684896,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "sdk_source_review": {
+    "version": "ESP-IDF 5.5.2, pinned Nix package",
+    "files_sha256": {
+      "components/bt/host/bluedroid/bta/gatt/bta_gattc_act.c": "6b3ff9c787e96dd380c58d1d5b648ff1badd06eaf1c31a63c31ab9e3fff3420c",
+      "components/bt/host/bluedroid/stack/gatt/gatt_cl.c": "2b33cee16177509c0a715b9a85fb24fb61398e469b3354eb7304bfb717664fca",
+      "components/bt/host/bluedroid/stack/gatt/gatt_auth.c": "017af15dadc36eeba0b9516d13577340b0f5119c81cbb231a09d9aeadef2ba3a",
+      "components/bt/host/bluedroid/stack/include/stack/gatt_api.h": "a9a9eb59472116870e99ce1f6d4154bdd27f963aa419072973adf8a27e1d60a2",
+      "components/bt/host/bluedroid/api/include/api/esp_gatt_defs.h": "897fff41d0d3838bc1ae3fad12364eb161de471474ec41d217068cb1e55de6e0"
+    },
+    "findings": [
+      "Characteristic reads use GATT_READ_BY_HANDLE; the SDK assembles consecutive Read Blob responses",
+      "gatt_process_read_rsp clips at GATT_MAX_ATTR_LEN and can report success at that limit",
+      "The inspected limit is 517 bytes; this BLE path accepts 1..=512 and statically requires a larger public SDK limit",
+      "GATT_AUTH_REQ_NONE skips the client security request; ATT errors are returned to the operation callback"
+    ]
+  },
+  "verified": [
+    "Completed values are copied into a fixed single-read slot and require matching operation, interface, connection and handle",
+    "Maps accept 1..=512 bytes; references require exactly two bytes",
+    "Duplicate or mismatched current-connection completions and failed/invalid-length responses latch failure",
+    "Stale connections cannot complete a pending read",
+    "Disconnect, service changes and timeout discard already-completed unconsumed reads and preserve cleanup handles",
+    "Descriptor validation covers ordering, range, required UUIDs, duplicate rejection and the 16-entry boundary",
+    "A host read sequence feeds a parsed HID map and its reference into validated routes and decodes a PageDown press",
+    "Bluetooth firmware compiles, links and passes image packaging validation"
+  ],
+  "limits": [
+    "No physical radio, long-read interoperability, connection, timing, SDK-cache ownership or teardown test",
+    "No pairing, bond storage, CCCD writes, notification registration, page-turn dispatch or reconnect",
+    "Peers requiring authenticated reads are not yet supported by this diagnostic",
+    "Descriptor ownership relies on the SDK characteristic-specific query plus local count/order/range checks",
+    "The 512-byte BLE map bound is stricter than the portable parser limit of 4096 bytes",
+    "SDK internal allocations and synchronous call/destructor behavior remain outside the portable buffer bounds",
+    "Normal non-Bluetooth and grayscale builds, clean reproducibility, native GUI and independent tailnet fixture not rerun"
+  ]
+}

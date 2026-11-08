@@ -1,15 +1,18 @@
 """Describe the app image and reference slot; never emits a flash command."""
+import argparse
 import hashlib
 import json
 from pathlib import Path
-import sys
 
 from picco_image import image_info
 
-path = Path(sys.argv[1])
-levels = int(sys.argv[2]) if len(sys.argv) > 2 else 2
-if levels not in (2, 4):
-    raise SystemExit("Display levels must be 2 or 4")
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("image", type=Path)
+parser.add_argument("levels", type=int, choices=(2, 4), nargs="?", default=2)
+parser.add_argument("--bluetooth", action="store_true", help="record Bluetooth support in this build")
+args = parser.parse_args()
+path = args.image
+levels = args.levels
 image = path.read_bytes()
 try:
     image_info(image, exact=True)
@@ -23,6 +26,7 @@ manifest = {
     "bytes": len(image),
     "chip": "esp32s3",
     "display_levels": levels,
+    "bluetooth": args.bluetooth,
     "reference_app_offset": "0xE0000",
     "reference_app_size": "0xE70000",
     "hardware_verified": False,

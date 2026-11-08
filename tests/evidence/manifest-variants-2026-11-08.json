@@ -1,0 +1,136 @@
+{
+  "feature": "Explicit Bluetooth variant metadata in firmware manifests",
+  "commands": [
+    {
+      "command": "python -m unittest discover -s tests/firmware -v",
+      "exit_code": 0,
+      "passed": 13
+    },
+    {
+      "command": "bash -n scripts/build-picco scripts/check-picco-repro",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/build-picco with each of the four Bluetooth/display feature combinations",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "scripts/build-picco": "d37d043e8fea5d085b29d2a127ad08919d90b92f7cc9e191f3fed552c33b3387",
+    "scripts/picco-image-manifest.py": "56a606f0f0f9505b5ceedfe9457691914f7777be6629eec5b41e5c2230b52212",
+    "tests/firmware/test_manifest_variant.py": "0ab2b4b6967b4377c87e4b5731f506a1fb54502b18e2a560620e5dd7988390b3"
+  },
+  "logs_sha256": {
+    "output/verification/manifest-bluetooth-gray-build.log": "ebe1a99407c1b5cbbc65edebcb655e2856b8501c511fda48b29caf32e2455abf",
+    "output/verification/manifest-variant-scratch.log": "92decbc73b069a04746a53ba7e99b89d478c03be3c7e2fa9afa9d4eb93bb1460",
+    "output/verification/manifest-variant-tests.log": "25a51e452f620ebe1c133955a458bc4614f7ce9faec6eb9eb20d1bc014cf5bc0",
+    "output/verification/manifest-normal-build.log": "ad995329d715296548ac9388d907fc1d616341455b61b5d6db4973e57a896673",
+    "output/verification/manifest-bluetooth-build.log": "aad0dd2c97ddc97978427ff6d7c43c686aa00cc1ab670c8b2363d4a4c0fb8d6b",
+    "output/verification/manifest-normal-gray-build.log": "e914256432248cc555b86c086548a3c96afe4d397c1f44863afd88f0ffd49fb1"
+  },
+  "variants": {
+    "picco": {
+      "manifest": {
+        "image": "femto-picco.bin",
+        "sha256": "4d3b3f6477a2d26aadbd6960e8f68a7dcd4f190565eaa328013f012eb0057e9e",
+        "bytes": 5239808,
+        "chip": "esp32s3",
+        "display_levels": 2,
+        "bluetooth": false,
+        "reference_app_offset": "0xE0000",
+        "reference_app_size": "0xE70000",
+        "hardware_verified": false,
+        "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+      },
+      "manifest_sha256": "ebd97efd243dda3abd3970f3ad155e5269fe2ba02bf1e5e267afadc2cf4a13be",
+      "compiled_artifacts_unchanged": {
+        "femto-picco.elf": true,
+        "femto-picco.bin": true,
+        "femto-picco.debug.elf": true
+      }
+    },
+    "picco-grayscale": {
+      "manifest": {
+        "image": "femto-picco.bin",
+        "sha256": "e28d74f208cd874a85c51904d33ef7adbefb0393cf3f9f7a2433c0bbdfb9ae6e",
+        "bytes": 5239888,
+        "chip": "esp32s3",
+        "display_levels": 4,
+        "bluetooth": false,
+        "reference_app_offset": "0xE0000",
+        "reference_app_size": "0xE70000",
+        "hardware_verified": false,
+        "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+      },
+      "manifest_sha256": "aa63c013b4684f86e2ef91f6d148c8fc6fe6762421f1a572fdb5847be4a80029",
+      "compiled_artifacts_unchanged": {
+        "femto-picco.elf": true,
+        "femto-picco.bin": true,
+        "femto-picco.debug.elf": true
+      }
+    },
+    "picco-bluetooth": {
+      "manifest": {
+        "image": "femto-picco.bin",
+        "sha256": "5e91a4d71ae4ad1406e69a36990dfd7401a733aaddc7c3ee7fffbb6c78fde2e8",
+        "bytes": 5697728,
+        "chip": "esp32s3",
+        "display_levels": 2,
+        "bluetooth": true,
+        "reference_app_offset": "0xE0000",
+        "reference_app_size": "0xE70000",
+        "hardware_verified": false,
+        "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+      },
+      "manifest_sha256": "5a652ff3b2a207ffbf3909a383361494e85704c358ac82cf24e747fc1dbcc9a0",
+      "compiled_artifacts_unchanged": {
+        "femto-picco.elf": true,
+        "femto-picco.bin": true,
+        "femto-picco.debug.elf": true
+      }
+    },
+    "picco-grayscale-bluetooth": {
+      "manifest": {
+        "image": "femto-picco.bin",
+        "sha256": "88d18f71e6e899ce5818855b245c0d0bbdff96004e23c373b4d785dc40365050",
+        "bytes": 5697824,
+        "chip": "esp32s3",
+        "display_levels": 4,
+        "bluetooth": true,
+        "reference_app_offset": "0xE0000",
+        "reference_app_size": "0xE70000",
+        "hardware_verified": false,
+        "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+      },
+      "manifest_sha256": "5fabb72a84b85cdc250825c36cc2a60ad22432794c36b8a4c700b951715aecf2",
+      "compiled_artifacts_unchanged": {
+        "femto-picco.elf": true,
+        "femto-picco.bin": true,
+        "femto-picco.debug.elf": true
+      }
+    }
+  },
+  "repackaged_clean_pairs": {
+    "2": {
+      "new_manifest_sha256": "5a652ff3b2a207ffbf3909a383361494e85704c358ac82cf24e747fc1dbcc9a0",
+      "both_clean_images_match_incremental_manifest": true,
+      "binary_bytes_unchanged": true
+    },
+    "4": {
+      "new_manifest_sha256": "5fabb72a84b85cdc250825c36cc2a60ad22432794c36b8a4c700b951715aecf2",
+      "both_clean_images_match_incremental_manifest": true,
+      "binary_bytes_unchanged": true
+    }
+  },
+  "scope": [
+    "Full clean firmware comparisons completed before this metadata-only change",
+    "All compiled artifacts are unchanged after running the updated build commands",
+    "Updated packager produces identical manifests for both images in each clean Bluetooth pair and the incremental image",
+    "Existing offline planner accepts new manifests; invalid options preserve the prior manifest"
+  ],
+  "limits": [
+    "Feature metadata is declared by the build command, not inferred from binary bytes",
+    "No full clean compilation after the packaging-only change",
+    "Physical device operation and other-host reproducibility remain unqualified"
+  ]
+}

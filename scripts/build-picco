@@ -10,10 +10,12 @@ case "${FEMTO_PICCO_GRAYSCALE:-0}" in
   1) femto_features=(--features grayscale); femto_output="$femto_root/output/picco-grayscale"; femto_levels=4 ;;
   *) echo 'FEMTO_PICCO_GRAYSCALE must be 0 or 1' >&2; exit 2 ;;
 esac
+femto_manifest_features=()
 case "${FEMTO_PICCO_BLUETOOTH:-0}" in
   0) ;;
   1)
     femto_features+=(--features bluetooth)
+    femto_manifest_features=(--bluetooth)
     femto_output="$femto_output-bluetooth"
     export ESP_IDF_SDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.bluetooth'
     export ESP_IDF_SDKCONFIG='sdkconfig.bluetooth.generated'
@@ -67,4 +69,4 @@ xtensa-esp-elf-objcopy --strip-all "$femto_output/femto-picco.debug.elf" "$femto
 esptool.py --chip esp32s3 elf2image --flash_mode dio --flash_freq 80m --flash_size 16MB \
   -o "$femto_output/femto-picco.bin" "$femto_output/femto-picco.elf"
 cd "$femto_root"
-python scripts/picco-image-manifest.py "$femto_output/femto-picco.bin" "$femto_levels"
+python scripts/picco-image-manifest.py "$femto_output/femto-picco.bin" "$femto_levels" "${femto_manifest_features[@]}"

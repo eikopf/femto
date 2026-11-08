@@ -1,0 +1,37 @@
+{
+  "candidate": "signal-slot/usb-serial-over-tailscale crates/tsnode",
+  "checked_at": "2026-11-08T19:05:30.761421+00:00",
+  "status": "documentation-level assessment; not adopted; source-level evaluation unavailable",
+  "sources": [
+    "https://github.com/signal-slot/usb-serial-over-tailscale",
+    "https://github.com/signal-slot/usb-serial-over-tailscale/blob/main/README.md"
+  ],
+  "observations": [
+    {
+      "operation": "git clone --depth 1 https://github.com/signal-slot/usb-serial-over-tailscale.git output/evaluation/tsnode",
+      "exit_code": 128,
+      "result": "Public clone failed; no source fetched"
+    },
+    {
+      "operation": "gh api repos/signal-slot/usb-serial-over-tailscale",
+      "exit_code": 1,
+      "http_status": 404
+    },
+    {
+      "operation": "Fetch https://raw.githubusercontent.com/signal-slot/usb-serial-over-tailscale/main/crates/tsnode/Cargo.toml",
+      "http_status": 404
+    },
+    {
+      "operation": "Search for accessible source mirror",
+      "result": "No accessible mirror identified"
+    }
+  ],
+  "decision": "Retain the pinned tailscale-esp32 implementation and Femto-owned lifecycle/authorization boundaries; do not introduce an unpinned and unreviewed source dependency",
+  "selected_revision": "dbd49fe4018023ba07596e4377496718ef21d6ae",
+  "limits": [
+    "Indexed documentation may describe an unavailable or changed revision",
+    "No source-level license, API, memory, cryptographic, interoperability, or build assessment of tsnode completed",
+    "No assertion that the repository was deleted rather than renamed, made private, or otherwise unavailable",
+    "An accessible versioned source archive is needed to continue source-level evaluation"
+  ]
+}

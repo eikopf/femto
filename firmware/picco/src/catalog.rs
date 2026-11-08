@@ -672,12 +672,17 @@ mod download_progress_tests {
         let mut menu = CatalogMenu::new("http://books.example/feed".into()).unwrap();
         let mut worker = Jobs::default();
         let (send, receive) = std::sync::mpsc::channel::<()>();
+        let (started, ready) = std::sync::mpsc::channel();
         let id = worker
             .submit(Instant::now() + Duration::from_secs(10), move |_, _| {
-                let _ = receive.recv_timeout(Duration::from_secs(5));
+                started.send(()).unwrap();
+                let _ = receive.recv();
                 Err(io::Error::other("test completion").into())
             })
             .unwrap();
+        // Cancellation before entry correctly skips the operation. This test
+        // needs an active operation whose completion remains under its control.
+        ready.recv_timeout(Duration::from_secs(5)).unwrap();
         menu.pending = Some((id, false));
         let count = Arc::new(DownloadCount::default());
         count.bytes.store(4096, Ordering::Relaxed);

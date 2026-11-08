@@ -3,6 +3,7 @@ pub mod auth;
 pub mod browser;
 pub mod deadline;
 pub mod http;
+mod json;
 pub mod routing;
 pub mod search;
 #[cfg(all(feature = "tailnet", unix, not(target_os = "espidf")))]
@@ -113,31 +114,6 @@ fn web_url(base: Option<&Url>, href: &str) -> Result<Url> {
     Ok(url)
 }
 
-// Bound the entire decoded tree, including extension properties omitted by the projection.
-fn validate(value: &Value, depth: usize, nodes: &mut usize) -> Result<()> {
-    *nodes += 1;
-    if *nodes > 16384 || depth > 16 {
-        return Err(Error::Limit("JSON tree"));
-    }
-    match value {
-        Value::String(s) if s.len() > 4096 => return Err(Error::Limit("string")),
-        Value::Array(items) => {
-            for item in items {
-                validate(item, depth + 1, nodes)?;
-            }
-        }
-        Value::Object(items) => {
-            for (key, value) in items {
-                if key.len() > 256 {
-                    return Err(Error::Limit("property name"));
-                }
-                validate(value, depth + 1, nodes)?;
-            }
-        }
-        _ => (),
-    }
-    Ok(())
-}
 fn array<'a>(object: &'a Value, key: &'static str) -> Result<&'a [Value]> {
     match object.get(key) {
         None => Ok(&[]),
@@ -279,8 +255,7 @@ impl Catalog {
             return Err(Error::Limit("feed bytes"));
         }
         let base = web_url(None, source)?;
-        let value: Value = serde_json::from_slice(bytes)?;
-        validate(&value, 0, &mut 0)?;
+        let value = json::parse(bytes)?;
         if !value.is_object()
             || !["navigation", "publications", "groups"]
                 .iter()

@@ -112,3 +112,25 @@ fn malformed_shapes_and_resource_limits_fail_without_a_partial_catalog() {
     let empty = json!({"metadata":{"title":"No results"},"links":[{"rel":"self","href":"catalog.json"}],"publications":[]});
     assert!(parse(&empty).unwrap().publications.is_empty());
 }
+
+#[test]
+fn tree_limits_stop_decoding_before_an_untrusted_suffix() {
+    // All inputs remain below the transport body cap. The invalid suffix must
+    // never be reached after a structural or decoded-string limit is exceeded.
+    let wide = format!("[{}false,?]", "null,".repeat(16_384));
+    let deep = format!("{}?{}", "[".repeat(18), "]".repeat(18));
+    let string = format!("[\"{}\",?]", "\\u0061".repeat(4097));
+    let key = format!("{{\"{}\":?}}", "\\u0061".repeat(257));
+    for (input, kind) in [
+        (wide, "JSON tree"),
+        (deep, "JSON tree"),
+        (string, "string"),
+        (key, "property name"),
+    ] {
+        assert!(input.len() < MAX_FEED_BYTES);
+        assert!(
+            matches!(Catalog::parse(input.as_bytes(), SOURCE), Err(femto_catalog::Error::Limit(actual)) if actual == kind),
+            "{kind}"
+        );
+    }
+}

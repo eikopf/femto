@@ -25,6 +25,10 @@ impl Default for Bindings {
 }
 
 impl Bindings {
+    pub fn entries(&self) -> &[(u32, PageTurn)] {
+        &self.entries[..self.len]
+    }
+
     pub fn new(entries: &[(u32, PageTurn)]) -> Result<Self, &'static str> {
         if entries.len() > 16 {
             return Err("binding limit");

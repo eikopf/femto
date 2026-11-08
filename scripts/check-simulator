@@ -6,3 +6,4 @@ if ! command -v cargo >/dev/null; then
 fi
 cargo build --locked --features desktop --bin femto-simulator
 python scripts/simulator-smoke.py
+python scripts/simulator-remote-smoke.py

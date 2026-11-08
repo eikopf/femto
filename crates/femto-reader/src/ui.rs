@@ -37,6 +37,7 @@ enum Panel {
     LinkPreview,
     PreviewOpening,
     Settings,
+    Remote,
     Light,
     Power,
     Library,
@@ -92,6 +93,9 @@ enum Command {
     Size(f32),
     Hyphenation,
     ResetTypography,
+    RemoteCycle(u32),
+    RemoteDefaults,
+    RemoteDisable,
     LineSpacing,
     Margin,
     Stroke,
@@ -1322,6 +1326,26 @@ impl ReaderUi {
                 self.edit_query().clear();
                 Ok(Effect::Redraw)
             }
+            Command::RemoteCycle(usage) => {
+                let mut bindings = reader.state.remote_bindings.clone().unwrap_or_default();
+                bindings.cycle(usage).map(|()| {
+                    reader.state.remote_bindings = Some(bindings);
+                    self.selected = self
+                        .selected
+                        .min(self.entries(reader).len().saturating_sub(1));
+                    Effect::Redraw
+                })
+            }
+            Command::RemoteDefaults => {
+                reader.state.remote_bindings = None;
+                self.selected = 0;
+                Ok(Effect::Redraw)
+            }
+            Command::RemoteDisable => {
+                reader.state.remote_bindings = Some(crate::remote::SavedBindings::new(&[])?);
+                self.selected = 0;
+                Ok(Effect::Redraw)
+            }
             Command::IdleSleep(timeout) => {
                 reader.state.idle_sleep = timeout;
                 Ok(Effect::Redraw)
@@ -1517,7 +1541,51 @@ impl ReaderUi {
                 (!self.dictionary_choices.is_empty())
                     .then(|| ("Dictionary".into(), Command::Open(Panel::DictionaryChooser))),
             )
+            .chain(std::iter::once((
+                "Remote buttons".into(),
+                Command::Open(Panel::Remote),
+            )))
             .collect(),
+            Panel::Remote => {
+                use crate::remote::RemoteAction;
+                let bindings = reader.state.remote_bindings.clone().unwrap_or_default();
+                let common = [
+                    (0x7004b, "Page Up"),
+                    (0x7004e, "Page Down"),
+                    (0x70050, "Left arrow"),
+                    (0x7004f, "Right arrow"),
+                    (0xc00e9, "Volume up"),
+                    (0xc00ea, "Volume down"),
+                ];
+                let mut rows = vec![
+                    ("Restore defaults".into(), Command::RemoteDefaults),
+                    ("Disable all buttons".into(), Command::RemoteDisable),
+                ];
+                let usages = common
+                    .iter()
+                    .map(|&(usage, label)| (usage, label.to_owned()))
+                    .chain(
+                        bindings
+                            .entries()
+                            .iter()
+                            .filter(|entry| !common.iter().any(|&(usage, _)| usage == entry.usage))
+                            .map(|entry| (entry.usage, format!("HID {:08X}", entry.usage))),
+                    );
+                for (usage, label) in usages {
+                    let action = match bindings
+                        .entries()
+                        .iter()
+                        .find(|entry| entry.usage == usage)
+                        .map(|entry| entry.action)
+                    {
+                        Some(RemoteAction::Previous) => "previous",
+                        Some(RemoteAction::Next) => "next",
+                        None => "off",
+                    };
+                    rows.push((format!("{label}: {action}"), Command::RemoteCycle(usage)));
+                }
+                rows
+            }
             Panel::DictionaryChooser => self
                 .dictionary_choices
                 .iter()
@@ -2104,6 +2172,7 @@ impl ReaderUi {
             Panel::Links => "Page links",
             Panel::LinkPreview => "Link preview",
             Panel::Settings => "Typography",
+            Panel::Remote => "Remote buttons",
             Panel::Light => "Frontlight",
             Panel::Power => "Automatic sleep",
             Panel::Library if self.library.truncated => "Library (scan limit)",

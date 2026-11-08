@@ -40,6 +40,26 @@ pub struct SavedBindings {
     len: usize,
 }
 
+impl Default for SavedBindings {
+    fn default() -> Self {
+        let mut entries = [EMPTY; 16];
+        let defaults = Bindings::default();
+        for (target, &(usage, action)) in entries.iter_mut().zip(defaults.entries()) {
+            *target = RemoteBinding {
+                usage,
+                action: match action {
+                    PageTurn::Previous => RemoteAction::Previous,
+                    PageTurn::Next => RemoteAction::Next,
+                },
+            };
+        }
+        Self {
+            entries,
+            len: defaults.entries().len(),
+        }
+    }
+}
+
 impl SavedBindings {
     pub fn new(entries: &[RemoteBinding]) -> Result<Self> {
         if entries.len() > 16 {
@@ -52,6 +72,33 @@ impl SavedBindings {
         result.entries[..entries.len()].copy_from_slice(entries);
         result.bindings()?;
         Ok(result)
+    }
+
+    /// Cycles one usage through previous, next, and unbound without partial mutation.
+    pub fn cycle(&mut self, usage: u32) -> Result<()> {
+        let mut next = self.clone();
+        if let Some(index) = next.entries().iter().position(|entry| entry.usage == usage) {
+            match next.entries[index].action {
+                RemoteAction::Previous => next.entries[index].action = RemoteAction::Next,
+                RemoteAction::Next => {
+                    next.entries.copy_within(index + 1..next.len, index);
+                    next.len -= 1;
+                    next.entries[next.len] = EMPTY;
+                }
+            }
+        } else {
+            if next.len == next.entries.len() {
+                return Err(Error::Limit("remote bindings"));
+            }
+            next.entries[next.len] = RemoteBinding {
+                usage,
+                action: RemoteAction::Previous,
+            };
+            next.len += 1;
+        }
+        next.bindings()?;
+        *self = next;
+        Ok(())
     }
 
     pub fn entries(&self) -> &[RemoteBinding] {

@@ -1,0 +1,62 @@
+{
+  "feature": "Remote button binding editor in the shared reader menu",
+  "commands": [
+    {
+      "command": "cargo test --locked -p femto-reader --test remote",
+      "exit_code": 0,
+      "passed": 13
+    },
+    {
+      "command": "cargo clippy --locked -p femto-reader -p femto-remote --all-targets -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "rust_passed": 1081,
+      "rust_batches": 81,
+      "rust_ignored": 1,
+      "python_passed": 7
+    },
+    {
+      "command": "FEMTO_PICCO_BLUETOOTH=1 CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    }
+  ],
+  "tested_files_sha256": {
+    "crates/femto-reader/src/remote/settings.rs": "7dcfe923fb24de004c402a4f1102a737d1b0395a81b6520095170415789ce3f1",
+    "crates/femto-reader/src/ui.rs": "963397526f0a5ef1e10be9531f4cb389adb8d61e2e7fb63fe4d9ec69238dd4cb",
+    "crates/femto-reader/tests/remote.rs": "0b3710e31fc085a81314316626bd59511f5f293abd78793d86cd405b3c857fc1",
+    "crates/femto-remote/src/bindings.rs": "b532e0aa6348bb8c176c422bbff6dbf3d58e962f99f980b17930dc09f43c4af9"
+  },
+  "logs_sha256": {
+    "output/verification/remote-editor-firmware.log": "6415f8eb655b0df2519a8d0f99a4345fd56a0cf3570d492655769d49a4652aba",
+    "output/verification/remote-editor-workspace.log": "ac180b824fc936027bf9819468a9dcaebc7571f34ce8dae6f7077240292a3ed9",
+    "output/verification/remote-editor-host.log": "955c9cb8e2aa89388cb33498d22d17322ce440c63249315454f6e52ec8e43157"
+  },
+  "firmware": {
+    "image": "femto-picco.bin",
+    "sha256": "a01e8acb33674048d1aa0da0ede524ebe3f0433384d6b5c0242c28f11e6251f6",
+    "bytes": 5698496,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "verified": [
+    "Menu cycles page/arrow/volume keys and existing custom usages through previous, next, and off",
+    "Restoring defaults removes custom settings; disabling all stores an empty map",
+    "Mapping edits serialize and dispatch through the existing reader adapter without replaying held presses",
+    "Invalid usages and a full 16-entry map reject additions atomically",
+    "Deleting the final custom row leaves a valid selection",
+    "Full workspace formatting, compilation, Clippy, tests and Bluetooth firmware packaging pass"
+  ],
+  "limits": [
+    "No arbitrary button learning or addition of arbitrary new usages through the menu",
+    "No physical Picco menu, persistence or Bluetooth qualification",
+    "Normal non-Bluetooth, grayscale, clean reproducibility, native GUI and independent tailnet fixtures not rerun",
+    "Existing pairing, bond storage, peer-selection and automatic reconnect work remains unfinished"
+  ]
+}

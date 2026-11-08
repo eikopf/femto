@@ -423,3 +423,121 @@ fn invalid_replacement_descriptor_preserves_current_remote() {
     assert_eq!(remote.submit(token, [0, 1], NEXT), Submit::Queued);
     assert_eq!(remote.poll(&mut reader, &mut ui).unwrap(), Effect::Redraw);
 }
+
+fn open_remote_menu(ui: &mut ReaderUi, reader: &mut Reader) {
+    ui.open();
+    for _ in 0..11 {
+        ui.turn(reader, true).unwrap();
+    }
+    ui.select(reader).unwrap();
+}
+
+#[test]
+fn menu_edits_persist_and_do_not_replay_a_held_remote_press() {
+    use femto_reader::remote::RemoteAction;
+    let mut reader = reader();
+    let mut ui = ReaderUi::default();
+    let mut remote = RemoteControl::default();
+    let token = remote.connect(MAP).unwrap();
+    remote.poll(&mut reader, &mut ui).unwrap();
+    let before = reader.position();
+    open_remote_menu(&mut ui, &mut reader);
+    remote.submit(token, [0, 1], NEXT);
+    remote.poll(&mut reader, &mut ui).unwrap();
+    for _ in 0..3 {
+        ui.turn(&mut reader, true).unwrap();
+    }
+    for expected in [None, Some(RemoteAction::Previous), Some(RemoteAction::Next)] {
+        ui.select(&mut reader).unwrap();
+        let bindings = reader.state.remote_bindings.as_ref().unwrap();
+        assert_eq!(
+            bindings
+                .entries()
+                .iter()
+                .find(|entry| entry.usage == 0x7004e)
+                .map(|entry| entry.action),
+            expected
+        );
+        assert!(
+            !bindings
+                .entries()
+                .iter()
+                .any(|entry| entry.usage >> 16 == 12)
+        );
+    }
+    assert_eq!(reader.position(), before);
+    assert_eq!(ui.render(&mut reader, 2).unwrap().len(), 480 * 800);
+    reader.state = serde_json::from_slice(&serde_json::to_vec(&reader.state).unwrap()).unwrap();
+    ui.back(&mut reader).unwrap();
+    ui.back(&mut reader).unwrap();
+    remote.submit(token, [0, 1], NEXT);
+    remote.poll(&mut reader, &mut ui).unwrap();
+    assert_eq!(reader.position(), before);
+    remote.submit(token, [0, 1], &[0; 6]);
+    remote.poll(&mut reader, &mut ui).unwrap();
+    remote.submit(token, [0, 1], NEXT);
+    remote.poll(&mut reader, &mut ui).unwrap();
+    assert_ne!(reader.position(), before);
+    open_remote_menu(&mut ui, &mut reader);
+    ui.turn(&mut reader, true).unwrap();
+    ui.select(&mut reader).unwrap();
+    assert!(
+        reader
+            .state
+            .remote_bindings
+            .as_ref()
+            .unwrap()
+            .entries()
+            .is_empty()
+    );
+    ui.select(&mut reader).unwrap(); // Selection resets to restore defaults.
+    assert!(reader.state.remote_bindings.is_none());
+}
+
+#[test]
+fn binding_editor_preserves_custom_entries_and_rejects_capacity_atomically() {
+    use femto_reader::remote::{RemoteAction, RemoteBinding, SavedBindings};
+    let entries: Vec<_> = (4..20)
+        .map(|id| RemoteBinding {
+            usage: 0x70000 + id,
+            action: RemoteAction::Next,
+        })
+        .collect();
+    let mut bindings = SavedBindings::new(&entries).unwrap();
+    let before = bindings.clone();
+    assert!(bindings.cycle(0xc00e9).is_err());
+    assert_eq!(bindings, before);
+    bindings.cycle(0x70004).unwrap();
+    let before = bindings.clone();
+    assert!(bindings.cycle(0x70001).is_err());
+    assert_eq!(bindings, before);
+    bindings.cycle(0xc00e9).unwrap();
+    assert_eq!(
+        bindings.entries().last().unwrap().action,
+        RemoteAction::Previous
+    );
+    let mut reader = reader();
+    reader.state.remote_bindings = Some(bindings);
+    let mut ui = ReaderUi::default();
+    open_remote_menu(&mut ui, &mut reader);
+    // Eight fixed rows precede the remaining custom bindings.
+    for _ in 0..22 {
+        ui.turn(&mut reader, true).unwrap();
+    }
+    ui.select(&mut reader).unwrap(); // Remove the final custom usage.
+    let saved = reader.state.remote_bindings.as_ref().unwrap();
+    assert!(!saved.entries().iter().any(|entry| entry.usage == 0x70013));
+    assert_eq!(saved.entries().len(), 15);
+    assert_eq!(ui.render(&mut reader, 2).unwrap().len(), 480 * 800);
+    ui.select(&mut reader).unwrap(); // Selection remains valid after the row disappears.
+    assert_eq!(
+        reader
+            .state
+            .remote_bindings
+            .as_ref()
+            .unwrap()
+            .entries()
+            .len(),
+        14
+    );
+}

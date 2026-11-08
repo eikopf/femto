@@ -513,23 +513,19 @@ pub(crate) fn paginate_step_until(
                 }
             }
             Block::Image(image) => {
-                let max_width = image_limit(image.max_width, config.width - 2 * config.margin)?;
-                let max_height = image_limit(image.max_height, config.height - 2 * config.margin)?;
-                let width = image_dimension(image.width, config.width - 2 * config.margin)?;
-                let height = image_dimension(image.height, config.height - 2 * config.margin)?;
-                if max_width == 0 || max_height == 0 || width == Some(0.0) || height == Some(0.0) {
+                let Some(size) = image_size(
+                    image,
+                    image.intrinsic.unwrap_or(crate::image::Size {
+                        width: 1,
+                        height: 1,
+                    }),
+                    config.width - 2 * config.margin,
+                    config.height - 2 * config.margin,
+                )?
+                else {
                     continue;
-                }
-                if let Some(intrinsic) = image.intrinsic {
-                    let Some(size) = image_size(
-                        image,
-                        intrinsic,
-                        config.width - 2 * config.margin,
-                        config.height - 2 * config.margin,
-                    )?
-                    else {
-                        continue;
-                    };
+                };
+                if image.intrinsic.is_some() {
                     let location = Locator {
                         chapter: chapter.index,
                         block: block_index,
@@ -958,9 +954,23 @@ fn image_size(
     available_width: u32,
     available_height: u32,
 ) -> Result<Option<crate::image::Size>> {
-    let max_width = image_dimension(image.max_width, available_width)?.unwrap_or(f64::MAX);
-    let max_height = image_dimension(image.max_height, available_height)?.unwrap_or(f64::MAX);
-    if image.width.is_none() && image.height.is_none() {
+    let min_width = image_dimension(image.min_width, available_width)?.unwrap_or(0.0);
+    let min_height = image_dimension(image.min_height, available_height)?.unwrap_or(0.0);
+    let max_width = image_dimension(image.max_width, available_width)?
+        .unwrap_or(f64::MAX)
+        .max(min_width);
+    let max_height = image_dimension(image.max_height, available_height)?
+        .unwrap_or(f64::MAX)
+        .max(min_height);
+    if max_width == 0.0 || max_height == 0.0 {
+        return Ok(None);
+    }
+    if image.width.is_none() && image.height.is_none() && min_width == 0.0 && min_height == 0.0 {
+        if image_limit(image.max_width, available_width)? == 0
+            || image_limit(image.max_height, available_height)? == 0
+        {
+            return Ok(None);
+        }
         return intrinsic
             .fit(
                 image
@@ -999,14 +1009,31 @@ fn image_size(
     });
     let ratio = f64::from(intrinsic.width) / f64::from(intrinsic.height);
     let (mut width, mut height) = match (width, height) {
-        (Some(width), Some(height)) => (width.min(max_width), height.min(max_height)),
+        (Some(width), Some(height)) => (
+            width.clamp(min_width, max_width),
+            height.clamp(min_height, max_height),
+        ),
         (width, height) => {
-            let width = width.unwrap_or_else(|| {
-                height.map_or(f64::from(intrinsic.width), |height| height * ratio)
-            });
-            let height = height.unwrap_or(width / ratio);
-            let scale = (max_width / width).min(max_height / height).min(1.0);
-            (width * scale, height * scale)
+            let width = width.map(|w| w.max(min_width));
+            let height = height.map(|h| h.max(min_height));
+            let mut width =
+                width.unwrap_or_else(|| height.map_or(f64::from(intrinsic.width), |h| h * ratio));
+            let mut height = height.unwrap_or(width / ratio);
+            if width == 0.0 || height == 0.0 {
+                width = min_width.max(min_height * ratio);
+                height = width / ratio;
+            }
+            if width == 0.0 || height == 0.0 {
+                return Ok(None);
+            }
+            // Preserve the ratio when feasible; conflicting author constraints can change it.
+            let lower = (min_width / width).max(min_height / height);
+            let upper = (max_width / width).min(max_height / height);
+            let scale = 1.0_f64.max(lower).min(upper);
+            (
+                (width * scale).clamp(min_width, max_width),
+                (height * scale).clamp(min_height, max_height),
+            )
         }
     };
     if width == 0.0 || height == 0.0 {

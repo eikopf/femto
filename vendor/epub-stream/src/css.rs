@@ -196,6 +196,10 @@ pub struct CssStyle {
     pub max_width: Option<ImageLimit>,
     /// Non-inherited image height constraint.
     pub max_height: Option<ImageLimit>,
+    /// Non-inherited minimum image width; None resolves to zero.
+    pub min_width: Option<ImageLimit>,
+    /// Non-inherited minimum image height; None resolves to zero.
+    pub min_height: Option<ImageLimit>,
     /// Inherited list marker style.
     pub list_style_type: Option<ListStyleType>,
     /// Inherited first-line indentation.
@@ -236,7 +240,7 @@ impl CssStyle {
 
     /// Check if any property is set
     pub fn is_empty(&self) -> bool {
-        self.width.is_none() && self.height.is_none() && self.max_width.is_none() && self.max_height.is_none() && self.list_style_type.is_none() && self.text_indent.is_none() && self.tab_size.is_none() && self.white_space.is_none() && self.direction.is_none() && self.hyphens.is_none()
+        self.width.is_none() && self.height.is_none() && self.max_width.is_none() && self.max_height.is_none() && self.min_width.is_none() && self.min_height.is_none() && self.list_style_type.is_none() && self.text_indent.is_none() && self.tab_size.is_none() && self.white_space.is_none() && self.direction.is_none() && self.hyphens.is_none()
             && self.font_size.is_none()
             && self.font_family.is_none()
             && self.font_weight.is_none()
@@ -254,6 +258,8 @@ impl CssStyle {
         if other.height.is_some() { self.height = other.height; }
         if other.max_width.is_some() { self.max_width = other.max_width; }
         if other.max_height.is_some() { self.max_height = other.max_height; }
+        if other.min_width.is_some() { self.min_width = other.min_width; }
+        if other.min_height.is_some() { self.min_height = other.min_height; }
         if other.list_style_type.is_some() { self.list_style_type = other.list_style_type; }
         if other.text_indent.is_some() { self.text_indent = other.text_indent; }
         if other.tab_size.is_some() { self.tab_size = other.tab_size; }
@@ -491,13 +497,14 @@ fn parse_declarations(declarations: &str) -> Result<CssStyle, EpubError> {
         let value = decl[colon_pos + 1..].trim();
 
         match property.as_str() {
-            "width" | "height" | "max-width" | "max-height" => {
+            "width" | "height" | "max-width" | "max-height" | "min-width" | "min-height" => {
                 let dimension = property == "width" || property == "height";
+                let minimum = property.starts_with("min-");
                 let value = value.to_ascii_lowercase();
                 let parsed = match value.as_str() {
-                    "initial" | "unset" => Some(ImageLimit::None),
+                    "initial" | "unset" => Some(if minimum { ImageLimit::Px(0.0) } else { ImageLimit::None }),
                     "auto" if dimension => Some(ImageLimit::None),
-                    "none" if !dimension => Some(ImageLimit::None),
+                    "none" if !dimension && !minimum => Some(ImageLimit::None),
                     "0" => Some(ImageLimit::Px(0.0)),
                     _ => ["px", "%"].into_iter().find_map(|unit| {
                         let number = value.strip_suffix(unit)?.parse::<f32>().ok()?;
@@ -509,7 +516,9 @@ fn parse_declarations(declarations: &str) -> Result<CssStyle, EpubError> {
                     if property == "width" { style.width = parsed; }
                     else if property == "height" { style.height = parsed; }
                     else if property == "max-width" { style.max_width = parsed; }
-                    else { style.max_height = parsed; }
+                    else if property == "max-height" { style.max_height = parsed; }
+                    else if property == "min-width" { style.min_width = parsed; }
+                    else { style.min_height = parsed; }
                 }
             }
             "list-style-type" => {
@@ -721,6 +730,25 @@ mod tests {
             assert_eq!(style.width, Some(ImageLimit::Px(7.0)));
             assert_eq!(style.height, Some(ImageLimit::Px(9.0)));
         }
+    }
+
+    #[test]
+    fn image_minimums_parse_and_invalid_overrides_preserve_cascade() {
+        for (value, expected) in [("0", ImageLimit::Px(0.0)), ("1.5px", ImageLimit::Px(1.5)),
+            ("50%", ImageLimit::Percent(50.0)), ("initial", ImageLimit::Px(0.0)), ("unset", ImageLimit::Px(0.0))] {
+            let style = parse_inline_style(&alloc::format!("min-width:{};min-height:{}", value, value)).unwrap();
+            assert_eq!(style.min_width, Some(expected));
+            assert_eq!(style.min_height, Some(expected));
+            assert!(!style.is_empty());
+        }
+        for value in ["-1px", "-1%", "NaNpx", "inf%", "12", "auto", "none", "inherit", "calc(50%)", "1em"] {
+            let style = parse_inline_style(&alloc::format!("min-width:7px;min-width:{}", value)).unwrap();
+            assert_eq!(style.min_width, Some(ImageLimit::Px(7.0)), "{}", value);
+        }
+        let mut style = parse_inline_style("min-width:50%;min-height:90px").unwrap();
+        style.merge(&parse_inline_style("min-width:unset").unwrap());
+        assert_eq!(style.min_width, Some(ImageLimit::Px(0.0)));
+        assert_eq!(style.min_height, Some(ImageLimit::Px(90.0)));
     }
 
     #[test]
@@ -1201,6 +1229,8 @@ mod tests {
             height: None,
             max_width: None,
             max_height: None,
+            min_width: None,
+            min_height: None,
         };
         let overlay = CssStyle {
             list_style_type: None,
@@ -1222,6 +1252,8 @@ mod tests {
             height: None,
             max_width: None,
             max_height: None,
+            min_width: None,
+            min_height: None,
         };
         base.merge(&overlay);
 

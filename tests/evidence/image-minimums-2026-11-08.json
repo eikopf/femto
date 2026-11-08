@@ -1,0 +1,70 @@
+{
+  "feature": "Non-inherited CSS image minimum dimensions with bounded paged layout",
+  "commands": [
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "rust_passed": 1084,
+      "rust_batches": 81,
+      "rust_ignored": 1,
+      "python_passed": 13
+    },
+    {
+      "command": "FEMTO_PICCO_BLUETOOTH=1 CARGO_BUILD_JOBS=1 ./scripts/build-picco",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo run --locked -- render tests/fixtures/image-minimums.epub --font tests/fixtures/DejaVuSans.ttf --width 448 --height 648 --margin 24 --levels 4 --output output/image-minimums",
+      "exit_code": 0,
+      "pages": 5
+    }
+  ],
+  "tested_files_sha256": {
+    "vendor/epub-stream/src/css.rs": "24da44f7cbd155b68d93deaad7257cda76d1d7a795c0bd0f6926ad98a1b07703",
+    "vendor/epub-stream/src/render_prep.rs": "13c1757744d85f45fb87faf37a2f2fa2c94285afbaf65b54e0b8ec028e237dcc",
+    "crates/femto-reader/src/document.rs": "e91a194a764c53feb8aa8071d1e073498731fc6356ab4c68b9ccca1c598722a0",
+    "crates/femto-reader/src/layout.rs": "ae7013af53a048c47a5e64515846ca8c33515cc89ae28cd803ff5da8bfbd29e1",
+    "crates/femto-reader/src/selection.rs": "d05a23990ab278141a3d6cb10acea4545fae1a65c6bd08ca30240444f9a23589",
+    "crates/femto-reader/tests/image_limits.rs": "596b0c6541a640b9d2627c11903faefdaa2de3b307e9f261fa41d45931c9d9cd",
+    "scripts/make-fixtures.py": "333dbc13291500b6d29f5fd8e7ad5828ae9a39a2e1cd27787d61c60b9af08e84",
+    "tests/fixtures/image-minimums.epub": "1a439b9fb7017ee10e296f63cb0870ec048c856c9a8222219c15b00012720e2f"
+  },
+  "logs_sha256": {
+    "output/verification/image-minimum-workspace-complete.log": "b1fc49c46e82d6bbce3867695c2ca384cc17f0f89cf5669a2a7e6e9c19b41d27",
+    "output/verification/image-minimum-targeted.log": "94ad941a117a92a04f17a74d9a90760390e9e8573257191bf9c230349f494424",
+    "output/verification/image-minimum-firmware.log": "623c4bb67899cb54509dfc22f0eb945db199c0bd51778a043f538f2b97f777f5",
+    "output/verification/image-minimum-render.log": "37b987e5865009cf2137ed78ce8ec0f2102f214a778857c793f807689c7589c6"
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "ea33ff998e78f39b82b617fc2706ae50658b427d9ae2510ce5c70925f913c085",
+    "bytes": 5700048,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "bluetooth": true,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "render_sha256": {
+    "output/image-minimums/page-0000.png": "5e467692f676688da3a74e851d27a253e7f6706170d3b4d836e7d82935ddb0d2",
+    "output/image-minimums/page-0001.png": "f077a7ba30a436224c5f1b9fe18b73d017c436289b9920760891b15d4d5274a8",
+    "output/image-minimums/page-0002.png": "b4fcf8715b4914d9338dc294f449162b437accfbf7898b5686bfb393c2564810",
+    "output/image-minimums/page-0003.png": "43638b5b7d20eabcae66255f65545588dff133b5cf33695f9a70a63eaa2c3843",
+    "output/image-minimums/page-0004.png": "629bf2e380a0c22454e8aaf1d9bf40b3780cf9ba070decb6a37c9d54a7fe650c"
+  },
+  "coverage": [
+    "Parser values, resets, invalid overrides, and cascade merge",
+    "Exact image sizes at two viewports, non-inheritance, conflicting constraints, and page bounds",
+    "Raster equality after pagination from each page source anchor",
+    "Nonfinite and negative minima rejected; extreme finite minima bounded before conversion",
+    "Hidden missing image omitted during rasterization; chapter header probing still reports missing asset"
+  ],
+  "limitations": [
+    "Physical Picco display and memory use unverified",
+    "Grayscale firmware and clean reproducibility not rerun for these source changes",
+    "The first full gate received SIGTERM before completion; only the successful complete rerun counts",
+    "Percentage dimensions resolve against page content bounds; nested containing blocks and complete browser CSS sizing remain unsupported"
+  ]
+}

@@ -379,6 +379,8 @@ mod tests {
                 intrinsic: None,
                 max_width: None,
                 max_height: None,
+                min_width: None,
+                min_height: None,
                 width_hint: None,
                 height_hint: None,
             }),

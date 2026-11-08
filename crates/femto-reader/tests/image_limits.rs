@@ -261,3 +261,129 @@ fn explicit_dimensions_validate_and_fit_before_integer_conversion() {
     assert!(pages.pages[0].images.is_empty());
     assert!(pages.pages[0].lines.is_empty());
 }
+
+#[test]
+fn minimum_dimensions_cascade_fit_and_reconstruct() {
+    let mut document = Document::open(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/image-minimums.epub"),
+    )
+    .unwrap();
+    let chapter = document.chapter(0).unwrap();
+    let fonts = fonts();
+    for (width, height, expected) in [
+        (
+            448,
+            648,
+            vec![
+                (400, 300),
+                (400, 300),
+                (400, 250),
+                (400, 300),
+                (80, 60),
+                (80, 40),
+                (400, 300),
+                (320, 240),
+                (320, 240),
+                (400, 300),
+            ],
+        ),
+        (
+            248,
+            348,
+            vec![
+                (200, 150),
+                (200, 150),
+                (200, 125),
+                (200, 150),
+                (80, 60),
+                (80, 40),
+                (200, 150),
+                (200, 150),
+                (200, 150),
+                (200, 150),
+            ],
+        ),
+    ] {
+        let config = LayoutConfig {
+            width,
+            height,
+            margin: 24,
+            ..Default::default()
+        };
+        let pages = paginate(&chapter, &fonts, config).unwrap();
+        assert_eq!(
+            pages
+                .pages
+                .iter()
+                .flat_map(|p| &p.images)
+                .map(|i| (i.size.width, i.size.height))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        for page in &pages.pages {
+            for image in &page.images {
+                assert!(image.x + image.size.width <= width - config.margin);
+                assert!(image.y + image.size.height <= height - config.margin);
+            }
+            let render = |page: &femto_reader::layout::Page, document: &mut Document| {
+                rasterize_with_assets(page, &fonts, config, |source| {
+                    assert!(!source.contains("missing"));
+                    document.resource(source)
+                })
+                .unwrap()
+            };
+            let pixels = render(page, &mut document);
+            assert!(pixels.iter().any(|p| *p != 255));
+            femto_reader::layout::paginate_from(&chapter, &fonts, config, page.start, |rebuilt| {
+                assert_eq!(rebuilt.start, page.start);
+                assert_eq!(rebuilt.end, page.end);
+                assert_eq!(render(&rebuilt, &mut document), pixels);
+                Ok(false)
+            })
+            .unwrap();
+        }
+    }
+}
+
+#[test]
+fn minimum_dimensions_reject_invalid_values_and_bound_extreme_values() {
+    let mut document = document();
+    let mut chapter = document.chapter(0).unwrap();
+    chapter.blocks.retain(|b| matches!(b, Block::Image(_)));
+    chapter.blocks.truncate(1);
+    let fonts = fonts();
+    let config = LayoutConfig {
+        width: 2048,
+        height: 2048,
+        ..Default::default()
+    };
+    for height_axis in [false, true] {
+        for invalid in [f32::NAN, f32::INFINITY, -1.0] {
+            for limit in [ImageLimit::Px(invalid), ImageLimit::Percent(invalid)] {
+                let Block::Image(image) = &mut chapter.blocks[0] else {
+                    panic!()
+                };
+                image.min_width = (!height_axis).then_some(limit);
+                image.min_height = height_axis.then_some(limit);
+                assert!(matches!(
+                    paginate(&chapter, &fonts, config),
+                    Err(Error::Layout("invalid image size limit"))
+                ));
+            }
+        }
+    }
+    let Block::Image(image) = &mut chapter.blocks[0] else {
+        panic!()
+    };
+    image.min_width = Some(ImageLimit::Percent(f32::MAX));
+    image.min_height = Some(ImageLimit::Px(f32::MAX));
+    let pages = paginate(&chapter, &fonts, config).unwrap();
+    let size = pages.pages[0].images[0].size;
+    assert!(size.width > 0 && size.width <= config.width - 2 * config.margin);
+    assert!(size.height > 0 && size.height <= config.height - 2 * config.margin);
+    assert!(
+        u64::from(size.width) * u64::from(size.height)
+            <= femto_reader::image::MAX_IMAGE_PIXELS as u64
+    );
+}

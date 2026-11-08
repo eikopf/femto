@@ -235,6 +235,10 @@ pub struct ImageBlock {
     pub intrinsic: Option<Size>,
     pub max_width: Option<epub_stream::css::ImageLimit>,
     pub max_height: Option<epub_stream::css::ImageLimit>,
+    /// Non-inherited minimum image width; None resolves to zero.
+    pub min_width: Option<epub_stream::css::ImageLimit>,
+    /// Non-inherited minimum image height; None resolves to zero.
+    pub min_height: Option<epub_stream::css::ImageLimit>,
     pub width_hint: Option<u16>,
     pub height_hint: Option<u16>,
 }
@@ -778,6 +782,8 @@ impl Document {
                                 height: image.height,
                                 max_width: image.max_width,
                                 max_height: image.max_height,
+                                min_width: image.min_width,
+                                min_height: image.min_height,
                                 width_hint: image.width_px,
                                 height_hint: image.height_px,
                             }));

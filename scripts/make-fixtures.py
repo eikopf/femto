@@ -488,3 +488,23 @@ with ZipFile(root / "images.epub") as source, ZipFile(root / "image-dimensions.e
 <img class="half" style="width:initial;height:unset" src="../images/gradient.jpg"/>
 <p>Reading continues.</p></body></html>'''.encode()
         archive.writestr(ZipInfo(info.filename), data, compress_type=info.compress_type)
+
+# Image minimum dimensions, resets, non-inheritance, and conflicting constraints.
+with ZipFile(root / "images.epub") as source, ZipFile(root / "image-minimums.epub", "w") as archive:
+    for info in source.infolist():
+        data = source.read(info.filename)
+        if info.filename == "EPUB/chapters/images.xhtml":
+            data = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><style>.minimum { min-width:400px } .minimum { min-width:420px } .reset { min-width:400px }</style></head><body>
+<img style="min-width:400px" src="../images/gradient.jpg"/>
+<img style="min-height:300px" src="../images/gradient.jpg"/>
+<img style="min-width:400px;max-height:250px" src="../images/gradient.jpg"/>
+<img style="min-width:400px;max-width:80px" src="../images/gradient.jpg"/>
+<img style="width:0;min-width:80px" src="../images/gradient.jpg"/>
+<img style="width:80px;height:20px;min-height:40px" src="../images/gradient.jpg"/>
+<img style="min-width:100%;min-height:50%" src="../images/gradient.jpg"/>
+<div style="min-width:400px;min-height:500px"><img src="../images/gradient.jpg"/></div>
+<img class="reset" style="min-width:initial" src="../images/gradient.jpg"/>
+<img class="minimum" style="min-width:400px;min-width:-1px;min-height:NaNpx" src="../images/gradient.jpg"/>
+<img style="width:0" src="../images/missing.jpg" alt="Hidden"/>
+</body></html>'''.encode()
+        archive.writestr(info, data)

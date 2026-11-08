@@ -469,6 +469,10 @@ pub struct StyledImage {
     pub max_width: Option<crate::css::ImageLimit>,
     /// Cascaded, non-inherited author image constraints.
     pub max_height: Option<crate::css::ImageLimit>,
+    /// Non-inherited minimum image width; None resolves to zero.
+    pub min_width: Option<crate::css::ImageLimit>,
+    /// Non-inherited minimum image height; None resolves to zero.
+    pub min_height: Option<crate::css::ImageLimit>,
     /// OPF-relative image href.
     pub src: String,
     /// Optional caption/alt text.
@@ -2127,6 +2131,8 @@ fn emit_image_event<F: FnMut(StyledEventOrRun)>(
         height: style.height,
         max_width: style.max_width,
         max_height: style.max_height,
+        min_width: style.min_width,
+        min_height: style.min_height,
         width_px: ctx.img_width_px,
         height_px: ctx.img_height_px,
         in_figure,
@@ -2413,7 +2419,8 @@ fn resolve_item_assets_for_chapter(
 ) -> StyledEventOrRun {
     if let StyledEventOrRun::Image(image) = &mut item {
         image.src = resolve_relative(chapter_href, &image.src);
-        if image.width.is_some() || image.height.is_some() {
+        if image.width.is_some() || image.height.is_some()
+            || image.min_width.is_some() || image.min_height.is_some() {
             // Preserve absent HTML hints so the paged layout can resolve CSS auto.
             return item;
         }
@@ -3280,6 +3287,8 @@ mod tests {
             height: None,
             max_width: None,
             max_height: None,
+            min_width: None,
+            min_height: None,
             width_px: None,
             height_px: Some(300),
             in_figure: false,

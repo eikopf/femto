@@ -1,14 +1,12 @@
 """Exercise the installed CLI command against the private coordinator and peer."""
-import hashlib
 import json
 import os
 from pathlib import Path
 import subprocess
-import signal
 import sys
-import threading
 import time
 from simulator_services import PeerServices
+from kosync_cli_fixture import check_tailnet
 
 folder, port = Path(sys.argv[1]), sys.argv[2]
 admin = ["headscale", "--config", str(folder / "config.json")]
@@ -72,7 +70,7 @@ with PeerServices(folder, port, admin, address, https=True) as services:
     assert (browse_directory / "café.epub").read_bytes() == services.epub
     assert not (folder / "escape.epub").exists()
     assert list(browse_directory.iterdir()) == [browse_directory / "café.epub"]
-    assert services.counts == {"feed":3,"book":2,"gets":0,"puts":0}
+    assert services.counts == {"feed":3,"book":2}
     assert len(services.feed_received_at) == 3
     timing = {
         "acquisition_total_seconds": acquisition_seconds,
@@ -95,74 +93,7 @@ with PeerServices(folder, port, admin, address, https=True) as services:
         assert services.tls_rejections[mode] == 1
         assert services.counts == counts
     services.tls_mode = "valid"
-    book_id = hashlib.sha256(services.epub).hexdigest()
-    state, checkpoint = folder / "reader.json", folder / "checkpoint.json"
-    state.write_text(json.dumps({"version": 1, "layout": {"width":480,"height":800,"margin":24,"font_size":24,"line_height":1.35},"books":{book_id:{"position":{"chapter":0,"block":0,"byte":0},"bookmarks":[],"last_opened":1}}}))
-    sync = runtime + ["--progress-url", services.origin + "/progress/" + book_id, "--progress-book", destination, "--progress-state", state, "--progress-checkpoint", checkpoint, "--progress-credentials", credentials]
-    run(sync)
-    assert json.loads(checkpoint.read_text())["baseline"] == services.remote["record"]
-    services.remote["record"]["position"]["byte"] = 1
-    services.remote["record"]["recorded_at"] += 1
-    services.remote["etag"] += 1
-    run(sync)
-    assert json.loads(state.read_text())["books"][book_id]["position"] == services.remote["record"]["position"]
-    assert json.loads(checkpoint.read_text())["baseline"] == services.remote["record"]
-    assert services.counts == {"feed":3,"book":2,"gets":2,"puts":1}
-    local = json.loads(state.read_text())
-    local["books"][book_id]["position"]["byte"] = 2
-    local["books"][book_id]["last_opened"] += 1
-    state.write_text(json.dumps(local))
-    services.remote["record"]["position"]["byte"] = 3
-    services.remote["record"]["recorded_at"] += 1
-    services.remote["etag"] += 1
-    state_before = state.read_bytes()
-    checkpoint_before = checkpoint.read_bytes()
-    remote_before = json.dumps(services.remote, sort_keys=True)
-    for _ in range(2):
-        conflict = run(sync, success=False)
-        assert conflict.returncode != 0 and "progress sync conflict" in conflict.stderr, conflict.stderr
-        assert '"status": "conflict"' in conflict.stdout
-        assert state.read_bytes() == state_before
-        assert checkpoint.read_bytes() == checkpoint_before
-        assert json.dumps(services.remote, sort_keys=True) == remote_before
-        assert services.counts["puts"] == 1
-    services.remote["record"]["position"] = dict(local["books"][book_id]["position"])
-    services.remote["record"]["recorded_at"] = local["books"][book_id]["last_opened"]
-    services.remote["etag"] += 1
-    run(sync)
-    assert state.read_bytes() == state_before
-    assert json.loads(checkpoint.read_text())["baseline"] == services.remote["record"]
-    assert services.counts == {"feed":3,"book":2,"gets":5,"puts":1}
-    entered, release = threading.Event(), threading.Event()
-    services.progress_gate = (entered, release)
-    checkpoint_before = checkpoint.read_bytes()
-    remote_before = json.dumps(services.remote, sort_keys=True)
-    process = subprocess.Popen(list(map(str, sync)), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    try:
-        assert entered.wait(30), "CLI did not reach held progress response"
-        assert process.poll() is None
-        cancelled_at = time.monotonic()
-        process.send_signal(signal.SIGINT)
-        stdout, stderr = process.communicate(timeout=5)
-        cancellation_seconds = time.monotonic() - cancelled_at
-        assert process.returncode > 0, (process.returncode, stderr)
-        assert "cancel" in stderr.lower() or "interrupt" in stderr.lower(), stderr
-        assert '"status": "synchronized"' not in stdout
-        assert not release.is_set()
-        assert state.read_bytes() == state_before
-        assert checkpoint.read_bytes() == checkpoint_before
-        assert json.dumps(services.remote, sort_keys=True) == remote_before
-        assert services.counts["puts"] == 1
-    finally:
-        release.set()
-        services.progress_gate = None
-        if process.poll() is None:
-            process.kill()
-            process.wait(timeout=5)
-    run(sync)
-    assert state.read_bytes() == state_before
-    assert checkpoint.read_bytes() == checkpoint_before
-    assert services.counts == {"feed":3,"book":2,"gets":7,"puts":1}
+    kosync = check_tailnet(runtime, services, folder)
     assert not services.errors, services.errors
-    report.write_text(json.dumps({"cli_registration":True,"coordinator_ca_rejection":True,"cli_reconnect":True,"cli_rotation":True,"cli_https_acquisition":True,"cli_interactive_details_refresh_and_download":True,"cli_interactive_destination_guards":True,"cli_certificate_rejection":True,"cli_progress_create_and_download":True,"cli_progress_conflict_preserves_both_sides":True,"cli_progress_conflict_retry":True,"cli_progress_convergence_without_write":True,"cli_progress_cancel_preserves_state":True,"cli_progress_retry_after_cancel":True,"cancellation_seconds":cancellation_seconds,"service_timing":timing,"request_counts":services.counts,"relay_only":relay_only,"peer":services.peer_version,"tls_failures":services.tls_failures,"hardware_verified":False},indent=2)+"\n")
-print("CLI enrollment, renewal, HTTPS acquisition and progress services passed")
+    report.write_text(json.dumps({"kosync":kosync,"cli_registration":True,"coordinator_ca_rejection":True,"cli_reconnect":True,"cli_rotation":True,"cli_https_acquisition":True,"cli_interactive_details_refresh_and_download":True,"cli_interactive_destination_guards":True,"cli_certificate_rejection":True,"service_timing":timing,"request_counts":services.counts,"relay_only":relay_only,"peer":services.peer_version,"tls_failures":services.tls_failures,"hardware_verified":False},indent=2)+"\n")
+print("CLI enrollment, renewal, HTTPS acquisition services passed")

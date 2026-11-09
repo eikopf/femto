@@ -456,6 +456,19 @@ impl Reader {
             links,
         })
     }
+    /// Prepares a source position without changing visible or saved state.
+    pub fn begin_location(&mut self, target: Locator) -> Result<Navigating> {
+        let chapter = self.document.chapter(target.chapter)?;
+        let valid = match chapter.blocks.get(target.block) {
+            Some(Block::Text(text)) => text.text.is_char_boundary(target.byte),
+            Some(Block::Image(_)) => target.byte == 0,
+            None => false,
+        };
+        if !valid {
+            return Err(Error::Document("invalid source position".into()));
+        }
+        self.navigation_job(target, true, false, std::sync::Arc::new(chapter))
+    }
     fn check_navigation(&self, job: &Navigating) -> Result<()> {
         if let Some(clipping) = &job.clipping
             && !self
@@ -481,6 +494,24 @@ impl Reader {
         job.indexer.step(&self.fonts)
     }
     pub fn finish_navigation(&mut self, job: Navigating) -> Result<Effect> {
+        self.finish_navigation_using(job, None, |_| Ok(()))
+    }
+    /// Publishes saved state before replacing the visible page. Failed storage
+    /// leaves the position, annotations and back history unchanged.
+    pub fn finish_navigation_saved(
+        &mut self,
+        job: Navigating,
+        now: u64,
+        save: impl FnOnce(&ReaderState) -> Result<()>,
+    ) -> Result<Effect> {
+        self.finish_navigation_using(job, Some(now), save)
+    }
+    fn finish_navigation_using(
+        &mut self,
+        job: Navigating,
+        now: Option<u64>,
+        save: impl FnOnce(&ReaderState) -> Result<()>,
+    ) -> Result<Effect> {
         self.check_navigation(&job)?;
         let pagination = job.indexer.finish()?;
         let position = normalize_position(&pagination, job.target);
@@ -492,6 +523,17 @@ impl Reader {
             256,
             |source| self.document.resource(source),
         )?;
+        if let Some(now) = now {
+            let mut state = self.state.clone();
+            state.set_position(&self.document.metadata.id, position, now);
+            state
+                .books
+                .get_mut(&self.document.metadata.id)
+                .unwrap()
+                .typography = Some(BookTypography::current(&state));
+            save(&state)?;
+            self.state = state;
+        }
         if job.remember {
             if self.history.len() == 64 {
                 self.history.remove(0);
@@ -696,68 +738,6 @@ impl Reader {
         Ok(clipping)
     }
 
-    pub fn progress_snapshot(&self) -> crate::progress::Progress {
-        crate::progress::Progress {
-            version: 1,
-            book_id: self.document.metadata.id.clone(),
-            position: self.position,
-            recorded_at: self
-                .state
-                .books
-                .get(&self.document.metadata.id)
-                .map_or(0, |book| book.last_opened),
-        }
-    }
-
-    /// Persists a prepared destination and checkpoint before changing visible state.
-    /// A persistence error can have an unknown durable outcome; the owner must
-    /// follow its store's recovery rules before another write.
-    pub fn commit_progress(
-        &mut self,
-        expected: &crate::progress::Progress,
-        checkpoint: crate::progress::SyncCheckpoint,
-        now: u64,
-        persist: impl FnOnce(&ReaderState) -> Result<()>,
-    ) -> Result<Effect> {
-        if &self.progress_snapshot() != expected {
-            return Err(Error::Document("local progress changed during sync".into()));
-        }
-        checkpoint.validate(&self.document.metadata.id)?;
-        checkpoint.baseline.validate_document(&mut self.document)?;
-        let target = checkpoint.baseline.position;
-        let chapter = self.document.chapter(target.chapter)?;
-        let links = chapter.links.clone();
-        let pagination = PageCache::new(chapter, &self.fonts, self.state.layout, target)?;
-        let page_index = pagination.page_for(target);
-        rasterize_display(
-            pagination.page(),
-            &self.fonts,
-            self.state.layout,
-            self.state.text_raster,
-            256,
-            |source| self.document.resource(source),
-        )?;
-        let mut state = self.state.clone();
-        state.set_position(&self.document.metadata.id, target, now);
-        state
-            .books
-            .get_mut(&self.document.metadata.id)
-            .unwrap()
-            .sync = Some(checkpoint);
-        persist(&state)?;
-        if target != self.position {
-            if self.history.len() == 64 {
-                self.history.remove(0);
-            }
-            self.history.push(self.position);
-        }
-        self.state = state;
-        self.pagination = pagination;
-        self.page_index = page_index;
-        self.position = target;
-        self.links = links;
-        Ok(Effect::Redraw)
-    }
     pub fn page_index(&self) -> usize {
         self.page_index
     }

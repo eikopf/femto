@@ -10,6 +10,8 @@ import ssl
 import subprocess
 import threading
 import time
+import urllib.request
+import urllib.error
 
 
 class PeerServices:
@@ -21,11 +23,11 @@ class PeerServices:
         self.tls_rejections = {"wrong-name": 0, "untrusted": 0}
         self.tls_failures = []
         self.daemon = self.log = self.server = self.thread = None
-        self.counts = {"feed": 0, "book": 0, "gets": 0, "puts": 0}
+        self.counts = {"feed": 0, "book": 0}
         self.feed_received_at = []
-        self.remote = {"record": None, "etag": 0}
         self.errors = []
-        self.progress_gate = None
+        self.kosync_origin = None
+        self.kosync_requests = 0
 
     def run(self, args, **kwargs):
         return subprocess.run(args, check=True, capture_output=True, text=True, timeout=30, **kwargs)
@@ -64,18 +66,16 @@ class PeerServices:
             def log_message(self, *_):
                 pass
 
-            def reply(self, status, body=b"", media="application/json", etag=None):
+            def reply(self, status, body=b"", media="application/json"):
                 self.send_response(status)
                 self.send_header("Content-Type", media)
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Connection", "close")
-                if etag is not None:
-                    self.send_header("ETag", f'"{etag}"')
                 self.end_headers()
                 self.wfile.write(body)
                 self.close_connection = True
 
-            def authorized(self):
+            def authorized(self, basic=True):
                 if fixture.https and self.connection.selected_alpn_protocol() != "http/1.1":
                     fixture.errors.append("service TLS ALPN mismatch")
                     self.reply(400)
@@ -84,13 +84,44 @@ class PeerServices:
                     fixture.errors.append("unexpected service authority or peer source")
                     self.reply(400)
                     return False
-                if self.headers.get("Authorization") != expected_auth:
+                if basic and self.headers.get("Authorization") != expected_auth:
                     fixture.errors.append("missing service authentication")
                     self.reply(401)
                     return False
                 return True
 
+            def kosync(self):
+                if fixture.kosync_origin is None or not self.path.startswith(("/users/", "/syncs/")):
+                    return False
+                if not self.authorized(basic=False):
+                    return True
+                length = int(self.headers.get("Content-Length", "0"))
+                if length < 0 or length > 65536:
+                    self.reply(413)
+                    return True
+                body = self.rfile.read(length) if self.command != "GET" else None
+                headers = {name: self.headers[name] for name in ("Accept", "Content-Type", "x-auth-user", "x-auth-key") if name in self.headers}
+                request = urllib.request.Request(fixture.kosync_origin + self.path, method=self.command, data=body, headers=headers)
+                fixture.kosync_requests += 1
+                try:
+                    response = urllib.request.urlopen(request, timeout=5)
+                except urllib.error.HTTPError as error:
+                    response = error
+                with response:
+                    self.reply(response.status, response.read(65537), response.headers.get("Content-Type", "application/json"))
+                return True
+
+            def do_POST(self):
+                if not self.kosync():
+                    self.reply(404)
+
+            def do_PUT(self):
+                if not self.kosync():
+                    self.reply(404)
+
             def do_GET(self):
+                if self.kosync():
+                    return
                 if not self.authorized():
                     return
                 if self.path == "/feed":
@@ -101,40 +132,8 @@ class PeerServices:
                 elif self.path == "/book.epub":
                     fixture.counts["book"] += 1
                     self.reply(200, epub, "application/epub+zip")
-                elif self.path.startswith("/progress/"):
-                    fixture.counts["gets"] += 1
-                    gate = fixture.progress_gate
-                    if gate is not None:
-                        entered, release = gate
-                        entered.set()
-                        if not release.wait(20):
-                            fixture.errors.append("held progress response was not released")
-                        self.close_connection = True
-                        return
-                    record = fixture.remote["record"]
-                    if record is None:
-                        self.reply(404)
-                    else:
-                        self.reply(200, json.dumps(record).encode(), etag=fixture.remote["etag"])
                 else:
                     self.reply(404)
-
-            def do_PUT(self):
-                if not self.authorized():
-                    return
-                if not self.path.startswith("/progress/") or fixture.remote["record"] is not None or self.headers.get("If-None-Match") != "*":
-                    fixture.errors.append("unexpected progress write or precondition")
-                    self.reply(412)
-                    return
-                record = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                if not self.path.endswith(record["book_id"]):
-                    fixture.errors.append("progress book mismatch")
-                    self.reply(400)
-                    return
-                fixture.remote["record"] = record
-                fixture.remote["etag"] += 1
-                fixture.counts["puts"] += 1
-                self.reply(200, etag=fixture.remote["etag"])
 
         if self.https:
             contexts = {}
@@ -178,9 +177,7 @@ class PeerServices:
         self.books.mkdir()
         (self.books / "catalog.url").write_text(self.origin + "/feed")
         (self.books / "catalog-tailnet-origins").write_text(self.origin + "\n")
-        (self.books / "progress.url").write_text(self.origin + "/progress/")
-        (self.books / "progress-route").write_text("tailnet")
-        for name in ["catalog-auth.json", "progress-auth.json"]:
+        for name in ["catalog-auth.json"]:
             path = self.books / name
             path.write_text(json.dumps({"username": "fixture", "password": password, "allow_http": not self.https}))
             path.chmod(0o600)

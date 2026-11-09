@@ -1,0 +1,22 @@
+{
+  "engine_revision": "fb4d562a2765c52bff052759112a94a0b05239db",
+  "sha256": "e9223fea978740f5946f42051212b5c7a85378e1d12b7602b8834f950ae636d6",
+  "images": [
+    {
+      "pointer": "/body[1]/DocFragment[1]/body[1]/p[1]/img[1]",
+      "source": "EPUB/diagram.png"
+    },
+    {
+      "pointer": "/body[1]/DocFragment[1]/body[1]/p[1]/img[2]",
+      "source": "EPUB/diagram.png"
+    },
+    {
+      "pointer": "/body[1]/DocFragment[1]/body[1]/figure[1]/img[1]",
+      "source": "EPUB/diagram.png"
+    },
+    {
+      "pointer": "/body[1]/DocFragment[2]/body[1]/img[1]",
+      "source": "EPUB/diagram.png"
+    }
+  ]
+}

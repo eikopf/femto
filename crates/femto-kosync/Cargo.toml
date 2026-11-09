@@ -1,0 +1,25 @@
+[package]
+name = "femto-kosync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+reader = ["dep:femto-reader"]
+
+[dependencies]
+femto-catalog = { path = "../femto-catalog" }
+femto-reader = { path = "../femto-reader", optional = true }
+md-5 = "=0.10.6"
+url = "=2.5.8"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+zeroize = { version = "=1.9.1", features = ["serde"] }
+
+[target.'cfg(all(unix, not(target_os = "espidf")))'.dependencies]
+libc = "=0.2.191"
+
+[dev-dependencies]
+tempfile.workspace = true

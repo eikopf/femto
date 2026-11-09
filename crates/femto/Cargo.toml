@@ -21,7 +21,7 @@ zeroize = { version = "=1.9.1", features = ["serde"] }
 url = "=2.5.8"
 femto-catalog = { path = "../femto-catalog", features = ["tailnet"] }
 femto-reader = { path = "../femto-reader" }
-femto-sync = { path = "../femto-sync" }
+femto-kosync = { path = "../femto-kosync", features = ["reader"] }
 femto-microlink = { path = "../femto-microlink" }
 anyhow.workspace = true
 clap.workspace = true

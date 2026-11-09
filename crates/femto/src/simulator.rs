@@ -9,8 +9,6 @@ mod catalog_menu;
 #[cfg(unix)]
 mod host_http;
 #[cfg(unix)]
-mod simulator_sync;
-#[cfg(unix)]
 mod simulator_tailnet;
 #[cfg(unix)]
 mod network {
@@ -99,10 +97,10 @@ struct Args {
     #[cfg(unix)]
     #[arg(long)]
     catalog_directory: Option<PathBuf>,
-    /// Directory containing progress.url and optional progress-auth.json/progress-route.
+    /// Private KOReader account and server configuration.
     #[cfg(unix)]
     #[arg(long)]
-    sync_directory: Option<PathBuf>,
+    kosync_config: Option<PathBuf>,
     /// Directory containing private tailnet.json and the host identity subdirectory.
     #[cfg(unix)]
     #[arg(long, requires = "tailnet_endpoint")]
@@ -161,8 +159,6 @@ fn save(reader: &mut Reader, path: &PathBuf) -> Result<()> {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    #[cfg(unix)]
-    let initial_book = args.book.clone();
     #[cfg(all(unix, not(target_os = "espidf")))]
     let state_file = state_file::StateFile::acquire(&args.state)?;
     #[cfg(all(unix, not(target_os = "espidf")))]
@@ -234,23 +230,16 @@ fn main() -> Result<()> {
     #[cfg(unix)]
     ui.set_tailnet_available(tailnet_manager.is_some());
     #[cfg(unix)]
+    let mut kosync = args
+        .kosync_config
+        .as_deref()
+        .map(femto_kosync::config::Settings::load)
+        .transpose()?
+        .map(femto_kosync::session::Session::new);
+    #[cfg(unix)]
+    ui.set_kosync_available(kosync.is_some());
+    #[cfg(unix)]
     let tailnet = femto_catalog::tailnet::Factory::default();
-    #[cfg(unix)]
-    let mut sync = args
-        .sync_directory
-        .as_ref()
-        .map(|root| {
-            simulator_sync::Sync::load(
-                root,
-                initial_book,
-                &reader,
-                args.state.clone(),
-                tailnet.clone(),
-            )
-        })
-        .transpose()?;
-    #[cfg(unix)]
-    ui.set_sync_available(sync.is_some());
     #[cfg(unix)]
     let mut catalog = args
         .catalog_directory
@@ -323,6 +312,8 @@ fn main() -> Result<()> {
             pixels = frame.into_iter().map(|v| u32::from(v) * 0x010101).collect();
             let title = if let Some(message) = error.as_deref().or_else(|| ui.error_message()) {
                 format!("Femto - {message}")
+            } else if let Some(status) = ui.kosync_status() {
+                format!("Femto - KOReader sync - {status}")
             } else if ui.is_dictionary_result() {
                 "Femto - Dictionary - Backspace: selection".into()
             } else if ui.is_dictionary_opening() {
@@ -392,6 +383,24 @@ fn main() -> Result<()> {
             dirty |= manager.poll(&mut ui);
         }
         #[cfg(unix)]
+        if let Some(sync) = &mut kosync {
+            if let Some(event) = ui.take_kosync_event() {
+                let factory = tailnet_manager
+                    .as_ref()
+                    .map(|manager| manager.factory())
+                    .unwrap_or_default();
+                let transport = std::sync::Arc::new(move |origins: &[String]| {
+                    factory.routed(host_http::HostTransport { endpoint: None }, origins)
+                });
+                if let Err(message) = sync.event(event, &reader, &mut ui, transport) {
+                    ui.show_error(message);
+                }
+                dirty = true;
+            }
+            let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+            dirty |= sync.poll(&mut reader, &mut ui, now, |state| state.save(&args.state));
+        }
+        #[cfg(unix)]
         if let Some(catalog) = &mut catalog {
             if let Some(event) = ui.take_catalog_event() {
                 let factory = tailnet_manager
@@ -409,16 +418,6 @@ fn main() -> Result<()> {
             if catalog.poll(&mut catalog_jobs, &mut ui) {
                 dirty = true;
             }
-        }
-        #[cfg(unix)]
-        if let Some(sync) = &mut sync {
-            sync.set_transport(
-                tailnet_manager
-                    .as_ref()
-                    .map(|manager| manager.factory())
-                    .unwrap_or_default(),
-            );
-            dirty |= sync.poll(&mut reader, &mut ui)?;
         }
         if ui.poll_scan() == Effect::Redraw {
             dirty = true;
@@ -536,29 +535,6 @@ mod tests {
     }
     use super::*;
     use femto_reader::document::Document;
-
-    #[test]
-    fn saving_menu_changes_preserves_sync_snapshot_until_navigation() {
-        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
-        let mut reader = Reader::new(
-            Document::open(fixture.join("sample.epub")).unwrap(),
-            Fonts::new(Font::load(fixture.join("DejaVuSerif.ttf")).unwrap()),
-            ReaderState::default(),
-        )
-        .unwrap();
-        reader.record_position(1);
-        let before = reader.progress_snapshot();
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("state.json");
-        reader.state.frontlight.brightness = 7;
-        save(&mut reader, &path).unwrap();
-        assert_eq!(reader.progress_snapshot(), before);
-        assert_eq!(ReaderState::load(&path).unwrap().frontlight.brightness, 7);
-        reader.dispatch(Action::Next).unwrap();
-        save(&mut reader, &path).unwrap();
-        assert_ne!(reader.progress_snapshot().position, before.position);
-        assert!(reader.progress_snapshot().recorded_at > before.recorded_at);
-    }
 
     fn complete_navigation(reader: &mut Reader, ui: &mut ReaderUi) {
         for _ in 0..16_384 {

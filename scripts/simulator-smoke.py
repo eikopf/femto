@@ -24,7 +24,7 @@ def wait_for(check, process, description):
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise RuntimeError(f"process exited during {description}: {process.returncode}")
+            raise RuntimeError(f"process exited during {description}: {process.returncode}: {process.stderr.read().decode()}")
         value = check()
         if value:
             return value
@@ -38,7 +38,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
     library.mkdir()
     shutil.copyfile("tests/fixtures/sample.epub", library / "sample.epub")
     read_fd, write_fd = os.pipe()
-    server = subprocess.Popen(["Xvfb", "-displayfd", str(write_fd), "-screen", "0", "800x1000x24", "-nolisten", "tcp"], pass_fds=(write_fd,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    server = subprocess.Popen(["Xvfb", "-noreset", "-displayfd", str(write_fd), "-screen", "0", "800x1000x24", "-nolisten", "tcp"], pass_fds=(write_fd,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     os.close(write_fd)
     app = None
     try:
@@ -520,18 +520,6 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         assert app.wait(timeout=10) == 0, app.stderr.read().decode()
         epub = (root / "tests/fixtures/sample.epub").read_bytes()
         requests = []
-        remote = {"record": None, "etag": 0, "gets": 0, "puts": 0}
-        held = {"next": None}
-        gates = []
-        server_errors = []
-
-        def hold_next_progress():
-            gate = {name: threading.Event() for name in ("entered", "release", "finished")}
-            assert held["next"] is None
-            held["next"] = gate
-            gates.append(gate)
-            return gate
-
         class CatalogHandler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *_):
                 pass
@@ -541,34 +529,6 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
                     self.send_error(401)
                     return
                 requests.append(self.path)
-                if self.path.startswith("/progress/"):
-                    remote["gets"] += 1
-                    if remote["record"] is None:
-                        self.send_response(404)
-                        self.send_header("Content-Length", "0")
-                        self.end_headers()
-                        return
-                    body = json.dumps(remote["record"]).encode()
-                    etag = f'"{remote["etag"]}"'
-                    gate = held["next"]
-                    held["next"] = None
-                    if gate:
-                        gate["entered"].set()
-                        if not gate["release"].wait(10):
-                            server_errors.append("held progress response was not released")
-                    try:
-                        self.send_response(200)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("ETag", etag)
-                        self.send_header("Content-Length", str(len(body)))
-                        self.end_headers()
-                        self.wfile.write(body)
-                    except (BrokenPipeError, ConnectionResetError):
-                        pass  # Cancellation can close the client before the held reply is released.
-                    finally:
-                        if gate:
-                            gate["finished"].set()
-                    return
                 if self.path == "/feed":
                     body = json.dumps({"metadata": {"title": "Simulator catalog"},
                         "links": [{"rel": "self", "href": "/feed", "type": "application/opds+json"}],
@@ -586,24 +546,6 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
-
-            def do_PUT(self):
-                if self.headers.get("Authorization") != "Basic cmVhZGVyOnNlY3JldA==":
-                    self.send_error(401)
-                    return
-                matches = (self.headers.get("If-None-Match") == "*" if remote["record"] is None
-                    else self.headers.get("If-Match") == f'"{remote["etag"]}"')
-                if not self.path.startswith("/progress/") or not matches:
-                    self.send_error(412)
-                    return
-                remote["record"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                assert remote["record"]["book_id"] == self.path.rsplit("/", 1)[1]
-                remote["etag"] += 1
-                remote["puts"] += 1
-                self.send_response(200)
-                self.send_header("ETag", f'"{remote["etag"]}"')
-                self.send_header("Content-Length", "0")
-                self.end_headers()
 
         catalog_server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), CatalogHandler)
         catalog_thread = threading.Thread(target=catalog_server.serve_forever, daemon=True)
@@ -627,158 +569,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
             assert not list(library.glob(".femto-download-*.part"))
             assert xdo("key", "q").returncode == 0
             assert app.wait(timeout=10) == 0, app.stderr.read().decode()
-            (library / "progress.url").write_text(f"http://127.0.0.1:{catalog_server.server_port}/progress/")
-            (library / "progress-auth.json").write_text((library / "catalog-auth.json").read_text())
-            state = Path(directory) / "sync-state.json"
-            app, window = start(extra=("--sync-directory", str(library)))
-
-            def open_sync():
-                assert xdo("key", "--delay", "100", "Tab", *(["Down"] * 10), "Return").returncode == 0
-
-            open_sync()
-            assert xdo("key", "Return").returncode == 0
-            wait_for(lambda: saved() and saved().get("sync"), app, "sync creation and state save")
-            assert remote["puts"] == 1
-            assert saved()["sync"]["baseline"] == remote["record"]
-            baseline = saved()["sync"]
-            assert xdo("key", "--delay", "150", "Escape", "Escape", "Right").returncode == 0
-            wait_for(lambda: saved()["position"] != baseline["baseline"]["position"], app, "local progress change")
-            local = saved()["position"]
-            remote["record"]["position"] = {"chapter": 0, "block": 0, "byte": 1}
-            remote["record"]["recorded_at"] += 1000
-            remote["etag"] += 1
-            open_sync()
-            assert xdo("key", "Return").returncode == 0
-            wait_for(lambda: remote["gets"] >= 2, app, "sync conflict retrieval")
-            time.sleep(1.2)  # Cross a timestamp second before choosing the retained conflict.
-            assert saved()["position"] == local
-            assert saved()["sync"] == baseline
-            assert remote["puts"] == 1
-            ImageGrab.grab(xdisplay=display).save(output / "sync-conflict.png")
-            assert xdo("key", "--delay", "100", *(["Down"] * 6), "Return").returncode == 0
-            wait_for(lambda: saved()["position"] == remote["record"]["position"], app, "explicit remote sync choice")
-            assert saved()["sync"]["baseline"] == remote["record"]
-            assert remote["puts"] == 1
-            assert xdo("key", "q").returncode == 0
-            assert app.wait(timeout=10) == 0, app.stderr.read().decode()
-            app, window = start(extra=("--sync-directory", str(library)))
-            assert saved()["position"] == remote["record"]["position"]
-            open_sync()
-            assert xdo("key", "--delay", "100", "Down", "Down", "Down", "Return", "Down", "Return").returncode == 0
-            wait_for(lambda: saved().get("sync") is None, app, "explicit sync-history reset")
-            assert saved()["position"] == remote["record"]["position"]
-            assert remote["puts"] == 1
-            assert xdo("key", "q").returncode == 0
-            assert app.wait(timeout=10) == 0, app.stderr.read().decode()
-            # Reestablish a baseline, then hold actual download responses at the server.
-            app, window = start(extra=("--sync-directory", str(library)))
-            open_sync()
-            assert xdo("key", "Return").returncode == 0
-            wait_for(lambda: saved().get("sync"), app, "sync baseline after reset")
-            baseline = saved()["sync"]
-            local = saved()["position"]
-            puts_before = remote["puts"]
-            remote["record"]["position"] = {"chapter": 0, "block": 0, "byte": 2}
-            remote["etag"] += 1
-            gate = hold_next_progress()
-            assert xdo("key", "Return").returncode == 0
-            wait_for(gate["entered"].is_set, app, "held cancellable sync response")
-            assert xdo("key", "--delay", "100", "Down", "Return").returncode == 0
-            gate["release"].set()
-            wait_for(gate["finished"].is_set, app, "cancelled response release")
-            time.sleep(0.5)
-            assert saved()["position"] == local
-            assert saved()["sync"] == baseline
-            assert remote["puts"] == puts_before
-            assert xdo("key", "--delay", "100", "Up", "Return").returncode == 0
-            wait_for(lambda: saved()["position"] == remote["record"]["position"], app, "worker reuse after cancellation")
-            baseline = saved()["sync"]
-
-            remote["record"]["position"] = {"chapter": 0, "block": 0, "byte": 3}
-            remote["etag"] += 1
-            gate = hold_next_progress()
-            assert xdo("key", "Return").returncode == 0
-            wait_for(gate["entered"].is_set, app, "held sync before navigation")
-            assert xdo("key", "--delay", "100", "Escape", "Escape", "Right").returncode == 0
-            wait_for(lambda: saved()["position"] != baseline["baseline"]["position"], app, "navigation during sync")
-            navigated = saved()["position"]
-            gate["release"].set()
-            wait_for(gate["finished"].is_set, app, "stale response release")
-            time.sleep(0.5)
-            assert saved()["position"] == navigated
-            assert saved()["sync"] == baseline
-            assert remote["puts"] == puts_before
-            previous_gets = remote["gets"]
-            open_sync()
-            assert xdo("key", "Return").returncode == 0
-            wait_for(lambda: remote["gets"] > previous_gets, app, "worker reuse after stale completion")
-            time.sleep(0.5)
-            assert saved()["position"] == navigated
-            assert saved()["sync"] == baseline
-            assert remote["puts"] == puts_before
-            assert xdo("key", "q").returncode == 0
-            assert app.wait(timeout=5) == 0, app.stderr.read().decode()
-            assert saved()["position"] == navigated
-            assert saved()["sync"] == baseline
-
-            app, window = start(extra=("--sync-directory", str(library)))
-            gate = hold_next_progress()
-            open_sync()
-            assert xdo("key", "Return").returncode == 0
-            wait_for(gate["entered"].is_set, app, "held sync before quit")
-            assert xdo("key", "q").returncode == 0
-            assert app.wait(timeout=5) == 0, app.stderr.read().decode()
-            gate["release"].set()
-            assert gate["finished"].wait(5)
-            assert saved()["position"] == navigated
-            assert saved()["sync"] == baseline
-            assert remote["puts"] == puts_before
-            # Force a completion-time rename failure only inside the private fixture directory.
-            remote["record"]["position"] = navigated
-            remote["etag"] += 1
-            app, window = start(extra=("--sync-directory", str(library)))
-            open_sync()
-            assert xdo("key", "Return").returncode == 0
-            wait_for(lambda: saved()["sync"]["baseline"]["position"] == navigated,
-                     app, "baseline before storage fault")
-            baseline = saved()["sync"]
-            remote["record"]["position"] = {"chapter": 0, "block": 0, "byte": 4}
-            remote["etag"] += 1
-            gate = hold_next_progress()
-            assert xdo("key", "Return").returncode == 0
-            wait_for(gate["entered"].is_set, app, "held sync before storage fault")
-            before_failure = state.read_bytes()
-            backup = state.with_suffix(".saved-before-fault")
-            state.rename(backup)
-            state.mkdir()
-            obstruction = state / "fixture-obstruction"
-            obstruction.write_bytes(b"keep this directory")
-            gate["release"].set()
-            assert app.wait(timeout=5) != 0, "sync persistence failure must terminate the owner"
-            failure = app.stderr.read().decode()
-            assert "Sync state save failed; reopen the state file before continuing" in failure, failure
-            assert gate["finished"].wait(5)
-            assert backup.read_bytes() == before_failure
-            assert obstruction.read_bytes() == b"keep this directory"
-            assert remote["puts"] == puts_before
-            obstruction.unlink()
-            state.rmdir()
-            backup.rename(state)
-            app, window = start(extra=("--sync-directory", str(library)))
-            assert saved()["position"] == navigated
-            assert saved()["sync"] == baseline
-            open_sync()
-            assert xdo("key", "Return").returncode == 0
-            wait_for(lambda: saved()["position"] == remote["record"]["position"],
-                     app, "fresh sync after reopening recovered state")
-            assert saved()["sync"]["baseline"] == remote["record"]
-            assert remote["puts"] == puts_before
-            assert xdo("key", "q").returncode == 0
-            assert app.wait(timeout=5) == 0, app.stderr.read().decode()
-            assert not server_errors, server_errors
         finally:
-            for gate in gates:
-                gate["release"].set()
             catalog_server.shutdown()
             catalog_server.server_close()
             catalog_thread.join(timeout=5)
@@ -843,7 +634,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
             tailnet_server.shutdown()
             tailnet_server.server_close()
             tailnet_thread.join(timeout=5)
-        print("Native X11 reader, catalog, progress sync and fault checks, plus tailnet setup cancellation, identity preservation, reconnect and quit passed")
+        print("Native X11 reader, catalog, plus tailnet setup cancellation, identity preservation, reconnect and quit passed")
     finally:
         os.close(read_fd)
         if app is not None and app.poll() is None:

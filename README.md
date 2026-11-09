@@ -8,14 +8,15 @@ The reader keeps document parsing, typography, navigation, and reading state sep
 
 Typography separates text shaping from e-paper rasterization. Font selection, bidirectional text, and line breaking feed a renderer with adjustable hinting, stroke weight, and grayscale output.
 
-Catalog downloads and progress sync use shared LAN and tailnet transport interfaces. The tailnet client provides in-process TCP/UDP access through direct WireGuard or DERP, with bounded state and default-deny policy.
+Catalog downloads use shared LAN and tailnet transport interfaces. The tailnet client provides in-process TCP/UDP access through direct WireGuard or DERP, with bounded state and default-deny policy.
 
 ## Architecture
 
 | Component | Responsibility |
 | --- | --- |
 | `femto-reader` | Documents, typography, navigation, library, and persistent state |
-| `femto-catalog`, `femto-sync` | OPDS acquisition and reading-progress exchange |
+| `femto-catalog` | OPDS acquisition |
+| `femto-kosync` | KOReader progress sync |
 | `femto-microlink` | Reusable Rust Tailscale client |
 | `femto-remote` | Page-turner input and bindings |
 | `femto` | Host CLI and native simulator |
@@ -25,10 +26,11 @@ Existing Rust libraries supply parsing, shaping, rasterization, and protocol pri
 
 ## Status and documentation
 
-Femto is a prototype. Host tests, independent network fixtures, and firmware builds pass at documented checkpoints. Physical Picco operation remains unverified.
+Femto is a prototype. Host tests, independent network fixtures, and firmware builds pass at documented checkpoints. Physical Picco operation remains unverified. KOReader sync uses shared protocol and position adapters across the CLI, simulator and device.
 
 - [Build and run](docs/development.md)
 - [Typography](docs/typography.md) and [dependency decisions](docs/dependencies.md)
 - [Picco firmware](docs/picco-firmware.md) and [tailnet design](docs/tailscale-data-plane.md)
 - [Qualification and limitations](docs/qualification.md)
 - [Diagnostics](docs/diagnostics.md) and [software review](docs/review-2026-11-09.md)
+- [KOReader sync](docs/koreader-sync.md)

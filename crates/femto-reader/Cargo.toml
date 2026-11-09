@@ -10,6 +10,7 @@ femto-remote = { path = "../femto-remote" }
 quireink-stardict.workspace = true
 quireink-platform.workspace = true
 epub-stream.workspace = true
+quick-xml = { version = "=0.39.4", default-features = false }
 rustybuzz.workspace = true
 swash.workspace = true
 unicode-bidi.workspace = true

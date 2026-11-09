@@ -19,7 +19,7 @@ femto-reader = { path = "../../crates/femto-reader" }
 femto-remote = { path = "../../crates/femto-remote" }
 femto-picco-board = { path = "../../crates/femto-picco" }
 femto-catalog = { path = "../../crates/femto-catalog" }
-femto-sync = { path = "../../crates/femto-sync" }
+femto-kosync = { path = "../../crates/femto-kosync", features = ["reader"] }
 femto-microlink = { path = "../../crates/femto-microlink" }
 
 [patch.crates-io]

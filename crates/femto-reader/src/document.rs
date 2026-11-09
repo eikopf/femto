@@ -243,6 +243,27 @@ pub struct ImageBlock {
     pub height_hint: Option<u16>,
 }
 
+/// Source provenance retained only when a position adapter requests it.
+#[derive(Clone, Debug)]
+pub struct SourceRun {
+    pub start: Locator,
+    pub text: String,
+    pub source: epub_stream::render_prep::TextSource,
+    pub white_space: epub_stream::css::WhiteSpace,
+}
+
+pub(crate) struct SourceImage {
+    pub offset: usize,
+    pub location: Locator,
+}
+
+type ChapterMapping = (
+    Chapter,
+    Vec<SourceRun>,
+    Vec<epub_stream::render_prep::SourceElement>,
+    Vec<SourceImage>,
+);
+
 #[derive(Clone, Debug)]
 pub struct Chapter {
     pub language: String,
@@ -272,6 +293,7 @@ enum Source {
 
 pub struct Document {
     pub metadata: Metadata,
+    path: Option<std::path::PathBuf>,
     source: Source,
     supplemental: Vec<String>,
     progress_weights: Option<Vec<u64>>,
@@ -293,6 +315,7 @@ impl Document {
                 contents: vec![],
             },
             source: Source::MemoryText(text.into()),
+            path: None,
             supplemental: vec![],
             progress_weights: Some(vec![text.len().max(1) as u64]),
         })
@@ -312,6 +335,23 @@ impl Document {
         loop {
             if let Some(file) = hashing.step()? {
                 return Self::from_hashed_format(path, file, format);
+            }
+        }
+    }
+    /// Parse the same file handle used by a caller's document-identity calculation.
+    /// The callback runs between bounded hash reads and before archive parsing.
+    pub fn from_file(
+        path: &Path,
+        mut file: File,
+        mut check: impl FnMut() -> std::io::Result<()>,
+    ) -> Result<Self> {
+        file.seek(SeekFrom::Start(0))?;
+        let mut hashing = FileHash::new(file);
+        loop {
+            check()?;
+            if let Some(file) = hashing.step()? {
+                check()?;
+                return Self::from_hashed(path, file);
             }
         }
     }
@@ -414,6 +454,7 @@ impl Document {
                 Ok(Self {
                     metadata,
                     source: Source::Epub(Box::new(book)),
+                    path: Some(path.to_owned()),
                     supplemental: supplemental.into_values().collect(),
                     progress_weights,
                 })
@@ -436,6 +477,7 @@ impl Document {
                         contents: vec![],
                     },
                     source: Source::Text(file),
+                    path: Some(path.to_owned()),
                     supplemental: vec![],
                     progress_weights: Some(vec![1]),
                 })
@@ -446,6 +488,10 @@ impl Document {
 
     pub fn document_count(&self) -> usize {
         self.metadata.chapters.len() + self.supplemental.len()
+    }
+    /// A reopened source must be checked against metadata.id before use.
+    pub fn source_path(&self) -> Option<&Path> {
+        self.path.as_deref()
     }
 
     pub fn document_href(&self, index: usize) -> Option<&String> {
@@ -486,6 +532,24 @@ impl Document {
     }
 
     pub fn chapter(&mut self, index: usize) -> Result<Chapter> {
+        self.chapter_with_sources(index, false)
+            .map(|(chapter, _)| chapter)
+    }
+
+    /// Retain XML token provenance for one chapter without changing its layout text.
+    pub fn chapter_with_sources(
+        &mut self,
+        index: usize,
+        track_source: bool,
+    ) -> Result<(Chapter, Vec<SourceRun>)> {
+        self.chapter_with_mapping(index, track_source)
+            .map(|(chapter, sources, _, _)| (chapter, sources))
+    }
+
+    fn chapter_with_mapping(&mut self, index: usize, track_source: bool) -> Result<ChapterMapping> {
+        let mut images = Vec::new();
+        let mut elements = Vec::new();
+        let mut sources = Vec::new();
         let href = self
             .document_href(index)
             .ok_or_else(|| Error::Document("chapter out of range".into()))?
@@ -517,10 +581,12 @@ impl Document {
                     max_items: MAX_CHAPTER_ITEMS,
                     ..Default::default()
                 };
+                options.render.track_source = track_source;
                 options.render.memory.max_entry_bytes = MAX_CHAPTER_BYTES;
                 options.render.memory.max_css_bytes = 128 * 1024;
                 book.resource_events(&href, options, |event| {
                     match event {
+                        StyledEventOrRun::SourceElement(element) => elements.push(element),
                         StyledEventOrRun::NoteBodyStart => note_starts.push(None),
                         StyledEventOrRun::NoteBodyEnd => {
                             if let Some(Some(start)) = note_starts.pop() {
@@ -583,6 +649,14 @@ impl Document {
                                     });
                                 }
                             }
+                            if let Some(source) = run.source {
+                                sources.push(SourceRun {
+                                    start,
+                                    text: run.text.clone(),
+                                    source,
+                                    white_space: run.style.white_space,
+                                });
+                            }
                             paragraph.push(
                                 &run.text,
                                 TextStyle {
@@ -643,7 +717,7 @@ impl Document {
                         }
                         StyledEventOrRun::Event(event) => match event {
                             StyledEvent::ListStart(ordered) => {
-                                flush(&mut paragraph, &mut blocks);
+                                flush_with_sources(&mut paragraph, &mut blocks, &mut sources);
                                 if lists.len() >= 16 {
                                     return Err(epub_stream::error::EpubError::Parse(
                                         "list nesting limit exceeded".into(),
@@ -652,7 +726,7 @@ impl Document {
                                 lists.push((ordered, 0, 1, ListNumberStyle::Decimal));
                             }
                             StyledEvent::ListEnd => {
-                                flush(&mut paragraph, &mut blocks);
+                                flush_with_sources(&mut paragraph, &mut blocks, &mut sources);
                                 lists.pop();
                             }
                             StyledEvent::ListStartAt(number) => {
@@ -717,7 +791,7 @@ impl Document {
                                 }
                             }
                             StyledEvent::ListItemStart => {
-                                flush(&mut paragraph, &mut blocks);
+                                flush_with_sources(&mut paragraph, &mut blocks, &mut sources);
                                 if items.len() >= 16 {
                                     return Err(epub_stream::error::EpubError::Parse(
                                         "list item nesting limit exceeded".into(),
@@ -744,16 +818,16 @@ impl Document {
                                 ));
                             }
                             StyledEvent::ListItemEnd => {
-                                flush(&mut paragraph, &mut blocks);
+                                flush_with_sources(&mut paragraph, &mut blocks, &mut sources);
                                 items.pop();
                             }
                             StyledEvent::LineBreak => {
                                 paragraph.push("\n", TextStyle::default(), None)
                             }
-                            _ => flush(&mut paragraph, &mut blocks),
+                            _ => flush_with_sources(&mut paragraph, &mut blocks, &mut sources),
                         },
                         StyledEventOrRun::Image(image) => {
-                            flush(&mut paragraph, &mut blocks);
+                            flush_with_sources(&mut paragraph, &mut blocks, &mut sources);
                             let start = Locator {
                                 chapter: index,
                                 block: blocks.len(),
@@ -774,6 +848,16 @@ impl Document {
                                     label: image.alt.clone(),
                                 });
                             }
+                            if let Some(offset) = image.source_offset {
+                                images.push(SourceImage {
+                                    offset,
+                                    location: Locator {
+                                        chapter: index,
+                                        block: blocks.len(),
+                                        byte: 0,
+                                    },
+                                });
+                            }
                             blocks.push(Block::Image(ImageBlock {
                                 source: image.src,
                                 alt: image.alt,
@@ -792,7 +876,7 @@ impl Document {
                     Ok(())
                 })
                 .map_err(|e| Error::Document(e.to_string()))?;
-                flush(&mut paragraph, &mut blocks);
+                flush_with_sources(&mut paragraph, &mut blocks, &mut sources);
                 for id in pending.drain(..) {
                     anchors.entry(id).or_insert(Locator {
                         chapter: index,
@@ -841,16 +925,120 @@ impl Document {
                 }
             }
         }
-        Ok(Chapter {
-            language: self.metadata.language.clone(),
-            index,
-            href,
-            blocks,
-            warnings,
-            anchors,
-            notes,
-            links,
-        })
+        Ok((
+            Chapter {
+                language: self.metadata.language.clone(),
+                index,
+                href,
+                blocks,
+                warnings,
+                anchors,
+                notes,
+                links,
+            },
+            sources,
+            elements,
+            images,
+        ))
+    }
+
+    /// Convert an EPUB source location to a normalized KOReader XPointer.
+    pub fn koreader_position(&mut self, location: Locator) -> Result<String> {
+        let (chapter, sources, elements, images) =
+            self.chapter_with_mapping(location.chapter, true)?;
+        let xml = self.koreader_xhtml(location.chapter, &chapter.href)?;
+        if let Some(image) = images.iter().find(|image| image.location == location) {
+            return crate::koreader::encode_image(
+                &xml,
+                location.chapter,
+                &sources,
+                &elements,
+                image.offset,
+            )
+            .map(|pointer| pointer.to_string());
+        }
+        crate::koreader::encode(&xml, location.chapter, &sources, &elements, location)
+            .map(|pointer| pointer.to_string())
+    }
+
+    /// Estimate a source location's fraction of the book for KOReader's display
+    /// metadata. The XPointer remains the authoritative reading position.
+    pub fn source_progress(&mut self, location: Locator) -> Result<f64> {
+        let chapter = self.chapter(location.chapter)?;
+        let length = |block: &Block| match block {
+            Block::Text(paragraph) => paragraph.text.len().max(1),
+            Block::Image(_) => 1,
+        };
+        let block = chapter
+            .blocks
+            .get(location.block)
+            .ok_or_else(|| Error::Document("invalid source progress block".into()))?;
+        let byte = match block {
+            Block::Text(paragraph) if paragraph.text.is_char_boundary(location.byte) => {
+                location.byte
+            }
+            Block::Image(_) if location.byte == 0 => 0,
+            _ => return Err(Error::Document("invalid source progress offset".into())),
+        };
+        let total: usize = chapter.blocks.iter().map(length).sum();
+        let before: usize = chapter.blocks[..location.block].iter().map(length).sum();
+        let fraction = (before + byte) as f64 / total.max(1) as f64;
+        let weights = self
+            .progress_weights
+            .as_ref()
+            .ok_or(Error::Limit("book progress weights"))?;
+        let weight = *weights
+            .get(location.chapter)
+            .ok_or(Error::Limit("book progress chapter"))?;
+        let total = weights
+            .iter()
+            .try_fold(0u64, |sum, weight| sum.checked_add(*weight))
+            .ok_or(Error::Limit("book progress weights"))?;
+        let before = weights[..location.chapter]
+            .iter()
+            .try_fold(0u64, |sum, weight| sum.checked_add(*weight))
+            .ok_or(Error::Limit("book progress weights"))?;
+        Ok(((before as f64 + weight as f64 * fraction) / total.max(1) as f64).clamp(0.0, 1.0))
+    }
+
+    /// Resolve a KOReader EPUB XPointer without changing persistent reading state.
+    pub fn resolve_koreader_position(&mut self, position: &str) -> Result<Locator> {
+        let pointer = crate::koreader::XPointer::parse(position)?;
+        let (chapter, sources, elements, images) =
+            self.chapter_with_mapping(pointer.chapter(), true)?;
+        let xml = self.koreader_xhtml(pointer.chapter(), &chapter.href)?;
+        if pointer.is_image() {
+            let offset = crate::koreader::decode_image(
+                &xml,
+                pointer.chapter(),
+                &sources,
+                &elements,
+                &pointer,
+            )?;
+            return images
+                .into_iter()
+                .find(|image| image.offset == offset)
+                .map(|image| image.location)
+                .ok_or_else(|| Error::Document("KOReader image has no rendered source".into()));
+        }
+        crate::koreader::decode(&xml, pointer.chapter(), &sources, &elements, &pointer)
+    }
+
+    fn koreader_xhtml(&mut self, index: usize, href: &str) -> Result<String> {
+        if index >= self.metadata.chapters.len() {
+            return Err(Error::Document(
+                "KOReader sync requires a spine chapter".into(),
+            ));
+        }
+        let Source::Epub(book) = &mut self.source else {
+            return Err(Error::Document(
+                "KOReader positions currently require EPUB".into(),
+            ));
+        };
+        let mut bytes = Vec::new();
+        book.read_resource_into_with_hard_cap(href, &mut bytes, MAX_CHAPTER_BYTES)
+            .map_err(|error| Error::Document(error.to_string()))?;
+        String::from_utf8(bytes).map_err(|_| Error::Document("KOReader XHTML must be UTF-8".into()))
     }
 
     pub fn resolve_link(&mut self, base: &str, reference: &str) -> Result<Locator> {
@@ -954,6 +1142,22 @@ fn text_blocks(text: &str, blocks: &mut Vec<Block>) {
             blocks.push(Block::Text(p));
         }
     }
+}
+
+fn flush_with_sources(
+    paragraph: &mut Paragraph,
+    blocks: &mut Vec<Block>,
+    sources: &mut Vec<SourceRun>,
+) {
+    if paragraph.text.trim().is_empty() {
+        while sources
+            .last()
+            .is_some_and(|run| run.start.block >= blocks.len())
+        {
+            sources.pop();
+        }
+    }
+    flush(paragraph, blocks);
 }
 
 fn flush(paragraph: &mut Paragraph, blocks: &mut Vec<Block>) {

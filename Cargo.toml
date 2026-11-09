@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/femto-catalog", "crates/femto-reader", "crates/femto", "crates/femto-microlink", "crates/femto-picco", "crates/femto-sync", "crates/femto-remote"]
+members = ["crates/femto-kosync", "crates/femto-catalog", "crates/femto-reader", "crates/femto", "crates/femto-microlink", "crates/femto-picco", "crates/femto-remote"]
 resolver = "2"
 exclude = ["vendor/epub-stream", "vendor/swash", "vendor/miniz_oxide", "vendor/quireink-stardict", "vendor/hidreport"]
 

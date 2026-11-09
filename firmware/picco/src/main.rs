@@ -19,7 +19,6 @@ mod light_command;
 pub mod network;
 mod panel;
 mod power;
-mod progress_sync;
 pub mod relay;
 pub mod relay_transport;
 mod storage;
@@ -127,19 +126,19 @@ fn run() -> Result<(), String> {
         }
     };
     ui.set_catalog_available(catalog.is_some());
-    ui.set_tailnet_available(true);
-    ui.set_rotation_available(true);
-    let sync_service = match progress_sync::Service::load(std::path::Path::new("/sdcard/femto")) {
-        Ok(service) => service,
+    let mut kosync = match femto_kosync::config::Settings::load(std::path::Path::new(
+        "/sdcard/femto/kosync.json",
+    )) {
+        Ok(settings) => Some(femto_kosync::session::Session::new(settings)),
+        Err(femto_kosync::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => {
-            log::warn!("Progress sync unavailable: {error}");
+            log::warn!("KOReader configuration unavailable: {error}");
             None
         }
     };
-    ui.set_sync_available(sync_service.is_some());
-    ui.set_sync_status("Ready");
-    let mut sync_conflict: Option<femto_sync::reader::Conflict> = None;
-    let mut sync_reset: Option<femto_sync::reader::Reset> = None;
+    ui.set_kosync_available(kosync.is_some());
+    ui.set_tailnet_available(true);
+    ui.set_rotation_available(true);
     ui.set_device_status(&format!(
         "{} | {}",
         battery_label(screen.battery()),
@@ -211,127 +210,6 @@ fn run() -> Result<(), String> {
                 }
                 effect = Effect::Redraw;
             }
-            if let Some(event) = ui.take_sync_event() {
-                use femto_reader::ui::SyncEvent;
-                match event {
-                    SyncEvent::Open => {
-                        sync_reset = None;
-                        if sync_conflict
-                            .as_ref()
-                            .is_some_and(|c| c.local().book_id != reader.document.metadata.id)
-                        {
-                            sync_conflict = None;
-                            ui.set_sync_conflict(None, None);
-                            ui.set_sync_status("Ready");
-                        }
-                        ui.open_sync();
-                    }
-                    SyncEvent::Cancel => {
-                        screen.progress.cancel();
-                        ui.set_sync_status(if screen.progress.is_busy() {
-                            "Cancelling sync"
-                        } else {
-                            "No sync running"
-                        });
-                    }
-                    SyncEvent::Reset => {
-                        sync_reset = None;
-                        if screen.progress.is_busy() {
-                            ui.show_error("Cancel sync and wait before resetting".into());
-                        } else if journal.is_none() {
-                            ui.show_error("Reset requires writable state".into());
-                        } else {
-                            sync_reset = femto_sync::reader::Reset::prepare(&reader);
-                            if sync_reset.is_some() {
-                                ui.open_sync_reset();
-                            } else {
-                                ui.set_sync_status("No saved sync history");
-                            }
-                        }
-                    }
-                    SyncEvent::CancelReset => {
-                        sync_reset = None;
-                        ui.open_sync();
-                    }
-                    SyncEvent::ConfirmReset => {
-                        let result = sync_reset
-                            .take()
-                            .ok_or_else(|| "Reset prompt expired".to_string())
-                            .and_then(|reset| {
-                                progress_sync::reset(
-                                    reset,
-                                    &screen.progress,
-                                    &mut reader,
-                                    &mut journal,
-                                )
-                            });
-                        ui.open_sync();
-                        ui.set_sleep_available(journal.is_some());
-                        match result {
-                            Ok(()) => {
-                                sync_conflict = None;
-                                ui.set_sync_conflict(None, None);
-                                ui.set_sync_status("Sync history forgotten");
-                            }
-                            Err(error) => ui.show_error(error),
-                        }
-                    }
-                    SyncEvent::Start | SyncEvent::UseLocal | SyncEvent::UseRemote => {
-                        let result = (|| -> Result<(), String> {
-                            if journal.is_none() {
-                                return Err("Sync requires writable state".into());
-                            }
-                            let service = sync_service.as_ref().ok_or("Sync is not configured")?;
-                            let path = ui
-                                .book_path(&reader.document.metadata.id)
-                                .ok_or("Book missing from library; rescan")?;
-                            if screen.progress.is_busy() {
-                                return Err("Sync already running".into());
-                            }
-                            let resolution = match event {
-                                SyncEvent::UseLocal | SyncEvent::UseRemote => Some((
-                                    sync_conflict.take().ok_or("Conflict expired; sync again")?,
-                                    if event == SyncEvent::UseLocal {
-                                        femto_sync::Choice::Local
-                                    } else {
-                                        femto_sync::Choice::Remote
-                                    },
-                                )),
-                                _ => {
-                                    sync_conflict = None;
-                                    None
-                                }
-                            };
-                            ui.set_sync_conflict(None, None);
-                            let tailnet = service.tailnet;
-                            let driver = screen.tailnet.driver().map(|driver| driver.downgrade());
-                            service
-                                .start(
-                                    &mut reader,
-                                    path,
-                                    &mut screen.progress,
-                                    resolution,
-                                    move || {
-                                        if tailnet {
-                                            Ok(Box::new(tailnet_http::Transport(
-                                                driver.and_then(|d| d.upgrade()),
-                                            )))
-                                        } else {
-                                            Ok(Box::new(network::Transport))
-                                        }
-                                    },
-                                )
-                                .map_err(|e| e.to_string())?;
-                            Ok(())
-                        })();
-                        match result {
-                            Ok(()) => ui.set_sync_status("Synchronizing progress"),
-                            Err(error) => ui.show_error(error),
-                        }
-                    }
-                }
-                effect = Effect::Redraw;
-            }
             if let Some(event) = ui.take_catalog_event() {
                 if let Some(catalog) = &mut catalog {
                     let driver = screen.tailnet.driver().map(|driver| driver.downgrade());
@@ -350,6 +228,24 @@ fn run() -> Result<(), String> {
                     }
                     effect = Effect::Redraw;
                 }
+            }
+            if let (Some(event), Some(sync)) = (ui.take_kosync_event(), kosync.as_mut()) {
+                let driver = screen.tailnet.driver().map(|driver| driver.downgrade());
+                let transport = std::sync::Arc::new(move |origins: &[String]| {
+                    let refs: Vec<_> = origins.iter().map(String::as_str).collect();
+                    Ok(Box::new(femto_catalog::routing::Routed::new(
+                        network::Transport,
+                        tailnet_http::Transport(
+                            driver.as_ref().and_then(|driver| driver.upgrade()),
+                        ),
+                        &refs,
+                    )?)
+                        as Box<dyn femto_catalog::http::Transport>)
+                });
+                if let Err(error) = sync.event(event, &reader, &mut ui, transport) {
+                    ui.show_error(error);
+                }
+                effect = Effect::Redraw;
             }
             if effect == Effect::Redraw {
                 if ui.take_light_request() {
@@ -395,15 +291,24 @@ fn run() -> Result<(), String> {
             render(&mut reader, &ui, &mut plane)?;
             screen.present(&plane)?;
         }
-        if progress_sync::poll(
-            &mut screen.progress,
-            &mut reader,
-            &mut journal,
-            &mut ui,
-            &mut sync_conflict,
-        ) {
-            render(&mut reader, &ui, &mut plane)?;
-            screen.present(&plane)?;
+        if let Some(sync) = &mut kosync {
+            let access = reader
+                .state
+                .books
+                .values()
+                .map(|book| book.last_opened)
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1);
+            if sync.poll(&mut reader, &mut ui, access, |state| {
+                journal
+                    .as_mut()
+                    .ok_or_else(|| std::io::Error::other("state journal unavailable"))?
+                    .save(state)
+            }) {
+                render(&mut reader, &ui, &mut plane)?;
+                screen.present(&plane)?;
+            }
         }
         if ui.poll_scan() == Effect::Redraw {
             render(&mut reader, &ui, &mut plane)?;
@@ -412,7 +317,6 @@ fn run() -> Result<(), String> {
         let navigated = ui.poll_navigation(&mut reader) == Effect::Redraw;
         if ui.poll_open(&mut reader) == Effect::Redraw || navigated {
             if !ui.is_open() {
-                sync_conflict = None;
                 let access = reader
                     .state
                     .books
@@ -480,12 +384,18 @@ fn run() -> Result<(), String> {
                 || ui.is_preview_opening()
                 || ui.is_dictionary_opening()
                 || screen.catalog.is_busy()
-                || screen.progress.is_busy(),
+                || kosync.as_ref().is_some_and(|sync| sync.is_busy()),
         );
         if manual_sleep || automatic_sleep {
             idle.suppress_until_activity();
             let prepared = (|| -> Result<(), String> {
                 power::wait_for_release()?;
+                if kosync
+                    .as_mut()
+                    .is_some_and(|sync| !sync.cancel_and_wait(Duration::from_secs(5)))
+                {
+                    return Err("KOReader request is still stopping".into());
+                }
                 let store = journal
                     .as_mut()
                     .ok_or_else(|| "Sleep requires a writable state journal".to_string())?;

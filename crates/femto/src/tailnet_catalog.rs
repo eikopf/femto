@@ -35,15 +35,14 @@ pub(super) struct Request {
     pub deadline: Instant,
 }
 pub(super) enum Work {
+    Kosync {
+        request: Box<crate::kosync::Prepared>,
+        started: Instant,
+    },
     Catalog(Request),
     Browse {
         request: Request,
         download_dir: Option<PathBuf>,
-    },
-    Progress {
-        prepared: Box<crate::progress_sync::Prepared>,
-        started: Instant,
-        deadline: Instant,
     },
 }
 pub(super) fn run(
@@ -57,7 +56,7 @@ pub(super) fn run(
 ) -> Result<()> {
     let started = match &work {
         Work::Catalog(request) | Work::Browse { request, .. } => request.started,
-        Work::Progress { started, .. } => *started,
+        Work::Kosync { started, .. } => *started,
     };
     let mut runtime = Shared::new(Runtime::with_transport(
         owner,
@@ -71,6 +70,10 @@ pub(super) fn run(
     let mut interrupts = crate::catalog::Interrupts::new()?;
     let operation = interrupts.begin();
     match work {
+        Work::Kosync { mut request, .. } => {
+            let result = request.exchange(&mut transport, operation.flag())?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
         Work::Browse {
             request,
             download_dir,
@@ -97,9 +100,6 @@ pub(super) fn run(
             let result = receive(&mut transport, request, operation.flag())?;
             println!("{}", result);
         }
-        Work::Progress {
-            prepared, deadline, ..
-        } => prepared.execute(&mut transport, deadline, operation.flag())?,
     }
     Ok(())
 }

@@ -1,0 +1,584 @@
+{
+  "engine_revision": "fb4d562a2765c52bff052759112a94a0b05239db",
+  "books": [
+    {
+      "file": "sample.epub",
+      "sha256": "14a86e9399bf469e5ca607e148e19b461a76338cf608e347b5e21d9e31af0a30",
+      "nodes": [
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/h1[1]/text()[1].0",
+          "text": "Femto reading sample"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0",
+          "text": "This is an original test book with "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/strong[1]/text()[1].0",
+          "text": "bold text"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[2].0",
+          "text": ", "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/em[1]/text()[1].0",
+          "text": "italic text"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[3].0",
+          "text": ", and ordinary punctuation."
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[2]/text()[1].0",
+          "text": "Mixed directions: English שלום עולם English. Combining marks: café, naïve. Ligatures: office, affinity."
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[3]/text()[1].0",
+          "text": "Long tokens: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789."
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[4]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[5]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[6]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[7]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[8]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[9]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[10]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[11]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[12]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[13]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[14]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[15]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[16]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[17]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/h1[1]/text()[1].0",
+          "text": "Another chapter"
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[1]/text()[1].0",
+          "text": "Chapter navigation resumes at a stable source location."
+        }
+      ],
+      "non_body_nodes": []
+    },
+    {
+      "file": "whitespace.epub",
+      "sha256": "573bf7ceae9521fb54b11a6b7be23cb7d63f7da846a4ca019a53a79618715b20",
+      "nodes": [
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0",
+          "text": "A "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/b[1]/text()[1].0",
+          "text": " bold "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[2].0",
+          "text": " "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/i[1]/text()[1].0",
+          "text": " word"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[3].0",
+          "text": "  "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[4].0",
+          "text": " tail"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[2]/code[1]/text()[1].0",
+          "text": "a b c"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/pre[1]/text()[1].0",
+          "text": "  first\n\n    second "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/pre[1]/b[1]/text()[1].0",
+          "text": "  bold"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[3]/text()[1].0",
+          "text": "first\n  second "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[3]/span[1]/text()[1].0",
+          "text": "  word"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[3]/text()[2].0",
+          "text": "\nthird"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[4]/text()[1].0",
+          "text": "a  "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[4]/span[1]/text()[1].0",
+          "text": " b"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[4]/text()[2].0",
+          "text": "\nc"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/pre[2]/text()[1].0",
+          "text": "a b c"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[5]/text()[1].0",
+          "text": "A "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[5]/a[1]/text()[1].0",
+          "text": " link"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[5]/text()[2].0",
+          "text": " tail"
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/h1[1]/text()[1].0",
+          "text": "Another chapter"
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[1]/text()[1].0",
+          "text": "Chapter navigation resumes at a stable source location."
+        }
+      ],
+      "non_body_nodes": []
+    },
+    {
+      "file": "navigation.epub",
+      "sha256": "c8045cb18458f3de10f222736963e05ca5ee8dc5b98c2d07e1b308108f36d1bb",
+      "nodes": [
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/h1[1]/text()[1].0",
+          "text": "Links and footnotes"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0",
+          "text": "Read "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/a[1]/text()[1].0",
+          "text": "the "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/a[1]/strong[1]/text()[1].0",
+          "text": "first"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/a[1]/text()[2].0",
+          "text": " footnote"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[2].0",
+          "text": ". "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/a[2]/text()[1].0",
+          "text": "External"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[3].0",
+          "text": ". "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/a[3]/text()[1].0",
+          "text": "Missing"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[4].0",
+          "text": "."
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[2]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[3]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[4]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[5]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[6]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[7]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[8]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[9]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/h1[1]/text()[1].0",
+          "text": "Notes chapter"
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[1]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[2]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[3]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[4]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[5]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[6]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[7]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[8]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[9]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[10]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[11]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[12]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[13]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[14]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[15]/text()[1].0",
+          "text": "The footnote target occurs after several pages. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[15]/a[1]/text()[1].0",
+          "text": "Return to reference"
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[15]/text()[2].0",
+          "text": "."
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[16]/text()[1].0",
+          "text": "Before "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[16]/span[1]/text()[1].0",
+          "text": "the inline target"
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[16]/text()[2].0",
+          "text": " after."
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[17]/text()[1].0",
+          "text": "Escaped attribute target."
+        }
+      ],
+      "non_body_nodes": []
+    },
+    {
+      "file": "lists.epub",
+      "sha256": "b2c3d0e0edf9b7efb1ab4235182c515453607c6148e5d2922f8fb70cd44fe007",
+      "nodes": [
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/ol[1]/li[1]/text()[1].0",
+          "text": "First "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/ol[1]/li[1]/a[1]/text()[1].0",
+          "text": "linked item"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/ol[1]/li[1]/text()[2].0",
+          "text": "."
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/ol[1]/li[1]/p[1]/text()[1].0",
+          "text": "Continuation paragraph."
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/ol[1]/li[1]/ul[1]/li[1]/text()[1].0",
+          "text": "Nested bullet."
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/ol[1]/li[1]/text()[3].0",
+          "text": "Parent tail."
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/ol[1]/li[2]/text()[1].0",
+          "text": "Second numbered item."
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/ul[1]/li[1]/text()[1].0",
+          "text": "שלום עולם שלום עולם"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/ol[2]/li[1]/text()[1].0",
+          "text": "A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. A quiet page keeps its place when the font changes. Words flow across lines without losing their source positions. "
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/h1[1]/text()[1].0",
+          "text": "Another chapter"
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[1]/text()[1].0",
+          "text": "Chapter navigation resumes at a stable source location."
+        }
+      ],
+      "non_body_nodes": []
+    },
+    {
+      "file": "tab-size.epub",
+      "sha256": "c0918d030a5366760b977fe95e196a8aaa4b63f456845678f695ceba5b2b7d4c",
+      "nodes": [
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0",
+          "text": "A       B"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[2]/text()[1].0",
+          "text": "A       B"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[3]/text()[1].0",
+          "text": "A       B"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[4]/text()[1].0",
+          "text": "A       B"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[5]/text()[1].0",
+          "text": "A       B"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[6]/text()[1].0",
+          "text": "A       B"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[7]/text()[1].0",
+          "text": "A       B"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[8]/text()[1].0",
+          "text": "A       B"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[9]/text()[1].0",
+          "text": "A"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[9]/span[1]/text()[1].0",
+          "text": "        B"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[9]/span[2]/text()[1].0",
+          "text": "        C"
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/h1[1]/text()[1].0",
+          "text": "Another chapter"
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[1]/text()[1].0",
+          "text": "Chapter navigation resumes at a stable source location."
+        }
+      ],
+      "non_body_nodes": []
+    },
+    {
+      "file": "kosync-css.epub",
+      "sha256": "43ca7a77d1d791ee806239cc39f334b056b676be68bebed4f7d4fdcd8b6f9160",
+      "nodes": [
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/h1[1]/text()[1].0",
+          "text": "CSS positions"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/span[1]/b[1]/text()[1].0",
+          "text": "Bold"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/span[1]/text()[1].0",
+          "text": " tail block"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[1]/text()[1].0",
+          "text": " "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[1]/b[1]/text()[1].0",
+          "text": "Bold"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[1]/text()[2].0",
+          "text": " tail inline"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[2]/span[1]/b[1]/text()[1].0",
+          "text": "Bold"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[2]/span[1]/text()[1].0",
+          "text": " tail inline style"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[2]/text()[1].0",
+          "text": " "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[2]/b[1]/text()[1].0",
+          "text": "Bold"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[2]/text()[2].0",
+          "text": " tail override"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/text()[1].0",
+          "text": " "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[3]/span[1]/text()[1].0",
+          "text": " "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[3]/span[1]/b[1]/text()[1].0",
+          "text": "Bold"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[3]/span[1]/text()[2].0",
+          "text": " tail inherited inline"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[4]/span[1]/b[1]/text()[1].0",
+          "text": "Bold"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[4]/span[1]/text()[1].0",
+          "text": " tail inherited block"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[5]/text()[1].0",
+          "text": "\n "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[5]/b[1]/text()[1].0",
+          "text": "Bold"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/div[5]/text()[2].0",
+          "text": " tail preserved"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/pre[1]/b[1]/text()[1].0",
+          "text": "Bold"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/pre[1]/text()[1].0",
+          "text": " tail normal"
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/h1[1]/text()[1].0",
+          "text": "Another chapter"
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[1]/text()[1].0",
+          "text": "Chapter navigation resumes at a stable source location."
+        }
+      ],
+      "non_body_nodes": [
+        {
+          "path": "/body[1]/DocFragment[1]/stylesheet[1]/text()[1].0",
+          "text": " .block { display: block; } .inline { display: inline; } .inherit { display: inherit; } .preserve { white-space: pre; } "
+        }
+      ]
+    }
+  ]
+}

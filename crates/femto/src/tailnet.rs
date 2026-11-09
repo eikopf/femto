@@ -113,24 +113,15 @@ pub struct ConnectArgs {
     /// Existing directory for downloads selected within the tailnet browser.
     #[arg(long, requires = "opds_browse")]
     opds_download_dir: Option<PathBuf>,
-    /// Synchronize one book's progress through the enrolled tailnet, then disconnect.
-    #[arg(long, requires_all = ["udp_bind", "progress_book", "progress_state", "progress_checkpoint"], conflicts_with_all = ["opds_url", "udp_probe_peer", "udp_echo_port"], value_parser = catalog_runtime::target)]
-    progress_url: Option<String>,
-    /// Local EPUB or TXT book whose reading position is synchronized.
-    #[arg(long, requires = "progress_url")]
-    progress_book: Option<PathBuf>,
-    /// Reader state file, exclusively locked during enrollment and synchronization.
-    #[arg(long, requires = "progress_url")]
-    progress_state: Option<PathBuf>,
-    /// Per-book synchronization checkpoint, distinct from the reader state.
-    #[arg(long, requires = "progress_url")]
-    progress_checkpoint: Option<PathBuf>,
-    /// Private JSON Basic credential file scoped to the progress origin.
-    #[arg(long, requires = "progress_url")]
-    progress_credentials: Option<PathBuf>,
-    /// Permit progress Basic credentials over HTTP inside the encrypted tailnet.
-    #[arg(long, requires = "progress_credentials")]
-    progress_allow_http_auth: bool,
+    /// Run a KOReader operation through this enrolled tailnet.
+    #[arg(long, requires_all = ["udp_bind", "kosync_action"], conflicts_with_all = ["opds_url", "udp_probe_peer", "udp_echo_port"])]
+    kosync_config: Option<PathBuf>,
+    #[arg(long, requires = "kosync_config", value_enum)]
+    kosync_action: Option<crate::kosync::Operation>,
+    #[arg(long, requires_all = ["kosync_config", "kosync_state"])]
+    kosync_book: Option<PathBuf>,
+    #[arg(long, requires_all = ["kosync_config", "kosync_book"])]
+    kosync_state: Option<PathBuf>,
 }
 
 fn clock(started: Instant) -> Clock {
@@ -233,28 +224,26 @@ pub fn connect(args: ConnectArgs) -> Result<()> {
             })
         })
         .transpose()?;
-    let progress = if let Some(source) = &args.progress_url {
-        let auth = args
-            .progress_credentials
-            .as_deref()
-            .map(|path| crate::catalog::credentials(path, source, args.progress_allow_http_auth))
-            .transpose()?;
-        Some(crate::progress_sync::Prepared::new(
-            args.progress_book
-                .as_deref()
-                .context("progress book is required")?,
-            source,
-            args.progress_state
-                .as_deref()
-                .context("progress state is required")?,
-            args.progress_checkpoint
-                .as_deref()
-                .context("progress checkpoint is required")?,
-            auth,
-        )?)
-    } else {
-        None
-    };
+    let kosync_request = args
+        .kosync_config
+        .as_deref()
+        .map(|path| {
+            let settings = crate::kosync::settings(path)?;
+            anyhow::ensure!(
+                settings.route == femto_kosync::config::Route::Tailnet,
+                "KOReader configuration must select the tailnet route"
+            );
+            catalog_runtime::target(settings.client.server()).map_err(anyhow::Error::msg)?;
+            crate::kosync::Prepared::new(
+                settings,
+                args.kosync_action.context("KOReader action required")?,
+                args.kosync_book.as_deref(),
+                args.kosync_state.as_deref(),
+                Instant::now() + Duration::from_secs(u64::from(args.run_seconds)),
+                &AtomicBool::new(false),
+            )
+        })
+        .transpose()?;
     let mut store = HostStore::open(&args.directory)?;
     let host_info = HostInfo {
         ipn_version: format!("femto/{}", env!("CARGO_PKG_VERSION")),
@@ -346,6 +335,21 @@ pub fn connect(args: ConnectArgs) -> Result<()> {
             _ => None,
         };
         let mut owner = ControlledNetwork::start(control.into_inner(), map, network)?;
+        if let Some(request) = kosync_request {
+            return catalog_runtime::run(
+                owner,
+                udp,
+                reconnect,
+                identity.node_key().clone(),
+                catalog_runtime::Work::Kosync {
+                    request: Box::new(request),
+                    started,
+                },
+                transport_config,
+                service_tls,
+            );
+        }
+
         if let Some(source) = args.opds_url {
             let request = catalog_runtime::Request {
                 source,
@@ -368,21 +372,6 @@ pub fn connect(args: ConnectArgs) -> Result<()> {
                 reconnect,
                 identity.node_key().clone(),
                 work,
-                transport_config,
-                service_tls,
-            );
-        }
-        if let Some(prepared) = progress {
-            return catalog_runtime::run(
-                owner,
-                udp,
-                reconnect,
-                identity.node_key().clone(),
-                catalog_runtime::Work::Progress {
-                    prepared: Box::new(prepared),
-                    started,
-                    deadline: started + Duration::from_secs(u64::from(args.run_seconds)),
-                },
                 transport_config,
                 service_tls,
             );
@@ -865,55 +854,5 @@ mod tests {
         .unwrap();
         assert!(connect(command.connect).is_err());
         assert!(!identity.exists());
-    }
-    #[test]
-    fn progress_arguments_validate_files_before_enrollment() {
-        use clap::Parser;
-        #[derive(Parser)]
-        struct Command {
-            #[command(flatten)]
-            connect: ConnectArgs,
-        }
-        let dir = tempfile::tempdir().unwrap();
-        let identity = dir.path().join("identity");
-        let state = dir.path().join("reader.json");
-        let checkpoint = dir.path().join("checkpoint.json");
-        let missing_book = dir.path().join("missing.epub");
-        let base = [
-            "tailnet",
-            identity.to_str().unwrap(),
-            "--endpoint",
-            "192.0.2.1:443",
-            "--udp-bind",
-            "0.0.0.0:0",
-        ];
-        let parse =
-            |extra: &[&str]| Command::try_parse_from(base.into_iter().chain(extra.iter().copied()));
-        assert!(parse(&["--progress-url", "https://peer.example/progress/book"]).is_err());
-        assert!(parse(&["--progress-book", "book.epub"]).is_err());
-        let options = [
-            "--progress-url",
-            "https://peer.example/progress/book",
-            "--progress-book",
-            missing_book.to_str().unwrap(),
-            "--progress-state",
-            state.to_str().unwrap(),
-            "--progress-checkpoint",
-            checkpoint.to_str().unwrap(),
-        ];
-        let command = parse(&options).unwrap();
-        assert!(connect(command.connect).is_err());
-        assert!(!identity.exists());
-        assert!(!state.exists());
-        assert!(!checkpoint.exists());
-        for conflicts in [
-            ["--opds-url", "https://peer.example/feed"],
-            ["--udp-probe-peer", "peer.example"],
-            ["--udp-echo-port", "9000"],
-        ] {
-            let mut args = options.to_vec();
-            args.extend(conflicts);
-            assert!(parse(&args).is_err());
-        }
     }
 }

@@ -106,6 +106,8 @@ pub struct StyleConfig {
 /// Render-prep orchestration options.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RenderPrepOptions {
+    /// Retain source token ranges and decoded character offsets for position adapters.
+    pub track_source: bool,
     /// Stylesheet parsing and resolution options.
     pub style: StyleConfig,
     /// Font registration limits.
@@ -446,6 +448,8 @@ pub struct ComputedTextStyle {
 /// Styled text run.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StyledRun {
+    /// Absent for generated text and when source tracking is disabled.
+    pub source: Option<TextSource>,
     /// Inherited language; an empty value explicitly clears the language.
     pub language: Option<String>,
     /// Run text payload.
@@ -458,9 +462,21 @@ pub struct StyledRun {
     pub resolved_family: String,
 }
 
+/// Provenance of a run in the original XHTML resource.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextSource {
+    /// Raw XML token byte range, including entity or CDATA delimiters.
+    pub token: core::ops::Range<usize>,
+    /// Decoded token character index for each output character, plus an end boundary.
+    /// Offsets count Unicode scalar values, not UTF-8 bytes or UTF-16 code units.
+    pub characters: Vec<usize>,
+}
+
 /// Styled inline image payload.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StyledImage {
+    /// Opening tag byte offset, present only during source tracking.
+    pub source_offset: Option<usize>,
     /// Cascaded, non-inherited author dimensions.
     pub width: Option<crate::css::ImageLimit>,
     /// Cascaded, non-inherited author dimensions.
@@ -539,6 +555,8 @@ pub enum StyledEvent {
 /// Stream item for styled output.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StyledEventOrRun {
+    /// Element style metadata emitted only during source tracking.
+    SourceElement(SourceElement),
     /// Start of an explicitly marked footnote or endnote body.
     NoteBodyStart,
     /// End of an explicitly marked note body.
@@ -557,6 +575,17 @@ pub enum StyledEventOrRun {
     Run(StyledRun),
     /// Styled inline image.
     Image(StyledImage),
+}
+
+/// Element start offset and styles that affect DOM text-node construction.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SourceElement {
+    /// Byte offset of the opening tag in the XHTML resource.
+    pub offset: usize,
+    /// Cascaded whitespace mode, including inheritance.
+    pub white_space: crate::css::WhiteSpace,
+    /// Author display override; absent values use the element's default.
+    pub display: Option<crate::css::Display>,
 }
 
 /// Styled chapter output.
@@ -588,6 +617,7 @@ impl StyledChapter {
 /// Lightweight style system with CSS cascade resolution.
 #[derive(Clone, Debug)]
 pub struct Styler {
+    track_source: bool,
     config: StyleConfig,
     memory: MemoryBudget,
     parsed: Vec<Stylesheet>,
@@ -600,11 +630,18 @@ impl Styler {
     pub fn new(config: StyleConfig) -> Self {
         Self {
             config,
+            track_source: false,
             memory: MemoryBudget::default(),
             parsed: Vec::with_capacity(0),
             css_bytes: 0,
             rule_count: 0,
         }
+    }
+
+    /// Enable source provenance without changing text or style output.
+    pub fn with_source_tracking(mut self, enabled: bool) -> Self {
+        self.track_source = enabled;
+        self
     }
 
     /// Override hard memory budget used in style paths.
@@ -715,7 +752,7 @@ impl Styler {
         let mut on_item = |mut item: StyledEventOrRun| {
             match &mut item {
                 StyledEventOrRun::Run(run) => {
-                    run.text = whitespace.text(&run.text, run.style.white_space);
+                    run.text = whitespace.mapped_text(&run.text, run.style.white_space, run.source.as_mut().map(|source| &mut source.characters));
                     if run.text.is_empty() { return; }
                 }
                 StyledEventOrRun::Event(_) | StyledEventOrRun::Image(_) => {
@@ -733,6 +770,7 @@ impl Styler {
         let mut table_row_cells: Vec<usize> = Vec::with_capacity(0);
 
         loop {
+            let token_start = reader.buffer_position() as usize;
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(e)) => {
                     let tag = decode_tag_name(&reader, e.name().as_ref())?;
@@ -753,7 +791,7 @@ impl Styler {
                         emit_navigation(&reader, &e, &mut on_item)?;
                         let mut image_style = self.resolve_tag_style(&ctx.tag, &ctx.classes);
                         if let Some(inline) = &ctx.inline_style { image_style.merge(inline); }
-                        emit_image_event(&ctx, in_figure, &image_style, &mut on_item);
+                        emit_image_event(&ctx, in_figure, &image_style, self.track_source.then_some(token_start), &mut on_item);
                         buf.clear();
                         continue;
                     }
@@ -767,6 +805,7 @@ impl Styler {
                                 let style =
                                     self.compute_style(resolved, role, bold_tag, italic_tag);
                                 on_item(StyledEventOrRun::Run(StyledRun {
+                                    source: None,
                                     language: stack
                                         .iter()
                                         .rev()
@@ -787,6 +826,7 @@ impl Styler {
                     emit_navigation(&reader, &e, &mut on_item)?;
                     if ctx.note_body { on_item(StyledEventOrRun::NoteBodyStart); }
                     stack.push(ctx);
+                    self.emit_source_element(token_start, &stack, &mut on_item);
                     self.emit_list_style(&stack, &mut on_item);
                 }
                 Ok(Event::Empty(e)) => {
@@ -803,7 +843,7 @@ impl Styler {
                         emit_navigation(&reader, &e, &mut on_item)?;
                         let mut image_style = self.resolve_tag_style(&ctx.tag, &ctx.classes);
                         if let Some(inline) = &ctx.inline_style { image_style.merge(inline); }
-                        emit_image_event(&ctx, in_figure, &image_style, &mut on_item);
+                        emit_image_event(&ctx, in_figure, &image_style, self.track_source.then_some(token_start), &mut on_item);
                         buf.clear();
                         continue;
                     }
@@ -815,6 +855,7 @@ impl Styler {
                                 let style =
                                     self.compute_style(resolved, role, bold_tag, italic_tag);
                                 on_item(StyledEventOrRun::Run(StyledRun {
+                                    source: None,
                                     language: stack
                                         .iter()
                                         .rev()
@@ -835,6 +876,7 @@ impl Styler {
                     emit_navigation(&reader, &e, &mut on_item)?;
                     if ctx.note_body { on_item(StyledEventOrRun::NoteBodyStart); }
                     stack.push(ctx.clone());
+                    self.emit_source_element(token_start, &stack, &mut on_item);
                     self.emit_list_style(&stack, &mut on_item);
                     stack.pop();
                     if ctx.tag == "br" {
@@ -896,6 +938,10 @@ impl Styler {
                     let (resolved, role, bold_tag, italic_tag) = self.resolve_context_style(&stack);
                     let style = self.compute_style(resolved, role, bold_tag, italic_tag);
                     on_item(StyledEventOrRun::Run(StyledRun {
+                        source: self.track_source.then(|| TextSource {
+                            token: token_start..reader.buffer_position() as usize,
+                            characters: Vec::new(),
+                        }),
                         language: stack.iter().rev().find_map(|ctx| ctx.language.clone()),
                         text: normalized,
                         style,
@@ -929,6 +975,10 @@ impl Styler {
                     let (resolved, role, bold_tag, italic_tag) = self.resolve_context_style(&stack);
                     let style = self.compute_style(resolved, role, bold_tag, italic_tag);
                     on_item(StyledEventOrRun::Run(StyledRun {
+                        source: self.track_source.then(|| TextSource {
+                            token: token_start..reader.buffer_position() as usize,
+                            characters: Vec::new(),
+                        }),
                         language: stack.iter().rev().find_map(|ctx| ctx.language.clone()),
                         text: normalized,
                         style,
@@ -970,6 +1020,10 @@ impl Styler {
                     let (resolved, role, bold_tag, italic_tag) = self.resolve_context_style(&stack);
                     let style = self.compute_style(resolved, role, bold_tag, italic_tag);
                     on_item(StyledEventOrRun::Run(StyledRun {
+                        source: self.track_source.then(|| TextSource {
+                            token: token_start..reader.buffer_position() as usize,
+                            characters: Vec::new(),
+                        }),
                         language: stack.iter().rev().find_map(|ctx| ctx.language.clone()),
                         text: normalized,
                         style,
@@ -993,6 +1047,19 @@ impl Styler {
         }
 
         Ok(())
+    }
+
+    fn emit_source_element<F: FnMut(StyledEventOrRun)>(&self, offset: usize, stack: &[ElementCtx], output: &mut F) {
+        if !self.track_source { return; }
+        let ctx = stack.last().unwrap();
+        let mut own = self.resolve_tag_style(&ctx.tag, &ctx.classes);
+        if let Some(inline) = &ctx.inline_style { own.merge(inline); }
+        let (resolved, _, _, _) = self.resolve_context_style(stack);
+        output(StyledEventOrRun::SourceElement(SourceElement {
+            offset,
+            white_space: resolved.white_space.unwrap_or_default(),
+            display: own.display,
+        }));
     }
 
     fn resolve_tag_style(&self, tag: &str, classes: &[String]) -> CssStyle {
@@ -1474,7 +1541,7 @@ impl RenderPrepTrace {
 impl RenderPrep {
     /// Create a render-prep engine.
     pub fn new(opts: RenderPrepOptions) -> Self {
-        let styler = Styler::new(opts.style).with_memory_budget(opts.memory);
+        let styler = Styler::new(opts.style).with_memory_budget(opts.memory).with_source_tracking(opts.track_source);
         let font_resolver = FontResolver::new(FontPolicy::default()).with_limits(opts.fonts);
         Self {
             opts,
@@ -2116,6 +2183,7 @@ fn emit_image_event<F: FnMut(StyledEventOrRun)>(
     ctx: &ElementCtx,
     in_figure: bool,
     style: &CssStyle,
+    source_offset: Option<usize>,
     on_item: &mut F,
 ) {
     if !matches!(ctx.tag.as_str(), "img" | "image") {
@@ -2125,6 +2193,7 @@ fn emit_image_event<F: FnMut(StyledEventOrRun)>(
         return;
     };
     on_item(StyledEventOrRun::Image(StyledImage {
+        source_offset,
         src,
         alt: ctx.img_alt.clone().unwrap_or_default(),
         width: style.width,
@@ -2342,12 +2411,17 @@ struct WhitespaceNormalizer {
 }
 
 impl WhitespaceNormalizer {
+    #[cfg(test)]
     fn text(&mut self, text: &str, mode: crate::css::WhiteSpace) -> String {
+        self.mapped_text(text, mode, None)
+    }
+    fn mapped_text(&mut self, text: &str, mode: crate::css::WhiteSpace, mut mapping: Option<&mut Vec<usize>>) -> String {
         use crate::css::WhiteSpace;
         let preserve = matches!(mode, WhiteSpace::Pre | WhiteSpace::PreWrap);
         let breaks = preserve || mode == WhiteSpace::PreLine;
         let mut result = String::with_capacity(text.len());
-        for ch in text.chars() {
+        for (index, ch) in text.chars().enumerate() {
+            let before = result.len();
             // XML line endings can cross text, entity, and CDATA boundaries.
             if ch == '\n' && self.cr { self.cr = false; continue; }
             self.cr = ch == '\r';
@@ -2366,7 +2440,11 @@ impl WhitespaceNormalizer {
                 result.push(ch);
                 self.space = false;
             }
+            if result.len() != before {
+                if let Some(mapping) = &mut mapping { mapping.push(index); }
+            }
         }
+        if let Some(mapping) = &mut mapping { mapping.push(text.chars().count()); }
         result
     }
 }
@@ -2408,7 +2486,8 @@ fn resolve_item_with_font(
         | StyledEventOrRun::Anchor(_)
         | StyledEventOrRun::LinkStart(_)
         | StyledEventOrRun::NoteReferenceStart(_)
-        | StyledEventOrRun::LinkEnd) => (item, RenderPrepTrace::Event),
+        | StyledEventOrRun::LinkEnd
+        | StyledEventOrRun::SourceElement(_)) => (item, RenderPrepTrace::Event),
     }
 }
 
@@ -3281,6 +3360,7 @@ mod tests {
         let mut map = BTreeMap::new();
         map.insert("images/cover.jpg".to_string(), (600u16, 900u16));
         let item = StyledEventOrRun::Image(StyledImage {
+            source_offset: None,
             src: "../images/cover.jpg".to_string(),
             alt: String::new(),
             width: None,
@@ -3859,4 +3939,51 @@ mod tests {
         assert!(styler.style_chapter_bytes_with(oversized.as_bytes(), |_| {}).is_err());
     }
 
+}
+
+#[cfg(test)]
+mod source_tracking_tests {
+    use super::*;
+
+    #[test]
+    fn source_tokens_and_unicode_offsets_survive_whitespace_normalization() {
+        let html = "<html><body><p>A \t <em> B😀</em>&amp; C<![CDATA[\r\nD]]></p></body></html>";
+        let styler = Styler::new(StyleConfig::default());
+        let plain = styler.style_chapter(html).unwrap();
+        let tracked = styler.with_source_tracking(true).style_chapter(html).unwrap();
+        let mut pairs = Vec::new();
+        for item in &tracked.items {
+            if let StyledEventOrRun::Run(run) = item {
+                let source = run.source.as_ref().unwrap();
+                assert_eq!(source.characters.len(), run.text.chars().count() + 1);
+                pairs.push((&html[source.token.clone()], run.text.as_str(), source.characters.clone()));
+            }
+        }
+        assert_eq!(pairs, vec![
+            ("A \t ", "A ", vec![0, 1, 4]),
+            (" B😀", "B😀", vec![1, 2, 3]),
+            ("&amp;", "&", vec![0, 1]),
+            (" C", " C", vec![0, 1, 2]),
+            ("<![CDATA[\r\nD]]>", " D", vec![0, 2, 3]),
+        ]);
+        let mut without_source = tracked.items;
+        without_source.retain(|item| !matches!(item, StyledEventOrRun::SourceElement(_)));
+        for item in &mut without_source {
+            if let StyledEventOrRun::Run(run) = item { run.source = None; }
+        }
+        assert_eq!(without_source, plain.items);
+    }
+
+    #[test]
+    fn preserved_newlines_and_generated_table_separators_have_correct_provenance() {
+        let styler = Styler::new(StyleConfig::default()).with_source_tracking(true);
+        let chapter = styler.style_chapter("<body><pre>A\r\n😀</pre><table><tr><td>a</td><td>b</td></tr></table></body>").unwrap();
+        let runs: Vec<_> = chapter.items.iter().filter_map(|item| match item {
+            StyledEventOrRun::Run(run) => Some(run), _ => None,
+        }).collect();
+        assert_eq!(runs[0].text, "A\n😀");
+        assert_eq!(runs[0].source.as_ref().unwrap().characters, [0, 1, 3, 4]);
+        let separator = runs.iter().find(|run| run.text == " | ").unwrap();
+        assert!(separator.source.is_none());
+    }
 }

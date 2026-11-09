@@ -184,10 +184,25 @@ pub enum ImageLimit {
     Percent(f32),
 }
 
+/// Display classes used when constructing source text nodes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Display {
+    /// Inline formatting.
+    Inline,
+    /// Block, table, list-item or inline-block formatting.
+    Block,
+    /// Hidden element.
+    None,
+    /// Explicit inheritance from the parent element.
+    Inherit,
+}
+
 /// All fields are optional — `None` means "not specified" (inherit from parent
 /// or use default).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CssStyle {
+    /// Author display category, retained for source-position interoperability.
+    pub display: Option<Display>,
     /// Non-inherited image width; ImageLimit::None means auto.
     pub width: Option<ImageLimit>,
     /// Non-inherited image height; ImageLimit::None means auto.
@@ -240,7 +255,7 @@ impl CssStyle {
 
     /// Check if any property is set
     pub fn is_empty(&self) -> bool {
-        self.width.is_none() && self.height.is_none() && self.max_width.is_none() && self.max_height.is_none() && self.min_width.is_none() && self.min_height.is_none() && self.list_style_type.is_none() && self.text_indent.is_none() && self.tab_size.is_none() && self.white_space.is_none() && self.direction.is_none() && self.hyphens.is_none()
+        self.display.is_none() && self.width.is_none() && self.height.is_none() && self.max_width.is_none() && self.max_height.is_none() && self.min_width.is_none() && self.min_height.is_none() && self.list_style_type.is_none() && self.text_indent.is_none() && self.tab_size.is_none() && self.white_space.is_none() && self.direction.is_none() && self.hyphens.is_none()
             && self.font_size.is_none()
             && self.font_family.is_none()
             && self.font_weight.is_none()
@@ -264,6 +279,7 @@ impl CssStyle {
         if other.text_indent.is_some() { self.text_indent = other.text_indent; }
         if other.tab_size.is_some() { self.tab_size = other.tab_size; }
         if other.white_space.is_some() { self.white_space = other.white_space; }
+        if other.display.is_some() { self.display = other.display; }
         if other.direction.is_some() { self.direction = other.direction; }
         if other.hyphens.is_some() { self.hyphens = other.hyphens; }
         if other.font_size.is_some() {
@@ -578,6 +594,19 @@ fn parse_declarations(declarations: &str) -> Result<CssStyle, EpubError> {
                 };
                 if mode.is_some() { style.white_space = mode; }
             }
+            "display" => {
+                let display = match value.to_ascii_lowercase().as_str() {
+                    "inline" | "initial" | "unset" => Some(Display::Inline),
+                    "none" => Some(Display::None),
+                    "inherit" => Some(Display::Inherit),
+                    "block" | "inline-block" | "list-item" | "table" | "inline-table"
+                    | "table-row-group" | "table-header-group" | "table-footer-group"
+                    | "table-row" | "table-cell" | "table-column" | "table-column-group"
+                    | "table-caption" => Some(Display::Block),
+                    _ => None,
+                };
+                if display.is_some() { style.display = display; }
+            }
             "direction" => {
                 let direction = match value.to_ascii_lowercase().as_str() {
                     "ltr" | "initial" => Some(Direction::Ltr),
@@ -794,12 +823,14 @@ mod tests {
     fn test_css_style_merge() {
         let mut base = CssStyle {
             list_style_type: None,
+            display: None,
             font_weight: Some(FontWeight::Bold),
             text_align: Some(TextAlign::Left),
             ..Default::default()
         };
         let overlay = CssStyle {
             list_style_type: None,
+            display: None,
             text_align: Some(TextAlign::Center),
             font_size: Some(FontSize::Px(16.0)),
             ..Default::default()
@@ -1211,6 +1242,7 @@ mod tests {
     fn test_css_style_merge_both_sides_same_property() {
         let mut base = CssStyle {
             list_style_type: None,
+            display: None,
             font_weight: Some(FontWeight::Bold),
             font_style: Some(FontStyle::Normal),
             direction: Some(Direction::Ltr),
@@ -1234,6 +1266,7 @@ mod tests {
         };
         let overlay = CssStyle {
             list_style_type: None,
+            display: None,
             font_weight: Some(FontWeight::Normal),
             font_style: Some(FontStyle::Italic),
             direction: Some(Direction::Rtl),
@@ -1277,6 +1310,7 @@ mod tests {
     fn test_css_style_merge_overlay_none_preserves_base() {
         let mut base = CssStyle {
             list_style_type: None,
+            display: None,
             font_weight: Some(FontWeight::Bold),
             font_size: Some(FontSize::Px(16.0)),
             ..Default::default()

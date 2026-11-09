@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ $# -gt 0 ]]; then
+  export FEMTO_ORACLE_BOOK="$(realpath "$1")"
+fi
+if [[ "${2:-}" == --resolve ]]; then
+  export FEMTO_ORACLE_RESOLVE=1
+fi
+if [[ "${2:-}" == --images ]]; then
+  export FEMTO_ORACLE_IMAGES=1
+fi
+: "${FEMTO_ORACLE_BOOK:?Pass an EPUB path}"
+cd "$(dirname "$0")/.."
+if [[ "${FEMTO_ORACLE_SHELL:-}" != 1 ]]; then
+  exec nix-shell nix/koreader-oracle.nix --run './scripts/koreader-position-oracle'
+fi
+femto_oracle_root="$PWD/output/koreader-oracle"
+femto_cre_revision=fb4d562a2765c52bff052759112a94a0b05239db
+mkdir -p "$femto_oracle_root"
+if [[ ! -d "$femto_oracle_root/source/.git" ]]; then
+  git init -q "$femto_oracle_root/source"
+  git -C "$femto_oracle_root/source" fetch -q --depth 1 https://github.com/koreader/crengine "$femto_cre_revision"
+  git -C "$femto_oracle_root/source" checkout -q --detach FETCH_HEAD
+fi
+[[ "$(git -C "$femto_oracle_root/source" rev-parse HEAD)" == "$femto_cre_revision" ]]
+git -C "$femto_oracle_root/source" diff --quiet HEAD --
+# Reduced standalone builds need this standard header normally included by optional dependencies.
+cmake -S "$femto_oracle_root/source" -B "$femto_oracle_root/build" \
+  -DAUTO=OFF -DFREETYPE=ON -DZLIB=ON -DCMAKE_CXX_FLAGS='-include cstdint' >&2
+cmake --build "$femto_oracle_root/build" -j2 >&2
+c++ -std=c++17 -include cstdint \
+  -I "$femto_oracle_root/build" -I "$femto_oracle_root/source/crengine/include" \
+  tests/interop/koreader-position-oracle.cpp -L "$femto_oracle_root/build" \
+  -Wl,-rpath,"$femto_oracle_root/build" -lcrengine -o "$femto_oracle_root/oracle"
+femto_oracle_args=()
+if [[ "${FEMTO_ORACLE_RESOLVE:-}" == 1 ]]; then femto_oracle_args+=(--resolve); fi
+if [[ "${FEMTO_ORACLE_IMAGES:-}" == 1 ]]; then femto_oracle_args+=(--images); fi
+exec "$femto_oracle_root/oracle" "$FEMTO_ORACLE_BOOK" "$femto_oracle_root/source/cr3gui/data/epub.css" "${femto_oracle_args[@]}"

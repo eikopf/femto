@@ -92,7 +92,6 @@ struct Head {
     status: u16,
     location: Option<String>,
     content_type: Option<String>,
-    etag: Option<String>,
     length: Option<usize>,
     chunked: bool,
 }
@@ -107,7 +106,6 @@ fn head(reader: &mut impl BufRead, limit: usize) -> io::Result<Head> {
         status: response.code.ok_or_else(invalid)?,
         location: None,
         content_type: None,
-        etag: None,
         length: None,
         chunked: false,
     };
@@ -140,12 +138,9 @@ fn head(reader: &mut impl BufRead, limit: usize) -> io::Result<Head> {
             encoding = true;
         } else if field.name.eq_ignore_ascii_case("location")
             || field.name.eq_ignore_ascii_case("content-type")
-            || field.name.eq_ignore_ascii_case("etag")
         {
             let slot = if field.name.eq_ignore_ascii_case("location") {
                 &mut result.location
-            } else if field.name.eq_ignore_ascii_case("etag") {
-                &mut result.etag
             } else {
                 &mut result.content_type
             };
@@ -247,30 +242,65 @@ fn body(
 }
 
 pub const MAX_EPUB_BYTES: usize = 64 * 1024 * 1024;
+
+/// Reads one bounded JSON response without following redirects. Non-success
+/// responses return their status without retaining an untrusted error body.
+pub fn read_json_response(
+    stream: impl Read,
+    limit: usize,
+    deadline: Instant,
+    cancelled: &AtomicBool,
+) -> Result<(u16, Vec<u8>), Error> {
+    if limit > MAX_FEED_BYTES {
+        return Err(invalid().into());
+    }
+    check(deadline, cancelled)?;
+    let mut reader = BufReader::new(stream);
+    let head = head(&mut reader, limit)?;
+    check(deadline, cancelled)?;
+    if !(200..300).contains(&head.status) {
+        return Ok((head.status, Vec::new()));
+    }
+    let media = head
+        .content_type
+        .as_deref()
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim();
+    let media = media.to_ascii_lowercase();
+    if media != "application/json"
+        && !media
+            .strip_prefix("application/")
+            .is_some_and(|subtype| subtype.ends_with("+json"))
+    {
+        return Err(Error::ContentType);
+    }
+    let mut bytes = Vec::new();
+    body(&mut reader, &head, limit, &mut bytes, deadline, cancelled)?;
+    check(deadline, cancelled)?;
+    Ok((head.status, bytes))
+}
 #[derive(Debug)]
 pub struct Download {
     pub source: String,
     pub bytes: usize,
-    pub etag: Option<StrongEtag>,
 }
 #[derive(Clone, Copy)]
 enum Kind {
-    ProgressExact,
-    Progress,
     Feed,
     Epub,
 }
 impl Kind {
     fn limit(self) -> usize {
         match self {
-            Self::Progress | Self::ProgressExact => 4096,
             Self::Feed => MAX_FEED_BYTES,
             Self::Epub => MAX_EPUB_BYTES,
         }
     }
     fn accept(self) -> &'static str {
         match self {
-            Self::Progress | Self::ProgressExact => "application/json",
             Self::Feed => "application/opds+json, application/json",
             Self::Epub => "application/epub+zip, application/octet-stream",
         }
@@ -332,167 +362,6 @@ pub fn fetch_authenticated(
     Ok(Catalog::parse(&bytes, &result.source)?)
 }
 
-/// Retrieves a Femto progress JSON record, capped at 4096 bytes before decoding.
-/// The caller validates book identity and position before changing local state.
-pub fn fetch_progress(
-    transport: &mut impl Transport,
-    source: &str,
-    deadline: Instant,
-    cancelled: Arc<AtomicBool>,
-    auth: Option<&crate::auth::BasicAuth>,
-) -> Result<Vec<u8>, Error> {
-    Ok(fetch_progress_versioned(transport, source, deadline, cancelled, auth)?.body)
-}
-
-pub struct ProgressResponse {
-    pub body: Vec<u8>,
-    pub source: String,
-    pub etag: Option<StrongEtag>,
-}
-pub fn fetch_progress_versioned(
-    transport: &mut impl Transport,
-    source: &str,
-    deadline: Instant,
-    cancelled: Arc<AtomicBool>,
-    auth: Option<&crate::auth::BasicAuth>,
-) -> Result<ProgressResponse, Error> {
-    let mut bytes = Vec::new();
-    let result = receive(
-        transport,
-        source,
-        deadline,
-        cancelled,
-        auth,
-        Kind::Progress,
-        &mut bytes,
-    )?;
-    Ok(ProgressResponse {
-        body: bytes,
-        source: result.source,
-        etag: result.etag,
-    })
-}
-
-/// Fetches only the configured endpoint, rejecting redirects even when their target is absent.
-pub fn fetch_progress_exact(
-    transport: &mut impl Transport,
-    source: &str,
-    deadline: Instant,
-    cancelled: Arc<AtomicBool>,
-    auth: Option<&crate::auth::BasicAuth>,
-) -> Result<ProgressResponse, Error> {
-    let mut bytes = Vec::new();
-    let result = receive(
-        transport,
-        source,
-        deadline,
-        cancelled,
-        auth,
-        Kind::ProgressExact,
-        &mut bytes,
-    )?;
-    Ok(ProgressResponse {
-        body: bytes,
-        source: result.source,
-        etag: result.etag,
-    })
-}
-
-/// A bounded ASCII strong entity tag. Weak tags and lists cannot authorize replacement.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StrongEtag(String);
-impl StrongEtag {
-    pub fn parse(value: &str) -> io::Result<Self> {
-        if !(2..=256).contains(&value.len())
-            || !value.starts_with('"')
-            || !value.ends_with('"')
-            || !value.as_bytes()[1..value.len() - 1]
-                .iter()
-                .all(|b| *b == 0x21 || (0x23..=0x7e).contains(b))
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid strong ETag",
-            ));
-        }
-        Ok(Self(value.to_owned()))
-    }
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-pub enum Precondition<'a> {
-    Create,
-    Match(&'a StrongEtag),
-}
-
-/// Sends one conditional PUT without redirects or retries. An error after sending
-/// can mean the server committed the write but its acknowledgement was lost.
-pub fn put_progress(
-    transport: &mut impl Transport,
-    source: &str,
-    deadline: Instant,
-    cancelled: Arc<AtomicBool>,
-    auth: Option<&crate::auth::BasicAuth>,
-    bytes: &[u8],
-    precondition: Precondition<'_>,
-) -> Result<StrongEtag, Error> {
-    if bytes.len() > Kind::Progress.limit() {
-        return Err(invalid().into());
-    }
-    let url = crate::web_url(None, source)?;
-    if url.fragment().is_some() {
-        return Err(invalid().into());
-    }
-    check(deadline, &cancelled)?;
-    let mut stream = transport.connect(&url, deadline, cancelled.clone())?;
-    check(deadline, &cancelled)?;
-    let target = &url[url::Position::BeforePath..url::Position::AfterQuery];
-    let authority = &url[url::Position::BeforeHost..url::Position::AfterPort];
-    write!(
-        stream,
-        "PUT {target} HTTP/1.1\r\nHost: {authority}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccept-Encoding: identity\r\nConnection: close\r\n",
-        bytes.len()
-    )?;
-    match precondition {
-        Precondition::Create => stream.write_all(b"If-None-Match: *\r\n")?,
-        Precondition::Match(tag) => write!(stream, "If-Match: {}\r\n", tag.as_str())?,
-    }
-    if let Some(header) = auth.and_then(|auth| auth.header_for(&url)) {
-        write!(stream, "Authorization: {header}\r\n")?;
-    }
-    stream.write_all(b"\r\n")?;
-    check(deadline, &cancelled)?;
-    stream.write_all(bytes)?;
-    stream.flush()?;
-    let mut reader = BufReader::new(stream);
-    let head = head(&mut reader, Kind::Progress.limit())?;
-    if !matches!(head.status, 200 | 201 | 204) {
-        return Err(Error::Status(head.status));
-    }
-    let etag = head
-        .etag
-        .as_deref()
-        .ok_or_else(invalid)
-        .and_then(StrongEtag::parse)?;
-    if head.status == 204 {
-        if head.length.is_some() || head.chunked {
-            return Err(invalid().into());
-        }
-    } else {
-        body(
-            &mut reader,
-            &head,
-            Kind::Progress.limit(),
-            &mut io::sink(),
-            deadline,
-            &cancelled,
-        )?;
-    }
-    check(deadline, &cancelled)?;
-    Ok(etag)
-}
-
 fn receive(
     transport: &mut impl Transport,
     source: &str,
@@ -527,9 +396,6 @@ fn receive(
         let mut reader = BufReader::new(stream);
         let head = head(&mut reader, kind.limit())?;
         if matches!(head.status, 301 | 302 | 303 | 307 | 308) {
-            if matches!(kind, Kind::ProgressExact) {
-                return Err(Error::Redirect);
-            }
             let location = head.location.as_deref().ok_or(Error::Redirect)?;
             let next = crate::web_url(Some(&url), location)?;
             if redirect == 5 || (url.scheme() == "https" && next.scheme() == "http") {
@@ -565,10 +431,6 @@ fn receive(
         return Ok(Download {
             source: url.to_string(),
             bytes,
-            etag: head
-                .etag
-                .as_deref()
-                .and_then(|tag| StrongEtag::parse(tag).ok()),
         });
     }
     Err(Error::Redirect)

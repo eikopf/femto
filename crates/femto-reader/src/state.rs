@@ -76,8 +76,6 @@ pub struct BookState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub clippings: Vec<crate::clipping::Clipping>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sync: Option<crate::progress::SyncCheckpoint>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub typography: Option<BookTypography>,
 }
 
@@ -295,9 +293,6 @@ impl ReaderState {
             }
             if let Some(typography) = book.typography {
                 typography.validate()?;
-            }
-            if let Some(checkpoint) = &book.sync {
-                checkpoint.validate(id)?;
             }
         }
         Ok(())

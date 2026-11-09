@@ -19,11 +19,8 @@ use femto_reader::{
 #[cfg(all(unix, not(target_os = "espidf")))]
 mod catalog;
 mod clippings;
-mod progress;
 #[cfg(all(unix, not(target_os = "espidf")))]
-mod progress_service;
-#[cfg(all(unix, not(target_os = "espidf")))]
-mod progress_sync;
+mod kosync;
 #[cfg(all(unix, not(target_os = "espidf")))]
 mod state_file;
 #[cfg(all(unix, not(target_os = "espidf")))]
@@ -71,6 +68,9 @@ impl RasterArgs {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Synchronize reading positions with a KOReader server.
+    #[cfg(all(unix, not(target_os = "espidf")))]
+    Kosync(kosync::Args),
     /// Look up an offline StarDict word and print definitions as JSON.
     DictionaryLookup { ifo: PathBuf, word: String },
     /// Export source-verified saved excerpts as JSON on stdout.
@@ -81,33 +81,6 @@ enum Command {
         /// Read an offline copy of the Picco state-slot directory.
         #[arg(long, required_unless_present = "state", conflicts_with = "state")]
         journal: Option<PathBuf>,
-    },
-    /// Synchronize one book using a durable shared-position checkpoint.
-    #[cfg(all(unix, not(target_os = "espidf")))]
-    ProgressSync(progress_sync::SyncArgs),
-    /// Serve a persistent progress store on a local loopback endpoint.
-    #[cfg(all(unix, not(target_os = "espidf")))]
-    ProgressServe(progress_service::ServeArgs),
-    /// Upload saved progress with a required remote precondition.
-    #[cfg(all(unix, not(target_os = "espidf")))]
-    ProgressPush(progress::PushArgs),
-    /// Fetch and apply a Femto progress record over HTTP or verified HTTPS.
-    #[cfg(all(unix, not(target_os = "espidf")))]
-    ProgressPull(progress::PullArgs),
-    /// Export an exact-content reading position as bounded JSON.
-    ProgressExport {
-        book: PathBuf,
-        #[arg(long)]
-        state: PathBuf,
-    },
-    /// Import progress with optional optimistic comparison against a local snapshot.
-    ProgressImport {
-        book: PathBuf,
-        record: PathBuf,
-        #[arg(long)]
-        state: PathBuf,
-        #[arg(long)]
-        expected: Option<PathBuf>,
     },
     /// Browse OPDS navigation, facets, pagination, and publication metadata.
     #[cfg(all(unix, not(target_os = "espidf")))]
@@ -202,13 +175,7 @@ enum Command {
 fn main() -> Result<()> {
     match Args::parse().command {
         #[cfg(all(unix, not(target_os = "espidf")))]
-        Command::ProgressSync(args) => progress_sync::sync(args)?,
-        #[cfg(all(unix, not(target_os = "espidf")))]
-        Command::ProgressServe(args) => progress_service::serve(args)?,
-        #[cfg(all(unix, not(target_os = "espidf")))]
-        Command::ProgressPush(args) => progress::push(args)?,
-        #[cfg(all(unix, not(target_os = "espidf")))]
-        Command::ProgressPull(args) => progress::pull(args)?,
+        Command::Kosync(args) => kosync::run(args)?,
         Command::DictionaryLookup { ifo, word } => {
             let mut dictionary = femto_reader::dictionary::Dictionary::open(ifo)?;
             while !dictionary.prepare_step()? {}
@@ -224,7 +191,6 @@ fn main() -> Result<()> {
                 )?
             );
         }
-        Command::ProgressExport { book, state } => progress::export(&book, &state)?,
         Command::ClippingsExport {
             book,
             state,
@@ -234,12 +200,6 @@ fn main() -> Result<()> {
             (None, Some(journal)) => clippings::export_journal(&book, &journal)?,
             _ => anyhow::bail!("select one clipping state source"),
         },
-        Command::ProgressImport {
-            book,
-            record,
-            state,
-            expected,
-        } => progress::import(&book, &record, &state, expected.as_deref())?,
         #[cfg(all(unix, not(target_os = "espidf")))]
         Command::TailnetConnect(args) => tailnet::connect(*args)?,
         #[cfg(all(unix, not(target_os = "espidf")))]

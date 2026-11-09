@@ -32,7 +32,7 @@ Arrow keys turn pages. Tab, Escape, or Enter opens the menu. In menus, arrows se
 
 For a terminal preview, use `read` with the same book and font arguments. It writes `output/display.png`; standard-input commands `n`, `p`, `b`, `+`, `-`, and `q` turn pages, toggle bookmarks, change font size, and exit. State defaults to `output/reader.json`. Each command's `--help` lists its options.
 
-[Typography](typography.md) covers font and raster controls. [Navigation](navigation.md) covers reading positions, links, dictionaries, highlights, clippings, and the library cache. Service configuration is described in [catalogs](catalogs.md), [progress sync](progress.md), and [tailnet integration](tailscale-data-plane.md).
+[Typography](typography.md) covers font and raster controls. [Navigation](navigation.md) covers reading positions, links, dictionaries, highlights, clippings, and the library cache.
 
 ## Validation
 
@@ -46,7 +46,9 @@ For a terminal preview, use `read` with the same book and font arguments. It wri
 
 `check-simulator` starts a private Xvfb display, exercises native input and persistence, and captures results under `output/simulator-smoke`. It does not interact with the user's desktop. Wayland runtime remains unqualified.
 
-`check-headscale` starts a temporary local Headscale server and official Tailscale userspace peer. It exercises authenticated control, direct and relay traffic, TLS, catalogs, and progress sync. It does not use the system Tailscale daemon or install a kernel VPN. [Independent qualification](headscale-qualification.md) records the fixture's scope and separate migration mode.
+`check-headscale` starts a temporary local Headscale server and official Tailscale userspace peer. It exercises authenticated control, direct and relay traffic, TLS and catalogs. It does not use the system Tailscale daemon or install a kernel VPN. [Independent qualification](headscale-qualification.md) records the fixture's scope and separate migration mode.
+
+`./scripts/check-kosync` uses rootless Podman to run the protocol, CLI and native menu fixtures against a disposable official KOReader server. The native fixture runs on a private Xvfb display. The CLI-only Headscale fixture also uses that server behind its official Tailscale peer. [KOReader sync](koreader-sync.md) covers configuration, commands and the independent position checks.
 
 ## Firmware
 

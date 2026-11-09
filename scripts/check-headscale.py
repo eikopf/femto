@@ -258,48 +258,10 @@ def independent_catalog_peer(folder, coordinator_port, command, local_address, p
     book = ROOT / "tests/fixtures/book-api.epub"
     book_bytes = book.read_bytes()
     counts = {"denied": 0, "redirect": 0, "feed": 0, "book": 0}
-    progress = {"record": None, "initial": None, "version": 0, "gets": 0, "puts": 0, "rejected": 0}
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         def log_message(self, *_):
             pass
-        def progress_reply(self, status, body=b""):
-            self.send_response(status)
-            if status != 204:
-                self.send_header("Content-Length", str(len(body)))
-            self.send_header("Content-Type", "application/json")
-            if status in [200, 201, 204]:
-                self.send_header("ETag", f'"{progress["version"]}"')
-            self.end_headers()
-            self.wfile.write(body)
-        def do_PUT(self):
-            self.close_connection = True
-            if self.path != "/progress/book" or self.headers.get("Authorization") != expected_auth:
-                counts["denied"] += 1
-                self.progress_reply(401)
-                return
-            length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= 4096 or self.headers.get("Transfer-Encoding"):
-                self.progress_reply(400)
-                return
-            record = json.loads(self.rfile.read(length))
-            progress["puts"] += 1
-            if progress["puts"] == 3:
-                # Simulate another device committing after GET and before PUT.
-                progress["record"] = progress["initial"]
-                progress["version"] += 1
-            condition = (self.headers.get("If-None-Match") == "*" and self.headers.get("If-Match") is None
-                         if progress["record"] is None else
-                         self.headers.get("If-Match") == f'"{progress["version"]}"' and self.headers.get("If-None-Match") is None)
-            if not condition:
-                progress["rejected"] += 1
-                self.progress_reply(412)
-                return
-            if progress["initial"] is None:
-                progress["initial"] = record
-            progress["record"] = record
-            progress["version"] += 1
-            self.progress_reply(204)
         def do_GET(self):
             self.close_connection = True
             if self.headers.get("Authorization") != expected_auth:
@@ -308,12 +270,6 @@ def independent_catalog_peer(folder, coordinator_port, command, local_address, p
                 self.send_header("WWW-Authenticate", 'Basic realm="fixture"')
                 self.send_header("Content-Length", "0")
                 self.end_headers()
-            elif self.path == "/progress/book":
-                progress["gets"] += 1
-                if progress["record"] is None:
-                    self.progress_reply(404)
-                else:
-                    self.progress_reply(200, json.dumps(progress["record"]).encode())
             elif self.path == "/start":
                 counts["redirect"] += 1
                 self.send_response(302)
@@ -375,8 +331,6 @@ def independent_catalog_peer(folder, coordinator_port, command, local_address, p
                 raise RuntimeError("independent catalog probe failed: " + stderr.decode().strip())
             if counts != {"denied": 1, "redirect": 1, "feed": 1, "book": 1} or output.read_bytes() != book_bytes:
                 raise RuntimeError("independent catalog server or acquisition evidence missing")
-            if (progress["gets"], progress["puts"], progress["rejected"], progress["version"]) != (12, 5, 1, 5):
-                raise RuntimeError("progress request, precondition, or mutation evidence missing")
             result = json.loads(next(line for line in stdout.decode().splitlines() if line.startswith("{")))
             if result["joined_shutdown"] is not True:
                 raise RuntimeError("catalog control worker shutdown evidence missing")
@@ -385,9 +339,6 @@ def independent_catalog_peer(folder, coordinator_port, command, local_address, p
             for field in ["independent_opds", "unauthenticated_denied", "authenticated_redirect", "relative_acquisition", "epub_validated", "epub_exact", "epub_noclobber"]:
                 if result[field] is not True:
                     raise RuntimeError("independent catalog evidence missing: " + field)
-            for field in ["progress_create", "progress_upload", "progress_conflict", "progress_download_resolution", "progress_precondition_race", "progress_stale_resolution", "progress_local_resolution", "progress_converged", "reader_download_journal", "reader_upload_journal", "reader_stale_completion_rejected", "reader_reopen_position", "reader_unrelated_state_preserved"]:
-                if result[field] is not True:
-                    raise RuntimeError("independent progress evidence missing: " + field)
         finally:
             if probe.poll() is None:
                 probe.kill()
@@ -776,20 +727,15 @@ with tempfile.TemporaryDirectory(prefix="femto-headscale-") as directory:
                 "opds_unauthenticated_denied": True, "opds_authenticated_redirect": True,
                 "opds_chunked_feed": True, "opds_relative_acquisition": True,
                 "acquired_epub_validated": True, "acquired_epub_exact": True, "acquired_epub_noclobber": True,
-                "independent_progress_sync": True, "progress_conditional_create_upload": True,
-                "progress_conflict_and_resolution": True, "progress_precondition_race_rejected": True,
-                "progress_stale_resolution_rejected": True, "progress_converged_without_write": True,
-                "reader_download_journal_reopened": True, "reader_upload_journal_reopened": True,
-                "reader_stale_completion_denied_persistence": True, "reader_unrelated_state_preserved": True,
                 "wireguard_peer_traffic": True, "derp_traffic": True, "derp_direct_udp_sent": 0, "derp_tls_verified": True, "derp_tcp": True, "derp_tcp_bytes_each_direction": 65536, "derp_tcp_orderly_close": True, "derp_tcp_transport_key_renewal_verified": True,
-                "derp_opds_authenticated_acquisition": True, "derp_progress_sync": True,
-                "derp_reader_journal_persistence": True, "derp_services_direct_udp_sent": 0,
+                "derp_opds_authenticated_acquisition": True,
+                "derp_services_direct_udp_sent": 0,
                 "derp_tls_http": True, "derp_tls_http_body_bytes": 65536,
                 "derp_tls_wrong_name_rejected": True, "derp_tls_untrusted_rejected": True,
                 "derp_tls_close_notify": True, "derp_tls_truncation_rejected": True,
                 "derp_tcp_minimum_connection_ms": 195000, "derp_tcp_minimum_authenticated_session_installations": 2, "hardware_verified": False,
             }, indent=2) + "\n")
-            print("Independent Headscale control, UDP/TCP/TLS, OPDS acquisition, and progress exchange checks passed")
+            print("Independent Headscale control, UDP/TCP/TLS, OPDS acquisition checks passed")
         finally:
             server.terminate()
             try:

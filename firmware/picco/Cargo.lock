@@ -881,6 +881,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "femto-kosync"
+version = "0.1.0"
+dependencies = [
+ "femto-catalog",
+ "femto-reader",
+ "libc",
+ "md-5",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "url",
+ "zeroize",
+]
+
+[[package]]
 name = "femto-microlink"
 version = "0.1.0"
 dependencies = [
@@ -909,11 +924,11 @@ dependencies = [
  "embuild",
  "esp-idf-svc",
  "femto-catalog",
+ "femto-kosync",
  "femto-microlink",
  "femto-picco-board",
  "femto-reader",
  "femto-remote",
- "femto-sync",
  "log",
  "zeroize",
 ]
@@ -935,6 +950,7 @@ dependencies = [
  "femto-remote",
  "hypher",
  "png",
+ "quick-xml",
  "quireink-platform",
  "quireink-stardict",
  "rustybuzz",
@@ -956,17 +972,6 @@ name = "femto-remote"
 version = "0.1.0"
 dependencies = [
  "hidreport",
-]
-
-[[package]]
-name = "femto-sync"
-version = "0.1.0"
-dependencies = [
- "femto-catalog",
- "femto-reader",
- "serde_json",
- "thiserror 2.0.21",
- "url",
 ]
 
 [[package]]
@@ -1506,6 +1511,16 @@ name = "managed"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ca88d725a0a943b096803bd34e73a4437208b6077654cc4ecb2947a5f91618d"
+
+[[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest",
+]
 
 [[package]]
 name = "memchr"

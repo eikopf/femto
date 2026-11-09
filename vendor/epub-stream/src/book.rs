@@ -2918,6 +2918,7 @@ mod tests {
                 }
             }
             StyledEventOrRun::Event(_)
+            | StyledEventOrRun::SourceElement(_)
             | StyledEventOrRun::NoteBodyStart
             | StyledEventOrRun::NoteBodyEnd
             | StyledEventOrRun::Anchor(_)

@@ -198,7 +198,6 @@ impl Bus for PanelBus {
 pub struct Screen {
     pub tailnet: crate::tailnet_menu::Manager,
     pub catalog: crate::catalog::Jobs,
-    pub progress: crate::progress_sync::Jobs,
     pub storage: Option<crate::storage::Storage>,
     display: Display<PanelBus>,
     input: crate::input::InputTask,
@@ -228,9 +227,6 @@ impl Screen {
         }
         if !self.catalog.cancel_and_wait(Duration::from_secs(5)) {
             return Err("Catalog request still stopping; retry sleep".into());
-        }
-        if !self.progress.cancel_and_wait(Duration::from_secs(5)) {
-            return Err("Progress sync still stopping; retry sleep".into());
         }
         self.set_light(0, 0)?;
         self.display
@@ -470,7 +466,6 @@ pub fn open() -> Result<Screen, String> {
     Ok(Screen {
         tailnet: Default::default(),
         catalog: femto_catalog::worker::Worker::default(),
-        progress: femto_catalog::worker::Worker::default(),
         wifi,
         #[cfg(feature = "bluetooth")]
         bluetooth,

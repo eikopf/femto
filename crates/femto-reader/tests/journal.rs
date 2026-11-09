@@ -241,55 +241,6 @@ fn idle_sleep_defaults_for_old_state_and_roundtrips_all_choices() {
 }
 
 #[test]
-fn sync_checkpoints_default_for_old_state_and_validate_before_writes() {
-    use femto_reader::{
-        layout::Locator,
-        progress::{Progress, SyncCheckpoint},
-    };
-    let id = "a".repeat(64);
-    let mut state = ReaderState::default();
-    state.set_position(&id, Locator::default(), 1);
-    let mut legacy = serde_json::to_value(&state).unwrap();
-    legacy["books"][&id].as_object_mut().unwrap().remove("sync");
-    let mut state: ReaderState = serde_json::from_value(legacy).unwrap();
-    assert!(state.books[&id].sync.is_none());
-    let checkpoint = SyncCheckpoint {
-        source: "https://peer.example/progress/book".into(),
-        baseline: Progress::from_state(&state, &id).unwrap(),
-        etag: "\"saved\"".into(),
-    };
-    state.books.get_mut(&id).unwrap().sync = Some(checkpoint.clone());
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("reader.json");
-    let (mut journal, _) = StateJournal::open(directory.path()).unwrap();
-    state.save(&path).unwrap();
-    journal.save(&state).unwrap();
-    assert_eq!(
-        ReaderState::load(&path).unwrap().books[&id].sync,
-        Some(checkpoint.clone())
-    );
-    for mode in 0..5 {
-        let mut bad = checkpoint.clone();
-        match mode {
-            0 => bad.etag = "W/\"weak\"".into(),
-            1 => bad.etag = "\"".into(),
-            2 => bad.source = "x".repeat(4097),
-            3 => bad.baseline.book_id = "b".repeat(64),
-            _ => bad.baseline.version = 2,
-        }
-        state.books.get_mut(&id).unwrap().sync = Some(bad);
-        assert!(state.save(&path).is_err());
-        assert!(journal.save(&state).is_err());
-        assert_eq!(
-            StateJournal::open(directory.path()).unwrap().1.books[&id].sync,
-            Some(checkpoint.clone())
-        );
-        std::fs::write(&path, serde_json::to_vec(&state).unwrap()).unwrap();
-        assert!(ReaderState::load(&path).is_err());
-    }
-}
-
-#[test]
 fn rotation_defaults_for_legacy_state_and_roundtrips_in_the_journal() {
     use femto_reader::state::Rotation;
     let mut value = serde_json::to_value(ReaderState::default()).unwrap();
@@ -314,4 +265,62 @@ fn rotation_defaults_for_legacy_state_and_roundtrips_in_the_journal() {
     let mut value = serde_json::to_value(state).unwrap();
     value["rotation"] = serde_json::json!("invalid");
     assert!(serde_json::from_value::<ReaderState>(value).is_err());
+}
+
+#[test]
+fn obsolete_sync_metadata_is_discarded_without_losing_reading_state() {
+    use femto_reader::{clipping::Clipping, document::Document, layout::Locator};
+    use sha2::{Digest, Sha256};
+    let mut document = Document::from_text("Book", "First paragraph.").unwrap();
+    let id = document.metadata.id.clone();
+    let start = Locator {
+        chapter: 0,
+        block: 0,
+        byte: 0,
+    };
+    let end = Locator { byte: 5, ..start };
+    let mut state = ReaderState::default();
+    state.set_position(&id, end, 123);
+    state.toggle_bookmark(&id, start, "Saved place".into());
+    let mut clipping = Clipping::capture(&mut document, start..end, 122).unwrap();
+    clipping.highlighted = true;
+    state.add_clipping(clipping).unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+    let mut legacy = expected.clone();
+    legacy["books"][&id]["sync"] = serde_json::json!({
+        "source": "https://old.invalid/progress/book",
+        "baseline": {"version": 1, "book_id": id, "position": end, "recorded_at": 123},
+        "etag": "\"old-version\""
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("reader.json");
+    std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let loaded = ReaderState::load(&path).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&serde_json::to_vec(&loaded).unwrap()).unwrap(),
+        expected
+    );
+    loaded.save(&path).unwrap();
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved, expected);
+
+    let mut slot = b"FEMTOST1".to_vec();
+    slot.extend_from_slice(&1u64.to_le_bytes());
+    slot.extend_from_slice(&serde_json::to_vec(&legacy).unwrap());
+    slot.extend_from_slice(&Sha256::digest(&slot));
+    std::fs::write(directory.path().join("state0.bin"), slot).unwrap();
+    let (mut journal, recovered) = StateJournal::open(directory.path()).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&serde_json::to_vec(&recovered).unwrap())
+            .unwrap(),
+        expected
+    );
+    journal.save(&recovered).unwrap();
+    let (_, reopened) = StateJournal::open(directory.path()).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&serde_json::to_vec(&reopened).unwrap())
+            .unwrap(),
+        expected
+    );
 }

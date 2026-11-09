@@ -191,39 +191,14 @@ try:
                 quit()
             services.tls_mode = "valid"
 
-        def saved():
-            return next(iter(json.loads((directory / "reader.json").read_text())["books"].values()))
-
-        start(directory, folder / "root.der", ("--sync-directory", str(services.books)), existing=True)
-        wait_for(native_online, "native sync runtime online")
-        xdo("key", "--delay", "100", "Escape", "Escape", "Tab", *(["Down"] * 11), "Return", "Return")
-        wait_for(lambda: saved().get("sync") is not None, "tailnet progress creation")
-        assert services.counts["puts"] == 1
-        assert saved()["sync"]["baseline"] == services.remote["record"]
-        services.remote["record"]["position"] = {"chapter": 0, "block": 0, "byte": 1}
-        services.remote["record"]["recorded_at"] += 1
-        services.remote["etag"] += 1
-        xdo("key", "Return")
-        wait_for(lambda: saved()["position"] == services.remote["record"]["position"], "tailnet remote progress application")
-        assert saved()["sync"]["baseline"] == services.remote["record"]
-        assert services.counts["puts"] == 1
-        capture("sync.png")
-        quit()
-        checkpoint = saved()["sync"]
         counts = dict(services.counts)
-        start(directory, folder / "root.der", ("--sync-directory", str(services.books)), existing=True)
-        wait_for(native_online, "native runtime after progress reopen")
-        assert saved()["position"] == services.remote["record"]["position"]
-        assert saved()["sync"] == checkpoint
-        assert services.counts == counts, "reopen started an unsolicited service exchange"
-        quit()
+        assert counts == {"feed": 1, "book": 1}
         assert not services.errors, services.errors
-        assert services.counts == {"feed": 1, "book": 1, "gets": 2, "puts": 1}
         peer_version = services.peer_version
         tls_rejections = dict(services.tls_rejections)
         tls_failures = list(services.tls_failures)
-    report.write_text(json.dumps({"native_enrollment": True, "untrusted_coordinator_rejected": True, "streaming_node_online": True, "explicit_disconnect": True, "existing_identity_reconnect": True, "node_key_renewed": True, "coordinator_node_continuity": True, "rotation_committed": True, "quit_releases_identity_lock": True, "native_tailnet_catalog": True, "native_tailnet_epub_exact": True, "native_tailnet_progress_create": True, "native_tailnet_progress_download": True, "native_tailnet_progress_reopen": True, "service_authentication": True, "service_counts": counts, "official_peer": peer_version, "relay_only": relay_only, "https": https, "tls_rejections": tls_rejections, "tls_failures": tls_failures, "coordinator": subprocess.run(["headscale", "version"], check=True, capture_output=True, text=True).stdout.strip(), "hardware_verified": False}, indent=2) + "\n")
-    print("Native simulator enrollment, renewal, tailnet catalog and progress services passed", flush=True)
+    report.write_text(json.dumps({"native_enrollment": True, "untrusted_coordinator_rejected": True, "streaming_node_online": True, "explicit_disconnect": True, "existing_identity_reconnect": True, "node_key_renewed": True, "coordinator_node_continuity": True, "rotation_committed": True, "quit_releases_identity_lock": True, "native_tailnet_catalog": True, "native_tailnet_epub_exact": True, "service_authentication": True, "service_counts": counts, "official_peer": peer_version, "relay_only": relay_only, "https": https, "tls_rejections": tls_rejections, "tls_failures": tls_failures, "coordinator": subprocess.run(["headscale", "version"], check=True, capture_output=True, text=True).stdout.strip(), "hardware_verified": False}, indent=2) + "\n")
+    print("Native simulator enrollment, renewal, tailnet catalog services passed", flush=True)
 finally:
     if app is not None and app.poll() is None:
         app.terminate()

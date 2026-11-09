@@ -16,6 +16,73 @@ fn reader() -> Reader {
 }
 
 #[test]
+fn saved_navigation_publishes_before_display_and_preserves_annotations() {
+    let mut reader = reader();
+    reader.record_position(10);
+    let original = reader.position();
+    let target = femto_reader::layout::Locator {
+        byte: 4,
+        ..original
+    };
+    let mut job = reader.begin_location(target).unwrap();
+    while !reader.step_navigation(&mut job).unwrap() {}
+    let before = serde_json::to_vec(&reader.state).unwrap();
+    assert!(
+        reader
+            .finish_navigation_saved(job, 20, |_| {
+                Err(std::io::Error::other("disk full").into())
+            })
+            .is_err()
+    );
+    assert_eq!(reader.position(), original);
+    assert_eq!(serde_json::to_vec(&reader.state).unwrap(), before);
+    assert!(reader.begin_navigation(Action::Back).unwrap().is_none());
+
+    let mut job = reader.begin_location(target).unwrap();
+    while !reader.step_navigation(&mut job).unwrap() {}
+    reader.dispatch(Action::ToggleBookmark).unwrap();
+    let id = reader.document.metadata.id.clone();
+    let mut saved = None;
+    reader
+        .finish_navigation_saved(job, 30, |state| {
+            assert_eq!(state.books[&id].position, target);
+            assert_eq!(state.books[&id].bookmarks.len(), 1);
+            saved = Some(serde_json::to_vec(state).unwrap());
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(reader.position(), target);
+    assert_eq!(Some(serde_json::to_vec(&reader.state).unwrap()), saved);
+    reader.dispatch(Action::Back).unwrap();
+    assert_eq!(reader.position(), original);
+}
+
+#[test]
+fn stale_saved_navigation_never_calls_storage() {
+    let mut reader = reader();
+    let target = femto_reader::layout::Locator {
+        byte: 4,
+        ..reader.position()
+    };
+    let mut job = reader.begin_location(target).unwrap();
+    while !reader.step_navigation(&mut job).unwrap() {}
+    reader.dispatch(Action::Chapter(1)).unwrap();
+    assert!(
+        reader
+            .finish_navigation_saved(job, 20, |_| { panic!("stale navigation must not save") })
+            .is_err()
+    );
+    assert!(
+        reader
+            .begin_location(femto_reader::layout::Locator {
+                byte: usize::MAX,
+                ..reader.position()
+            })
+            .is_err()
+    );
+}
+
+#[test]
 fn word_hits_resolve_ligatures_combining_text_and_rtl_clusters_after_rotation() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
     let mut fonts = Fonts::new(Font::load(root.join("DejaVuSerif.ttf")).unwrap());

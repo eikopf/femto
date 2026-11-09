@@ -17,9 +17,9 @@ The implementation status and the validation scope are separate. Host tests can 
 | Library and persistent state | Metadata/search/folders/recent books, bounded incremental scans, cache reuse, host state and alternating device journal slots | SD removal, interrupted writes and physical startup behavior |
 | Touch/button UI and host simulator | Shared reader menus and hit testing; native X11 input/persistence fixtures | Picco touch/buttons and Wayland runtime |
 | OPDS | OPDS 2.0 navigation/search, origin-scoped Basic authentication and streamed EPUB acquisition; host/native LAN and tailnet fixtures | Picco Mbed TLS, storage-failure and cancellation behavior; broader service compatibility |
-| Progress sync | Exact-book source locations, conditional writes, conflict choices and persistent checkpoints; independent HTTPS and journal fixtures | Physical Picco sync/sleep interaction and deployed service compatibility |
+| KOReader sync | v1 client, compatible document hashes, initial EPUB XPointer bridge, CLI and shared reader menus; official server and engine fixtures; enrolled CLI exchange; compiled Picco integration | Wider position/CSS coverage; independent device UI networking and memory; physical operation |
 
-The supported CSS and service subsets are documented in [typography](typography.md), [catalogs](catalogs.md), and [progress sync](progress.md). OPDS 1.x, OAuth, full browser CSS, tables, and embedded EPUB font discovery are not implied by the supported prototype behavior.
+OPDS 1.x, OAuth, full browser CSS, tables, and embedded EPUB font discovery are not implied by the supported prototype behavior.
 
 ## Tailnet client
 

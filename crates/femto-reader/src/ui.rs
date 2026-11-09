@@ -18,9 +18,8 @@ enum Panel {
     Rotation,
     Catalog,
     CatalogSearch,
+    Kosync,
     Tailnet,
-    Sync,
-    SyncReset,
     Contents,
     Chapters,
     Bookmarks,
@@ -56,9 +55,9 @@ enum Panel {
 }
 #[derive(Clone, Copy)]
 enum Command {
+    Kosync(KosyncEvent),
     Catalog(CatalogEvent),
     Tailnet(TailnetEvent),
-    Sync(SyncEvent),
     Sleep,
     Rotation(crate::state::Rotation),
     IdleSleep(crate::state::IdleSleep),
@@ -115,24 +114,22 @@ pub enum CatalogEvent {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KosyncEvent {
+    Open,
+    Push,
+    Pull,
+    Auth,
+    Register,
+    Back,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TailnetEvent {
     Open,
     Connect,
     Provision,
     Stop,
     Renew,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SyncEvent {
-    Open,
-    Start,
-    Cancel,
-    UseLocal,
-    UseRemote,
-    Reset,
-    ConfirmReset,
-    CancelReset,
 }
 
 #[derive(Default)]
@@ -164,11 +161,6 @@ pub struct ReaderUi {
     panel: Option<Panel>,
     rotation_available: bool,
     rotation_request: Option<crate::state::Rotation>,
-    sync_available: bool,
-    sync_event: Option<SyncEvent>,
-    sync_status: String,
-    sync_local: Option<String>,
-    sync_remote: Option<String>,
     tailnet_available: bool,
     tailnet_event: Option<TailnetEvent>,
     tailnet_rows: Vec<String>,
@@ -177,6 +169,10 @@ pub struct ReaderUi {
     catalog_title: String,
     catalog_rows: Vec<String>,
     catalog_query: String,
+    kosync_available: bool,
+    kosync_event: Option<KosyncEvent>,
+    kosync_status: String,
+    kosync_busy: bool,
     selected: usize,
     error: Option<String>,
     device_status: Option<String>,
@@ -191,6 +187,29 @@ pub struct ReaderUi {
 }
 
 impl ReaderUi {
+    pub fn set_kosync_available(&mut self, available: bool) {
+        self.kosync_available = available;
+    }
+    pub fn take_kosync_event(&mut self) -> Option<KosyncEvent> {
+        self.kosync_event.take()
+    }
+    pub fn is_kosync_open(&self) -> bool {
+        matches!(self.panel, Some(Panel::Kosync))
+    }
+    pub fn kosync_status(&self) -> Option<&str> {
+        self.is_kosync_open().then_some(self.kosync_status.as_str())
+    }
+    pub fn set_kosync_view(&mut self, status: &str, busy: bool) {
+        self.kosync_status = status
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(40)
+            .collect();
+        self.kosync_busy = busy;
+        self.panel = Some(Panel::Kosync);
+        self.selected = 0;
+        self.error = None;
+    }
     pub fn set_dictionary_path(&mut self, path: Option<PathBuf>) {
         self.dictionary_choices = path
             .iter()
@@ -419,42 +438,6 @@ impl ReaderUi {
         self.rotation_request.take()
     }
 
-    pub fn set_sync_available(&mut self, available: bool) {
-        self.sync_available = available;
-    }
-    pub fn take_sync_event(&mut self) -> Option<SyncEvent> {
-        self.sync_event.take()
-    }
-    pub fn is_sync_open(&self) -> bool {
-        matches!(self.panel, Some(Panel::Sync))
-    }
-    pub fn open_sync(&mut self) {
-        self.preview = None;
-        self.panel = Some(Panel::Sync);
-        self.selected = 0;
-        self.error = None;
-    }
-    pub fn open_sync_reset(&mut self) {
-        self.preview = None;
-        self.panel = Some(Panel::SyncReset);
-        self.selected = 0;
-        self.error = None;
-    }
-    pub fn set_sync_status(&mut self, status: &str) {
-        if self.is_sync_open() {
-            self.error = None;
-        }
-        self.sync_status = status
-            .chars()
-            .filter(|c| !c.is_control())
-            .take(32)
-            .collect();
-    }
-    pub fn set_sync_conflict(&mut self, local: Option<String>, remote: Option<String>) {
-        let bounded = |s: String| s.chars().filter(|c| !c.is_control()).take(25).collect();
-        self.sync_local = local.map(bounded);
-        self.sync_remote = remote.map(bounded);
-    }
     pub fn book_path(&self, id: &str) -> Option<PathBuf> {
         self.library
             .entries
@@ -834,12 +817,12 @@ impl ReaderUi {
                 self.error = None;
                 Ok(Effect::Redraw)
             }
-            Some(Panel::SyncReset) => {
-                self.sync_event = Some(SyncEvent::CancelReset);
-                Ok(Effect::Redraw)
-            }
             Some(Panel::Catalog | Panel::CatalogSearch) => {
                 self.catalog_event = Some(CatalogEvent::Back);
+                Ok(Effect::Redraw)
+            }
+            Some(Panel::Kosync) => {
+                self.kosync_event = Some(KosyncEvent::Back);
                 Ok(Effect::Redraw)
             }
             Some(Panel::Reflowing) => Ok(self.cancel_reflow()),
@@ -1152,12 +1135,12 @@ impl ReaderUi {
     fn activate(&mut self, reader: &mut Reader, command: Command) -> Result<Effect> {
         self.error = None;
         let result = match command {
-            Command::Rotation(rotation) => {
-                self.rotation_request = Some(rotation);
+            Command::Kosync(event) => {
+                self.kosync_event = Some(event);
                 Ok(Effect::Redraw)
             }
-            Command::Sync(event) => {
-                self.sync_event = Some(event);
+            Command::Rotation(rotation) => {
+                self.rotation_request = Some(rotation);
                 Ok(Effect::Redraw)
             }
             Command::Tailnet(event) => {
@@ -1477,6 +1460,31 @@ impl ReaderUi {
     }
     fn entries(&self, reader: &Reader) -> Vec<(String, Command)> {
         match self.panel.unwrap_or(Panel::Root) {
+            Panel::Kosync => {
+                let mut rows = vec![(self.kosync_status.clone(), Command::Noop)];
+                if !self.kosync_busy {
+                    rows.extend([
+                        (
+                            "Upload reading position".into(),
+                            Command::Kosync(KosyncEvent::Push),
+                        ),
+                        (
+                            "Download reading position".into(),
+                            Command::Kosync(KosyncEvent::Pull),
+                        ),
+                        ("Check account".into(), Command::Kosync(KosyncEvent::Auth)),
+                        (
+                            "Create account".into(),
+                            Command::Kosync(KosyncEvent::Register),
+                        ),
+                    ]);
+                }
+                rows.push((
+                    if self.kosync_busy { "Cancel" } else { "Back" }.into(),
+                    Command::Kosync(KosyncEvent::Back),
+                ));
+                rows
+            }
             Panel::Catalog => self
                 .catalog_rows
                 .iter()
@@ -1505,6 +1513,10 @@ impl ReaderUi {
             ]
             .into_iter()
             .chain(
+                self.kosync_available
+                    .then(|| ("KOReader sync".into(), Command::Kosync(KosyncEvent::Open))),
+            )
+            .chain(
                 self.catalog_available
                     .then(|| ("Catalog".into(), Command::Catalog(CatalogEvent::Open))),
             )
@@ -1524,10 +1536,6 @@ impl ReaderUi {
             .chain(
                 self.tailnet_available
                     .then(|| ("Tailnet".into(), Command::Tailnet(TailnetEvent::Open))),
-            )
-            .chain(
-                self.sync_available
-                    .then(|| ("Sync progress".into(), Command::Sync(SyncEvent::Open))),
             )
             .chain(
                 self.rotation_available
@@ -1727,50 +1735,6 @@ impl ReaderUi {
                 })
                 .collect()
             }
-            Panel::Sync => {
-                let mut rows = vec![
-                    ("Sync current book".into(), Command::Sync(SyncEvent::Start)),
-                    ("Cancel sync".into(), Command::Sync(SyncEvent::Cancel)),
-                    (self.sync_status.clone(), Command::Noop),
-                ];
-                if let Some(local) = &self.sync_local {
-                    rows.push((format!("Local: {local}"), Command::Noop));
-                    rows.push((
-                        format!(
-                            "Remote: {}",
-                            self.sync_remote.as_deref().unwrap_or("absent")
-                        ),
-                        Command::Noop,
-                    ));
-                    rows.push((
-                        "Use shown local position".into(),
-                        Command::Sync(SyncEvent::UseLocal),
-                    ));
-                    if self.sync_remote.is_some() {
-                        rows.push((
-                            "Use shown remote position".into(),
-                            Command::Sync(SyncEvent::UseRemote),
-                        ));
-                    }
-                }
-                rows.push((
-                    "Forget sync history".into(),
-                    Command::Sync(SyncEvent::Reset),
-                ));
-                rows
-            }
-            Panel::SyncReset => vec![
-                (
-                    "Keep sync history".into(),
-                    Command::Sync(SyncEvent::CancelReset),
-                ),
-                (
-                    "Forget this book's history".into(),
-                    Command::Sync(SyncEvent::ConfirmReset),
-                ),
-                (reader.document.metadata.title.clone(), Command::Noop),
-                ("Reading position is kept".into(), Command::Noop),
-            ],
             Panel::Tailnet => vec![
                 (
                     "Connect existing identity".into(),
@@ -2154,9 +2118,8 @@ impl ReaderUi {
             Panel::Root => &reader_title,
             Panel::Rotation => "Screen orientation",
             Panel::Tailnet => "Tailnet",
-            Panel::Sync => "Sync progress",
-            Panel::SyncReset => "Forget sync history?",
             Panel::Catalog => &self.catalog_title,
+            Panel::Kosync => "KOReader sync",
             Panel::Contents => "Contents",
             Panel::Chapters => "Chapters",
             Panel::Bookmarks => "Bookmarks",

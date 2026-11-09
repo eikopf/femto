@@ -52,11 +52,14 @@ impl UdpTransport {
         }
         Ok(())
     }
-    /// Reads at most one datagram. The extra byte detects oversized input even
-    /// when the operating system truncates a much larger UDP payload.
-    pub fn receive(&self) -> io::Result<Option<Datagram>> {
-        let mut bytes = [0; MAX_DATAGRAM + 1];
-        let (length, source) = match self.socket()?.recv_from(&mut bytes) {
+    /// Reads one datagram into caller-owned storage without allocating. The extra
+    /// byte detects oversized input even when the OS truncates the datagram.
+    /// Only the returned prefix contains the current packet; the tail is unchanged.
+    pub fn receive_into(
+        &self,
+        bytes: &mut [u8; MAX_DATAGRAM + 1],
+    ) -> io::Result<Option<(SocketAddr, usize)>> {
+        let (length, source) = match self.socket()?.recv_from(bytes) {
             Ok(value) => value,
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(None),
             Err(error) => return Err(error),
@@ -67,10 +70,17 @@ impl UdpTransport {
                 "oversized UDP datagram",
             ));
         }
-        Ok(Some(Datagram {
-            source,
-            bytes: bytes[..length].to_vec(),
-        }))
+        Ok(Some((source, length)))
+    }
+    /// Allocating convenience API for callers that retain a datagram.
+    pub fn receive(&self) -> io::Result<Option<Datagram>> {
+        let mut bytes = [0; MAX_DATAGRAM + 1];
+        Ok(self
+            .receive_into(&mut bytes)?
+            .map(|(source, length)| Datagram {
+                source,
+                bytes: bytes[..length].to_vec(),
+            }))
     }
     /// Closing the socket does not alter authorization. The network actor must
     /// disconnect its coordinator and maintain handshake state when stopping.
@@ -117,6 +127,40 @@ mod tests {
             Ok(())
         }
     }
+    #[test]
+    fn borrowed_receive_handles_empty_maximum_oversized_and_reused_buffers() {
+        let receiver = socket();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut buffer = [0xa5; MAX_DATAGRAM + 1];
+        assert!(receiver.receive_into(&mut buffer).unwrap().is_none());
+        for length in [0, MAX_DATAGRAM, MAX_DATAGRAM + 1, 3] {
+            sender
+                .send_to(&vec![0x42; length], receiver.local_addr().unwrap())
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let result = loop {
+                match receiver.receive_into(&mut buffer) {
+                    Ok(None) if Instant::now() < deadline => std::thread::yield_now(),
+                    result => break result,
+                }
+            };
+            if length > MAX_DATAGRAM {
+                assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
+            } else {
+                let (source, received) = result.unwrap().expect("loopback datagram");
+                assert_eq!(source, sender.local_addr().unwrap());
+                assert_eq!(received, length);
+                assert!(buffer[..received].iter().all(|byte| *byte == 0x42));
+            }
+        }
+        let mut receiver = receiver;
+        receiver.close();
+        assert_eq!(
+            receiver.receive_into(&mut buffer).unwrap_err().kind(),
+            io::ErrorKind::NotConnected
+        );
+    }
+
     #[test]
     fn loopback_handshake_confirmation_and_revocation() {
         let a = DeviceIdentity::generate().unwrap();

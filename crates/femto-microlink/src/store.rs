@@ -93,11 +93,9 @@ impl HostStore {
         let (identity, epoch, fresh) = match fs::symlink_metadata(&record) {
             Ok(_) => {
                 check_path(&record, false)?;
-                let mut bytes = Zeroizing::new(Vec::new());
-                File::open(&record)?
-                    .take((LENGTH + 1) as u64)
-                    .read_to_end(&mut bytes)?;
-                let (identity, epoch) = decode(&bytes)?;
+                let mut bytes = Zeroizing::new([0; LENGTH + 1]);
+                let length = read_record(File::open(&record)?, &mut bytes[..])?;
+                let (identity, epoch) = decode(&bytes[..length])?;
                 (identity, epoch, false)
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -112,11 +110,12 @@ impl HostStore {
         let pending = match fs::symlink_metadata(&pending_path) {
             Ok(_) => {
                 check_path(&pending_path, false)?;
-                let mut bytes = Zeroizing::new(Vec::new());
-                File::open(&pending_path)?
-                    .take((crate::rotation::RECORD_LEN + 1) as u64)
-                    .read_to_end(&mut bytes)?;
-                Some(crate::rotation::PendingRotation::decode(&bytes, &identity)?)
+                let mut bytes = Zeroizing::new([0; crate::rotation::RECORD_LEN + 1]);
+                let length = read_record(File::open(&pending_path)?, &mut bytes[..])?;
+                Some(crate::rotation::PendingRotation::decode(
+                    &bytes[..length],
+                    &identity,
+                )?)
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
@@ -265,6 +264,21 @@ impl EpochStore for HostStore {
     }
 }
 
+// Fixed storage avoids reallocating buffers that contain private keys. The
+// caller includes one extra byte so oversized records cannot pass decoding.
+fn read_record(mut reader: impl Read, output: &mut [u8]) -> std::io::Result<usize> {
+    let mut length = 0;
+    while length < output.len() {
+        match reader.read(&mut output[length..]) {
+            Ok(0) => break,
+            Ok(count) => length += count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(length)
+}
+
 fn check_path(path: &Path, directory: bool) -> Result<(), StoreError> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink()
@@ -300,6 +314,30 @@ fn decode(bytes: &[u8]) -> Result<(DeviceIdentity, u64), StoreError> {
 mod tests {
     use super::*;
     use crate::timestamp::TimestampClock;
+
+    #[test]
+    fn fixed_record_reads_preserve_fragmented_and_oversized_detection() {
+        struct Fragmented<'a>(&'a [u8], bool);
+        impl Read for Fragmented<'_> {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                self.1 = !self.1;
+                if self.1 {
+                    return Err(std::io::ErrorKind::Interrupted.into());
+                }
+                let count = output.len().min(self.0.len()).min(3);
+                output[..count].copy_from_slice(&self.0[..count]);
+                self.0 = &self.0[count..];
+                Ok(count)
+            }
+        }
+        for length in [0, LENGTH - 1, LENGTH, LENGTH + 1, LENGTH * 2] {
+            let input = vec![0x42; length];
+            let mut output = [0; LENGTH + 1];
+            let count = read_record(Fragmented(&input, false), &mut output).unwrap();
+            assert_eq!(count, length.min(output.len()));
+            assert!(output[..count].iter().all(|byte| *byte == 0x42));
+        }
+    }
 
     #[test]
     fn pending_rotation_survives_restart_and_requires_candidate_authorization() {

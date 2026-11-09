@@ -126,3 +126,5 @@ The opt-in `./scripts/check-headscale` runs a temporary TLS-protected local Head
 | Catalog and progress | Independent authenticated acquisition and conditional sync through the official peer; reader-journal reopen; native and one-shot CLI normal/DERP-only HTTPS and certificate rejection | Broader terminal browsing, upload ambiguity and additional service faults, device UI/network/storage operation, production service deployment |
 
 `./scripts/check` runs local tests and static checks. `./scripts/check-simulator` exercises the native window under Xvfb. `./scripts/check-headscale` runs the independent protocol/service fixture. `./scripts/build-picco` builds firmware without installing it. The [implementation status](docs/status.md) retains the remaining feature scope; passing one of these commands does not establish the unqualified behavior in the table.
+
+[Network diagnostics](docs/diagnostics.md) describes queue and transport counters, host access, and periodic Picco logs. The [2026-11-09 software review](docs/review-2026-11-09.md) records allocation changes, security review scope, validation, and remaining profiling targets.

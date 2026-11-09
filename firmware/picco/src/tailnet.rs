@@ -163,6 +163,7 @@ pub struct Runtime {
     retry: Reconnect,
     reconnecting: bool,
     stopped: bool,
+    next_diagnostics_ms: u64,
 }
 impl Runtime {
     /// The caller explicitly opens or provisions the store before starting.
@@ -225,6 +226,7 @@ impl Runtime {
             retry: Reconnect::default(),
             reconnecting: false,
             stopped: false,
+            next_diagnostics_ms: 30_000,
         })
     }
     pub fn set_local_address_source(&mut self, source: femto_microlink::endpoints::LocalAddress) {
@@ -360,6 +362,11 @@ impl Runtime {
             self.owner.run(clock, |network| {
                 let now = clock().monotonic_ms;
                 let assigned = network.local_address(now)?;
+                if now >= self.next_diagnostics_ms {
+                    self.next_diagnostics_ms = now.saturating_add(30_000);
+                    #[cfg(target_os = "espidf")]
+                    log::info!("Tailnet diagnostics: {:?}", network.diagnostics());
+                }
                 if let Some(publisher) = &mut self.publisher {
                     if assigned.is_some() {
                         self.assigned = true;

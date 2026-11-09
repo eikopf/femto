@@ -73,6 +73,10 @@ impl<C: FnMut() -> Clock> Driver for Runtime<C> {
     }
 }
 impl<C: FnMut() -> Clock> Runtime<C> {
+    /// Reads content-free network counters through the control authorization lock.
+    pub fn diagnostics(&mut self) -> io::Result<crate::network::Diagnostics> {
+        self.base.run(|network, _| Ok(network.diagnostics()))
+    }
     /// Exposes terminal versus retryable control failure for application status.
     pub fn stop_reason(&self) -> Option<crate::control_worker::StopReason> {
         self.base.owner.stop_reason()

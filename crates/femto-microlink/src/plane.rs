@@ -59,6 +59,10 @@ pub struct PendingPacket {
     bytes: Vec<u8>,
 }
 impl PendingPacket {
+    pub(crate) fn capacity(&self) -> usize {
+        self.bytes.capacity()
+    }
+
     pub(crate) fn tcp_endpoints(&self) -> Option<(std::net::SocketAddrV4, std::net::SocketAddrV4)> {
         use smoltcp::wire::{Ipv4Packet, TcpPacket};
         if self.bytes.get(9) != Some(&6) {

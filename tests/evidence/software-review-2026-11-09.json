@@ -1,0 +1,51 @@
+{
+  "feature": "Software review, bounded diagnostics and UDP receive allocation removal",
+  "status": "passed",
+  "hardware_verified": false,
+  "source_sha256": {
+    "crates/femto-microlink/src/host_runtime.rs": "1c56cc8fabf1029351014a1e1d7e2d4e2cddf48a1909000e96a062e8386bb808",
+    "crates/femto-microlink/src/network.rs": "e465b1d43642e9b2aaa74277cc30e43f131191f94b426d8245212440b2e7f326",
+    "crates/femto-microlink/src/plane.rs": "2267edb67fae65ac96c51b28e2bbdb85fe523f1871542ffcca53c3d0b239c15b",
+    "crates/femto-microlink/src/socket_network.rs": "414cfad34be1a34f5753e4512f8a3ef8e8104fc1f8c82c76acde70f2617657df",
+    "crates/femto-microlink/src/socket_udp.rs": "f51dd22092f03c91c272a8f0d3d6ab195b87901618234212f1b08e2337dab006",
+    "crates/femto-microlink/src/store.rs": "d53ea5bf6afaa4712454c13be8f323ce975885eabb1c047cf98c4cc45a712716",
+    "firmware/picco/src/tailnet.rs": "b697997de8a212ce55ad2b0e7cb95f95161b43bf5f2ee774d947de978f004a32"
+  },
+  "checks": {
+    "command": "./scripts/check",
+    "exit_code": 0,
+    "rust_passed": 1111,
+    "rust_batches": 82,
+    "rust_ignored": 1,
+    "python_tests": 16,
+    "log_sha256": "1d11be866e0f4d8680925e873dc27e00906833f471b86fcb738d7deaec10c2d7"
+  },
+  "firmware": {
+    "exit_code": 0,
+    "variant": "grayscale with Bluetooth",
+    "manifest": {
+      "image": "femto-picco.bin",
+      "sha256": "328dc172509eaf01e838eaa6a1ca1a6f9d415161ceb8947645a259f8c9f42635",
+      "bytes": 5707488,
+      "chip": "esp32s3",
+      "display_levels": 4,
+      "bluetooth": true,
+      "reference_app_offset": "0xE0000",
+      "reference_app_size": "0xE70000",
+      "hardware_verified": false,
+      "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+    },
+    "log_sha256": "6fa546a8095004cc2bda3f2889922dc005c3bc68d649c1af8e7a8368dd41a2e1"
+  },
+  "scope": [
+    "Caller-buffer UDP ingress preserves oversized rejection and removes the shared poller datagram allocation/copy.",
+    "Fixed-size zeroizing host identity reads avoid growing private-key buffers.",
+    "Content-free saturating network counters, queue capacity snapshots, host API and periodic device logs."
+  ],
+  "not_verified": [
+    "Physical resource and performance measurements",
+    "New clean relocated firmware reproducibility",
+    "Independent Headscale fixture on this changed source",
+    "Complete repository security audit"
+  ]
+}

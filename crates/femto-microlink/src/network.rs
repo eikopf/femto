@@ -129,7 +129,25 @@ impl RelayPlan {
     }
 }
 
+/// Content-free counters for one network owner. Counters saturate and survive
+/// disconnects; a new owner starts at zero. Receive acceptance is not application
+/// delivery. Send acceptance means the adapter accepted the packet, not delivery.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Diagnostics {
+    pub receive_calls: u64,
+    pub receive_rejected: u64,
+    pub send_accepted: u64,
+    pub send_would_block: u64,
+    pub send_errors: u64,
+    pub outgoing_packets: usize,
+    pub outgoing_capacity_bytes: usize,
+    pub incoming_packets: usize,
+    pub incoming_capacity_bytes: usize,
+    pub tcp_connections: usize,
+}
+
 pub struct Network<S: EpochStore> {
+    diagnostics: Diagnostics,
     local_node: Key,
     coordinator: Coordinator,
     discovery: Discovery,
@@ -172,6 +190,7 @@ impl<S: EpochStore> Network<S> {
         address: Option<Ipv4Addr>,
     ) -> Result<Self, Error> {
         Ok(Self {
+            diagnostics: Diagnostics::default(),
             local_node: identity.node_key().public(),
             coordinator: match address {
                 Some(address) => Coordinator::new(
@@ -207,6 +226,18 @@ impl<S: EpochStore> Network<S> {
             silence: BTreeMap::new(),
             next_handshake_ms: 0,
         })
+    }
+    /// Allocation-free snapshot. Buffer capacities exclude container metadata,
+    /// allocator overhead, protocol state and transport-adapter queues.
+    pub fn diagnostics(&self) -> Diagnostics {
+        Diagnostics {
+            outgoing_packets: self.outgoing.len(),
+            outgoing_capacity_bytes: self.outgoing.iter().map(|p| p.bytes.capacity()).sum(),
+            incoming_packets: self.incoming.len(),
+            incoming_capacity_bytes: self.incoming.iter().map(|(_, p, _)| p.capacity()).sum(),
+            tcp_connections: self.tcp_connections.len(),
+            ..self.diagnostics
+        }
     }
     /// Authenticated session installations, including peer-initiated renewals.
     pub fn completed_handshakes(&self) -> crate::handshake::Completed {
@@ -999,6 +1030,14 @@ impl<S: EpochStore> Network<S> {
         self.queue(peer, Destination::Relay, packet, now_ms)
     }
     pub fn receive(&mut self, source: Source, packet: &[u8], now_ms: u64) -> Result<(), Error> {
+        self.diagnostics.receive_calls = self.diagnostics.receive_calls.saturating_add(1);
+        let result = self.receive_inner(source, packet, now_ms);
+        if result.is_err() {
+            self.diagnostics.receive_rejected = self.diagnostics.receive_rejected.saturating_add(1);
+        }
+        result
+    }
+    fn receive_inner(&mut self, source: Source, packet: &[u8], now_ms: u64) -> Result<(), Error> {
         self.tick(now_ms)?;
         if packet.len() > crate::derp::MAX_DATAGRAM {
             return Err(Error::Packet);
@@ -1155,6 +1194,8 @@ impl<S: EpochStore> Network<S> {
             };
             match send(route, packet.peer, &packet.bytes, &permit) {
                 Ok(()) => {
+                    self.diagnostics.send_accepted =
+                        self.diagnostics.send_accepted.saturating_add(1);
                     if packet.session.is_some() && packet.bytes.len() > 32 {
                         // Output was accepted; timer setup cannot undo the send.
                         let _ = self.arm_silence(&packet, now_ms);
@@ -1189,6 +1230,13 @@ impl<S: EpochStore> Network<S> {
                     return Ok(true);
                 }
                 Err(error) => {
+                    if error.kind() == io::ErrorKind::WouldBlock {
+                        self.diagnostics.send_would_block =
+                            self.diagnostics.send_would_block.saturating_add(1);
+                    } else {
+                        self.diagnostics.send_errors =
+                            self.diagnostics.send_errors.saturating_add(1);
+                    }
                     if error.kind() != io::ErrorKind::WouldBlock
                         && let Route::Direct(endpoint) = route
                     {
@@ -1299,6 +1347,52 @@ mod tests {
         ip[10..12].copy_from_slice(&(!(checksum as u16)).to_be_bytes());
         ip
     }
+    #[test]
+    fn diagnostics_track_backpressure_failures_and_owner_lifetime_without_payloads() {
+        let a = DeviceIdentity::generate().unwrap();
+        let b = DeviceIdentity::generate().unwrap();
+        let mut owner = network(&a, &b, 1, 2);
+        let source = Source::Udp("192.0.2.2:1234".parse().unwrap());
+        assert!(
+            owner
+                .receive(source, b"private invalid payload", 0)
+                .is_err()
+        );
+        owner.initiate(b.node_key().public(), 0).unwrap();
+        let queued = owner.diagnostics();
+        assert_eq!(queued.outgoing_packets, 1);
+        assert!(queued.outgoing_capacity_bytes > 0);
+        assert!(
+            !owner
+                .flush_one(0, |_, _, _| Err(io::ErrorKind::WouldBlock.into()))
+                .unwrap()
+        );
+        assert!(
+            owner
+                .flush_one(0, |_, _, _| Err(io::ErrorKind::NetworkUnreachable.into()))
+                .is_err()
+        );
+        assert!(owner.flush_one(0, |_, _, _| Ok(())).unwrap());
+        let stats = owner.diagnostics();
+        assert_eq!((stats.receive_calls, stats.receive_rejected), (1, 1));
+        assert_eq!(
+            (
+                stats.send_accepted,
+                stats.send_would_block,
+                stats.send_errors
+            ),
+            (1, 1, 1)
+        );
+        assert_eq!(stats.outgoing_packets, 0);
+        assert_eq!(stats.outgoing_capacity_bytes, 0);
+        assert!(!format!("{stats:?}").contains("private"));
+        owner.disconnect();
+        assert_eq!(owner.diagnostics(), stats);
+        owner.diagnostics.receive_calls = u64::MAX;
+        assert!(owner.receive(source, b"invalid", 1).is_err());
+        assert_eq!(owner.diagnostics().receive_calls, u64::MAX);
+    }
+
     #[test]
     fn idle_tick_retires_expired_transport_key_owners_without_new_traffic() {
         let a = DeviceIdentity::generate().unwrap();

@@ -107,8 +107,9 @@ pub(crate) fn receive_and_probe<S: EpochStore>(
     now: u64,
     stats: &mut PollStats,
 ) -> Result<(), network::Error> {
+    let mut buffer = [0; crate::derp::MAX_DATAGRAM + 1];
     for _ in 0..RECEIVE_BUDGET {
-        let datagram = match udp.receive() {
+        let (source, length) = match udp.receive_into(&mut buffer) {
             Ok(Some(datagram)) => datagram,
             Ok(None) => break,
             Err(error) if error.kind() == io::ErrorKind::InvalidData => {
@@ -119,9 +120,9 @@ pub(crate) fn receive_and_probe<S: EpochStore>(
             Err(error) => return Err(error.into()),
         };
         stats.received += 1;
-        match network.receive(Source::Udp(datagram.source), &datagram.bytes, now) {
+        match network.receive(Source::Udp(source), &buffer[..length], now) {
             Ok(()) => {
-                if datagram.bytes.get(..4) == Some(&2u32.to_le_bytes()) {
+                if buffer[..length].get(..4) == Some(&2u32.to_le_bytes()) {
                     stats.handshake_responses += 1;
                 }
             }

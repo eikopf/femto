@@ -2,6 +2,8 @@
 
 Femto is a Rust e-reader prototype targeting the BOOX Picco. The implementation combines existing EPUB, typography, graphics, and Tailscale protocol libraries with reader behavior and device integration. The prototype includes a host CLI, a native simulator, reproducible Picco firmware builds, and an independently reusable Rust tailnet client. Physical Picco operation remains unverified.
 
+[Prototype qualification](docs/qualification.md) maps implemented requirements to host, build, independent-network and remaining physical evidence.
+
 The reader opens EPUB and TXT books, shapes bidirectional text with custom and fallback fonts, renders images, and retains source-based positions and bookmarks across layout changes. Shared menus provide library search, chapter and link navigation, typography, and device controls. The `femto-microlink` crate implements authenticated enrollment, durable identities, bounded peer maps and policy, direct WireGuard, DERP transport, and TCP/UDP application access. Independent local Headscale and official Tailscale fixtures verify enrollment, revocation, reconnection, transport-key renewal, TLS, catalog acquisition, and progress exchange. This evidence does not establish Tailscale SaaS enrollment or physical Picco behavior.
 
 Shared menus also save visible page text as clippings, display excerpts, and confirm deletion. `femto clippings-export BOOK --state STATE.json` exports source-verified records as JSON; `--journal DIRECTORY` reads a copied Picco state journal instead. [Clipping behavior and limits](docs/navigation.md#saved-clippings) cover selection, persistent highlights, exports, and remaining cross-page selection and device controls.

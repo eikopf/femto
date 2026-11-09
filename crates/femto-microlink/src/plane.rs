@@ -153,6 +153,14 @@ impl DataPlane {
         self.synchronized = false;
     }
 
+    /// Retire expired transport keys even when no application traffic arrives.
+    /// Owners must poll this with their monotonic clock while retaining the plane.
+    pub fn maintain(&mut self, now_ms: u64) -> Result<(), PlaneError> {
+        self.clock(now_ms)?;
+        self.sessions.retire_expired(now_ms);
+        Ok(())
+    }
+
     fn clock(&mut self, now_ms: u64) -> Result<(), PlaneError> {
         let previous = self.last_ms;
         self.last_ms = now_ms;

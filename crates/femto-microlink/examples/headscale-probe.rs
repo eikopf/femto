@@ -3,6 +3,9 @@
 #[path = "support/transport.rs"]
 mod fixture_transport;
 #[cfg(all(unix, not(target_os = "espidf")))]
+#[path = "support/path_migration.rs"]
+mod path_migration;
+#[cfg(all(unix, not(target_os = "espidf")))]
 #[path = "support/response_loss.rs"]
 mod response_loss;
 #[cfg(all(unix, not(target_os = "espidf")))]
@@ -352,6 +355,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut reported_written = 0;
             let mut dropped_data = Vec::new();
             let mut dropped_other = 0usize;
+            let mut migration = (std::env::var("FEMTO_HEADSCALE_MIGRATION_ONLY").as_deref()
+                == Ok("1")
+                && !relay_only)
+                .then(path_migration::Migration::default);
             loop {
                 let now = clock();
                 if now.monotonic_ms >= 330000 {
@@ -455,6 +462,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             udp.as_ref().unwrap(),
                             now,
                             &mut dropped_response_at,
+                        )?
+                    } else if let Some(migration) = &mut migration {
+                        migration.pump(
+                            path_migration::Pump {
+                                owner: &mut owner,
+                                pool: &mut relays,
+                                udp: udp.as_ref().unwrap(),
+                                connector: &connector,
+                                address,
+                                key: identity.node_key(),
+                                clock,
+                            },
+                            established_at.map(|at| now.monotonic_ms - at),
+                            read,
                         )?
                     } else {
                         socket_network::poll_udp(&mut owner, udp.as_ref().unwrap(), now)?
@@ -575,6 +596,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .first()
                             .copied()
                             .ok_or("independent transport-data loss injection missing")?;
+                    let migration_report =
+                        migration.as_ref().map(|m| m.report(read)).transpose()?;
                     relays.close();
                     if received == 0 || sent == 0 || !owner.close_and_wait(Duration::from_secs(2)) {
                         return Err("TCP transport evidence or joined shutdown missing".into());
@@ -582,7 +605,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!(
                         "{}",
                         serde_json::json!({"mode":args[5], "independent_peer_tcp":true,
-                        "derp_traffic":relay_only, "direct_udp_sent":if relay_only {0} else {sent},
+                        "derp_traffic":relay_only || migration.is_some(), "direct_udp_sent":if relay_only {0} else {migration.as_ref().map_or(sent, |m| m.direct_sent())},
                         "bytes_written":written, "bytes_read":read, "remote_eof":eof,
                         "tcp_closed":true, "renewal_elapsed_ms":elapsed,
                         "authenticated_handshake_responses":handshake_responses,
@@ -605,7 +628,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "data_drop_installed_sessions":sessions_at_drop,
                         "timer_only_handshake_recovery":true,
                         "handshake_retry_recovery_ms":retry_recovery_ms,
-                        "transport_received":received, "transport_sent":sent})
+                        "transport_received":received, "transport_sent":sent,
+                        "path_migration":migration_report})
                     );
                     return Ok(());
                 }

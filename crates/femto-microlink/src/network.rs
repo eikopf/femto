@@ -244,6 +244,7 @@ impl<S: EpochStore> Network<S> {
             self.outgoing.clear();
             self.incoming.clear();
         }
+        self.coordinator.data_plane().maintain(now_ms)?;
         self.handshakes
             .maintain(self.coordinator.data_plane(), now_ms)?;
         self.discovery.maintain(&mut self.coordinator, now_ms)?;
@@ -1094,7 +1095,8 @@ impl<S: EpochStore> Network<S> {
         )))
     }
     /// Invokes one nonblocking transport send under exclusive ownership. A
-    /// WouldBlock retains work; other failures retain it until its deadline.
+    /// WouldBlock retains work. Failed discovery probes are discarded; their
+    /// scheduler supplies a fresh attempt. Other failures retain queued work.
     /// Selection and authorization are rechecked on every retry.
     pub fn flush_one(
         &mut self,
@@ -1192,7 +1194,11 @@ impl<S: EpochStore> Network<S> {
                     {
                         self.discovery.failed_endpoint(packet.peer, endpoint);
                     }
-                    self.outgoing.push_back(packet);
+                    if error.kind() == io::ErrorKind::WouldBlock
+                        || !matches!(packet.destination, Destination::Probe(_))
+                    {
+                        self.outgoing.push_back(packet);
+                    }
                     if error.kind() == io::ErrorKind::WouldBlock {
                         return Ok(false);
                     }
@@ -1293,6 +1299,50 @@ mod tests {
         ip[10..12].copy_from_slice(&(!(checksum as u16)).to_be_bytes());
         ip
     }
+    #[test]
+    fn idle_tick_retires_expired_transport_key_owners_without_new_traffic() {
+        let a = DeviceIdentity::generate().unwrap();
+        let b = DeviceIdentity::generate().unwrap();
+        let ak = a.node_key().public();
+        let bk = b.node_key().public();
+        let mut na = network(&a, &b, 1, 2);
+        let mut nb = network(&b, &a, 2, 1);
+        na.ensure_session(bk, 0).unwrap();
+        deliver(&mut na, &mut nb, ak, "192.0.2.1:1234".parse().unwrap(), 1);
+        deliver(&mut nb, &mut na, bk, "192.0.2.2:1234".parse().unwrap(), 2);
+        deliver(&mut na, &mut nb, ak, "192.0.2.1:1234".parse().unwrap(), 3);
+        let alice = std::sync::Arc::downgrade(
+            &na.coordinator
+                .data_plane()
+                .session_identity(bk, 3)
+                .unwrap()
+                .unwrap(),
+        );
+        let bob = std::sync::Arc::downgrade(
+            &nb.coordinator
+                .data_plane()
+                .session_identity(ak, 3)
+                .unwrap()
+                .unwrap(),
+        );
+        na.tick(180_001).unwrap();
+        nb.tick(180_000).unwrap();
+        assert!(alice.upgrade().is_some());
+        assert!(bob.upgrade().is_some());
+        na.tick(180_002).unwrap();
+        nb.tick(180_001).unwrap();
+        assert!(
+            alice.upgrade().is_none(),
+            "expired initiator key owner retained"
+        );
+        assert!(
+            bob.upgrade().is_none(),
+            "expired responder key owner retained"
+        );
+        assert!(na.coordinator.local_address(180_002).unwrap().is_some());
+        assert!(nb.coordinator.local_address(180_001).unwrap().is_some());
+    }
+
     #[test]
     fn home_relay_is_independent_of_peers_and_excludes_ineligible_regions() {
         let a = DeviceIdentity::generate().unwrap();
@@ -2550,6 +2600,51 @@ mod tests {
         );
         assert!(na.send_ip(bk, &udp(), 13).is_err());
     }
+    #[test]
+    fn failed_discovery_probe_waits_for_fresh_scheduled_attempt() {
+        let a = DeviceIdentity::generate().unwrap();
+        let b = DeviceIdentity::generate().unwrap();
+        let bk = b.node_key().public();
+        let mut n = network(&a, &b, 1, 2);
+        assert!(n.probe(bk, 0).unwrap());
+        let mut first = Vec::new();
+        assert!(
+            !n.flush_one(0, |_, _, bytes| {
+                first = bytes.to_vec();
+                Err(io::ErrorKind::WouldBlock.into())
+            })
+            .unwrap()
+        );
+        assert_eq!(n.outgoing.len(), 1);
+        assert!(
+            n.flush_one(1, |_, _, bytes| {
+                assert_eq!(bytes, first);
+                Err(io::ErrorKind::NetworkUnreachable.into())
+            })
+            .is_err()
+        );
+        assert!(
+            n.outgoing.is_empty(),
+            "failed probe retained for immediate retry"
+        );
+        for now in 2..100 {
+            assert!(
+                !n.flush_one(now, |_, _, _| panic!("failed probe retried"))
+                    .unwrap()
+            );
+            assert!(!n.probe(bk, now).unwrap());
+        }
+        assert!(!n.probe(bk, 4999).unwrap());
+        assert!(n.probe(bk, 5000).unwrap());
+        assert!(
+            n.flush_one(5000, |_, _, bytes| {
+                assert_ne!(bytes, first, "fresh probe must use a new transaction");
+                Ok(())
+            })
+            .unwrap()
+        );
+    }
+
     #[test]
     fn bounded_queues_blocked_sends_expiry_and_clock_rollback() {
         let a = DeviceIdentity::generate().unwrap();

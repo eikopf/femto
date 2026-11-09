@@ -17,10 +17,13 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
 OUTPUT = ROOT / "output/headscale-probe.json"
+MIGRATION_ONLY = os.environ.get("FEMTO_HEADSCALE_MIGRATION_ONLY") == "1"
 CLI_ONLY = os.environ.get("FEMTO_HEADSCALE_CLI_ONLY") == "1"
 RUNTIME_ONLY = os.environ.get("FEMTO_HEADSCALE_RUNTIME_ONLY") == "1"
 SIMULATOR_ONLY = os.environ.get("FEMTO_HEADSCALE_SIMULATOR_ONLY") == "1"
 RUNTIME_OUTPUT = ROOT / "output/headscale-runtime.json"
+if MIGRATION_ONLY:
+    (ROOT / "output/headscale-migration.json").unlink(missing_ok=True)
 (ROOT / "output/headscale-cli.json" if CLI_ONLY else ROOT / "output/headscale-simulator.json" if SIMULATOR_ONLY else RUNTIME_OUTPUT if RUNTIME_ONLY else OUTPUT).unlink(missing_ok=True)
 
 
@@ -79,7 +82,7 @@ def independent_tcp_peer(folder, coordinator_port, auth, command, local_address,
             with connection:
                 if source[0] != "127.0.0.1":
                     raise RuntimeError("independent TCP peer used an unexpected source")
-                connection.settimeout(20)
+                connection.settimeout(45 if MIGRATION_ONLY else 20)
                 received = 0
                 while received < len(payload):
                     chunk = connection.recv(997)
@@ -126,6 +129,15 @@ def independent_tcp_peer(folder, coordinator_port, auth, command, local_address,
                 raise RuntimeError("independent three-packet loss evidence missing")
             if [drop["at_ms"] for drop in drops] != sorted(drop["at_ms"] for drop in drops):
                 raise RuntimeError("independent packet-loss timing is not ordered")
+            if MIGRATION_ONLY:
+                migration = result["path_migration"]
+                if (migration["direct_data_sent"][0] == 0 or migration["direct_data_sent"][2] == 0
+                        or migration["direct_data_sent"][1] != 0
+                        or migration["relay_packets_queued"][1] == 0
+                        or migration["relay_events"][1] == 0
+                        or migration["outage_send_errors"] == 0
+                        or not migration["read_at_outage"] < migration["read_at_recovery"] < result["bytes_read"]):
+                    raise RuntimeError("independent direct/DERP/direct migration evidence missing")
             return result
         except Exception as error:
             if probe.poll() is None:
@@ -409,6 +421,10 @@ def independent_peer(folder, coordinator_port, auth, command, local_address):
                 env=environment)
             status = json.loads(run(cli + ["status", "--json"], env=environment).stdout)
             print("independent peer DNS name: " + status["Self"]["DNSName"], flush=True)
+            if MIGRATION_ONLY:
+                peer_address = next(address for address in status["Self"]["TailscaleIPs"] if ":" not in address)
+                result = independent_tcp_peer(folder, coordinator_port, auth, command, local_address, peer_address)
+                return run(cli + ["version"]).stdout.splitlines()[0], {"migration": result}
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as echo:
                 echo.bind(("127.0.0.1", 0))
                 echo.settimeout(0.1)
@@ -563,6 +579,19 @@ with tempfile.TemporaryDirectory(prefix="femto-headscale-") as directory:
             auth = folder / "auth.key"
             auth.write_text(key["key"])
             auth.chmod(0o600)
+            if MIGRATION_ONLY:
+                registration = run(["target/debug/examples/headscale-probe", f"127.0.0.1:{port}",
+                                    path("root.der"), str(auth), path("identity"), "register"])
+                record = next(json.loads(line) for line in registration.stdout.splitlines()
+                              if line.startswith("{") and "assigned_ipv4" in json.loads(line))
+                peer_version, measurements = independent_peer(folder, port, auth, command, record["assigned_ipv4"])
+                output = ROOT / "output/headscale-migration.json"
+                output.parent.mkdir(exist_ok=True)
+                output.write_text(json.dumps({"status": "passed", "hardware_verified": False,
+                    "headscale": run(["headscale", "version"]).stdout.splitlines()[0],
+                    "tailscale_peer": peer_version, "measurements": measurements}, indent=2) + "\n")
+                print("Independent TCP direct/DERP/direct migration passed", flush=True)
+                sys.exit(0)
             if CLI_ONLY:
                 subprocess.run([sys.executable, "scripts/cli-headscale.py", str(folder), str(port)], check=True, timeout=180)
                 sys.exit(0)

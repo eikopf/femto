@@ -146,9 +146,7 @@ impl SessionPool {
         session: Session,
         now_ms: u64,
     ) -> Result<(), TransportError> {
-        self.sessions.retain(|_, session| !session.expired(now_ms));
-        self.previous
-            .retain(|peer, session| self.sessions.contains_key(peer) && !session.expired(now_ms));
+        self.retire_expired(now_ms);
         if !self.sessions.contains_key(&peer) && self.sessions.len() >= self.capacity {
             return Err(TransportError::Capacity);
         }
@@ -156,6 +154,12 @@ impl SessionPool {
             self.previous.insert(peer, previous);
         }
         Ok(())
+    }
+    /// Dropping a session invokes the pinned protocol's key zeroization.
+    pub(crate) fn retire_expired(&mut self, now_ms: u64) {
+        self.sessions.retain(|_, session| !session.expired(now_ms));
+        self.previous
+            .retain(|peer, session| self.sessions.contains_key(peer) && !session.expired(now_ms));
     }
     pub(crate) fn by_identity(
         &mut self,
@@ -293,6 +297,33 @@ mod tests {
         assert!(pool.by_identity(&peer, &third_id, 181000).is_none());
         assert!(pool.sessions.is_empty());
         assert!(pool.previous.is_empty());
+    }
+
+    #[test]
+    fn retirement_drops_previous_keys_at_their_original_deadline() {
+        let peer = DeviceIdentity::generate().unwrap().node_key().public();
+        let mut pool = SessionPool::new(1);
+        let (old, _) = pair();
+        let old_owner = std::sync::Arc::downgrade(&old.identity());
+        pool.insert(peer, old, 1000).unwrap();
+        let (mut current, _) = pair();
+        current.created_ms = 2000;
+        let current_owner = std::sync::Arc::downgrade(&current.identity());
+        pool.insert(peer, current, 2000).unwrap();
+        pool.retire_expired(180_999);
+        assert!(old_owner.upgrade().is_some());
+        assert!(current_owner.upgrade().is_some());
+        pool.retire_expired(181_000);
+        assert!(old_owner.upgrade().is_none());
+        assert!(current_owner.upgrade().is_some());
+        assert!(pool.get_mut(&peer).unwrap().encrypt(&[], 181_000).is_ok());
+        pool.retire_expired(182_000);
+        assert!(current_owner.upgrade().is_none());
+        assert!(pool.get_mut(&peer).is_none());
+        let (mut fresh, _) = pair();
+        fresh.created_ms = 182_000;
+        pool.insert(peer, fresh, 182_000).unwrap();
+        assert!(pool.get_mut(&peer).unwrap().encrypt(&[], 182_000).is_ok());
     }
 
     #[test]

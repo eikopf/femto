@@ -197,7 +197,7 @@ fn main() -> Result<()> {
         if !window.is_open() || cancelled || window.is_key_down(Key::Escape) {
             return Ok(());
         }
-        if startup.step()? {
+        if startup.step_for(std::time::Duration::from_millis(5))? {
             break;
         }
         window.set_title(&format!(
@@ -292,9 +292,10 @@ fn main() -> Result<()> {
                 .drain(..)
                 .any(|event| event == InputEvent::Key(Key::Escape));
             if skipped || window.is_key_down(Key::Escape) {
+                ui.set_library(scan.cancel());
                 break;
             }
-            if let Some(library) = scan.step()? {
+            if let Some(library) = scan.step_for(std::time::Duration::from_millis(5))? {
                 ui.set_library(library);
                 break;
             }

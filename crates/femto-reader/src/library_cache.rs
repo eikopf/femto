@@ -98,6 +98,21 @@ impl Cache {
             .filter(|meta| meta.id == digest)
             .cloned()
     }
+    pub(crate) fn resume_hint(&self, state: &crate::state::ReaderState) -> Option<PathBuf> {
+        let mut candidates: Vec<_> = self
+            .entries
+            .iter()
+            .filter_map(|(path, metadata)| Some((state.books.get(&metadata.id)?.last_opened, path)))
+            .collect();
+        candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+        candidates.into_iter().find_map(|(_, path)| {
+            let path = path.canonicalize().ok()?;
+            if !path.starts_with(&self.root) || !path.is_file() {
+                return None;
+            }
+            Some(path)
+        })
+    }
     pub(crate) fn save(&self, entries: &[LibraryEntry]) -> Result<()> {
         if self.loaded
             && entries.len() == self.entries.len()

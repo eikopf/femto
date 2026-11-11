@@ -663,7 +663,7 @@ impl ReaderUi {
         let Some(mut opening) = self.opening.take() else {
             return Effect::Unchanged;
         };
-        let result = reader.step_open(&mut opening);
+        let result = reader.step_open_for(&mut opening, std::time::Duration::from_millis(5));
         match result {
             Ok(false) => {
                 self.opening = Some(opening);
@@ -695,7 +695,7 @@ impl ReaderUi {
         let Some(scan) = &mut self.scan else {
             return Effect::Unchanged;
         };
-        match scan.step() {
+        match scan.step_for(std::time::Duration::from_millis(5)) {
             Ok(None) => Effect::Unchanged,
             Ok(Some(library)) => {
                 self.scan = None;
@@ -2149,7 +2149,7 @@ impl ReaderUi {
             Panel::Remote => "Remote buttons",
             Panel::Light => "Frontlight",
             Panel::Power => "Automatic sleep",
-            Panel::Library if self.library.truncated => "Library (scan limit)",
+            Panel::Library if self.library.truncated => "Library (incomplete)",
             Panel::Library => "Library",
             Panel::Books => "All books",
             Panel::Recent => "Recent books",

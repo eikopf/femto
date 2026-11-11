@@ -212,9 +212,15 @@ impl ReaderStartup {
     /// Hashes one file chunk or indexes one page. Metadata and chapter parsing
     /// occur synchronously when hashing completes.
     pub fn step(&mut self) -> Result<bool> {
+        self.step_for(std::time::Duration::ZERO)
+    }
+
+    /// Batches hashing within the budget; indexing still processes one page.
+    /// Metadata and chapter parsing at EOF can exceed the budget.
+    pub fn step_for(&mut self, budget: std::time::Duration) -> Result<bool> {
         match &mut self.phase {
             OpeningPhase::Hashing { path, file } => {
-                if let Some(file) = file.step()? {
+                if let Some(file) = file.step_for(budget)? {
                     let document = Document::from_hashed(path, file)?;
                     self.phase =
                         OpeningPhase::Indexing(Box::new(prepare_opening(document, &self.state)?));
@@ -633,10 +639,18 @@ impl Reader {
     }
 
     pub fn step_open(&self, opening: &mut BookOpening) -> Result<bool> {
+        self.step_open_for(opening, std::time::Duration::ZERO)
+    }
+
+    pub fn step_open_for(
+        &self,
+        opening: &mut BookOpening,
+        budget: std::time::Duration,
+    ) -> Result<bool> {
         self.check_opening(opening)?;
         match &mut opening.phase {
             OpeningPhase::Hashing { path, file } => {
-                if let Some(file) = file.step()? {
+                if let Some(file) = file.step_for(budget)? {
                     let document = Document::from_hashed(path, file)?;
                     opening.phase = self.begin_open(document)?.phase;
                 }

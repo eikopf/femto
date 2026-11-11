@@ -481,14 +481,34 @@ impl LibraryScan {
         self.cache_hits
     }
 
+    /// Returns a cached path hint. Opening must hash and parse the file again.
+    pub fn resume_hint(&self, state: &ReaderState) -> Option<PathBuf> {
+        self.cache.as_ref()?.resume_hint(state)
+    }
+
+    /// Keeps only entries verified before cancellation; the disk cache is unchanged.
+    pub fn cancel(mut self) -> Library {
+        self.library.truncated = true;
+        self.library.entries.sort_by(|a, b| a.path.cmp(&b.path));
+        self.library
+            .entries
+            .sort_by_cached_key(|entry| library_key(&entry.metadata.title));
+        self.library
+    }
+
     /// Processes one directory entry or at most 8 KiB of book hashing.
     /// Cache loading, metadata parsing on a miss, and index saving are synchronous.
     pub fn step(&mut self) -> Result<Option<Library>> {
+        self.step_for(std::time::Duration::ZERO)
+    }
+
+    /// Batches hash reads within the budget. Parsing and filesystem calls can exceed it.
+    pub fn step_for(&mut self, budget: std::time::Duration) -> Result<Option<Library>> {
         if self.done {
             return Err(Error::Document("library scan already completed".into()));
         }
         if let Some((path, hashing)) = &mut self.hashing {
-            match hashing.step() {
+            match hashing.step_for(budget) {
                 Ok(Some(file)) => {
                     let (path, _) = self.hashing.take().unwrap();
                     if let Some(metadata) = self

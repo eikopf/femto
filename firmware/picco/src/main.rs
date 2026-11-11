@@ -75,16 +75,21 @@ fn run() -> Result<(), String> {
     let (width, height) = orientation(state.rotation).dimensions();
     state.layout.width = width as u32;
     state.layout.height = height as u32;
-    let library = if screen.storage.is_some() {
+    let (library, resume_hint) = if screen.storage.is_some() {
         startup_library(&mut screen, &fonts, &state)?
     } else {
-        Library::default()
+        (Library::default(), None)
     };
     if unsafe { esp_idf_svc::sys::esp_sleep_get_wakeup_cause() }
         != esp_idf_svc::sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_UNDEFINED
     {
-        if let Some(entry) = library.recent(&state).first() {
-            candidates.push((entry.path.clone(), true));
+        if let Some(path) = resume_hint.or_else(|| {
+            library
+                .recent(&state)
+                .first()
+                .map(|entry| entry.path.clone())
+        }) {
+            candidates.push((path, true));
         }
     }
     if screen.storage.is_some() {
@@ -454,12 +459,12 @@ fn startup_library(
     screen: &mut panel::Screen,
     fonts: &Fonts,
     state: &ReaderState,
-) -> Result<Library, String> {
+) -> Result<(Library, Option<std::path::PathBuf>), String> {
     let mut scan = match LibraryScan::cached("/sdcard/femto", 256) {
         Ok(scan) => scan,
         Err(error) => {
             log::warn!("Library scan unavailable: {error}");
-            return Ok(Library::default());
+            return Ok((Library::default(), None));
         }
     };
     if let Err(error) = screen.set_light(state.frontlight.brightness, state.frontlight.warmth) {
@@ -505,21 +510,23 @@ fn startup_library(
         screen.poll_wifi();
         if screen.event().is_some() {
             log::info!("Startup library scan skipped; cached index preserved");
-            return Ok(Library::default());
+            let hint = scan.resume_hint(state);
+            return Ok((scan.cancel(), hint));
         }
-        match scan.step() {
+        match scan.step_for(Duration::from_millis(5)) {
             Ok(Some(library)) => {
                 log::info!(
                     "Library: {} books, {} errors",
                     library.entries.len(),
                     library.errors.len()
                 );
-                return Ok(library);
+                return Ok((library, None));
             }
             Ok(None) => {}
             Err(error) => {
                 log::warn!("Library scan failed: {error}");
-                return Ok(Library::default());
+                let hint = scan.resume_hint(state);
+                return Ok((scan.cancel(), hint));
             }
         }
     }
@@ -565,7 +572,7 @@ fn startup_reader(
                 log::info!("Startup opening cancelled");
                 break 'books;
             }
-            match startup.step() {
+            match startup.step_for(Duration::from_millis(5)) {
                 Ok(true) => {
                     return startup
                         .finish()

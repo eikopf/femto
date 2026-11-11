@@ -294,3 +294,65 @@ fn epub_cache_survives_reopen_and_does_not_consume_the_book_limit() {
         cold.entries[0].metadata.language
     );
 }
+
+#[test]
+fn cancelling_keeps_verified_entries_and_a_separate_cached_resume_hint() {
+    use femto_reader::{
+        document::Document,
+        state::{BookState, LibraryScan, ReaderState},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("arbitrary-name.txt");
+    let second = dir.path().join("other.txt");
+    std::fs::write(&first, "first contents").unwrap();
+    std::fs::write(&second, "second contents").unwrap();
+    let (library, _) = cached(dir.path(), 32);
+    let mut state = ReaderState::default();
+    for entry in &library.entries {
+        state.books.insert(
+            entry.metadata.id.clone(),
+            BookState {
+                last_opened: if entry.path == first { 20 } else { 10 },
+                ..BookState::default()
+            },
+        );
+    }
+    let scan = LibraryScan::cached(dir.path(), 32).unwrap();
+    assert_eq!(scan.resume_hint(&state), Some(first.clone()));
+    let partial = scan.cancel();
+    assert!(partial.entries.is_empty());
+    assert!(partial.truncated);
+    let cache = dir.path().join(".femto-library-cache.json");
+    let before = std::fs::read(&cache).unwrap();
+    let old_id = Document::open(&first).unwrap().metadata.id;
+    std::fs::write(&first, "changed content").unwrap();
+    let scan = LibraryScan::cached(dir.path(), 32).unwrap();
+    let hint = scan.resume_hint(&state).unwrap();
+    assert_ne!(Document::open(hint).unwrap().metadata.id, old_id);
+    scan.cancel();
+    assert_eq!(std::fs::read(&cache).unwrap(), before);
+    std::fs::remove_file(first).unwrap();
+    let scan = LibraryScan::cached(dir.path(), 32).unwrap();
+    assert_eq!(scan.resume_hint(&state), Some(second));
+}
+
+#[cfg(unix)]
+#[test]
+fn cached_resume_hint_cannot_follow_a_replaced_symlink_outside_the_library() {
+    use femto_reader::state::{BookState, LibraryScan, ReaderState};
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let book = dir.path().join("book.txt");
+    std::fs::write(&book, "book").unwrap();
+    let (library, _) = cached(dir.path(), 32);
+    let mut state = ReaderState::default();
+    state
+        .books
+        .insert(library.entries[0].metadata.id.clone(), BookState::default());
+    std::fs::remove_file(&book).unwrap();
+    let target = outside.path().join("outside.txt");
+    std::fs::write(&target, "outside").unwrap();
+    std::os::unix::fs::symlink(target, book).unwrap();
+    let scan = LibraryScan::cached(dir.path(), 32).unwrap();
+    assert!(scan.resume_hint(&state).is_none());
+}

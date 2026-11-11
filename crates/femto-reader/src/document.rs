@@ -1107,6 +1107,17 @@ impl FileHash {
             digest: Sha256::new(),
         }
     }
+    /// Batches hash reads until the budget expires. One read can exceed the budget.
+    pub(crate) fn step_for(&mut self, budget: std::time::Duration) -> Result<Option<HashedFile>> {
+        let start = std::time::Instant::now();
+        loop {
+            let result = self.step()?;
+            if result.is_some() || start.elapsed() >= budget {
+                return Ok(result);
+            }
+        }
+    }
+
     /// Hashes at most 8192 bytes; only EOF produces a parser-ready file.
     pub(crate) fn step(&mut self) -> Result<Option<HashedFile>> {
         let file = self
@@ -1171,6 +1182,30 @@ fn flush(paragraph: &mut Paragraph, blocks: &mut Vec<Block>) {
 #[cfg(test)]
 mod hashed_file_tests {
     use super::*;
+
+    #[test]
+    fn hash_budget_batches_reads_without_changing_identity_or_consuming_parser_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("book.txt");
+        let bytes = vec![b'a'; 32768];
+        std::fs::write(&path, &bytes).unwrap();
+        let mut hashing = FileHash::new(File::open(&path).unwrap());
+        assert!(
+            hashing
+                .step_for(std::time::Duration::ZERO)
+                .unwrap()
+                .is_none()
+        );
+        let file = hashing
+            .step_for(std::time::Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        assert_eq!(file.id(), format!("{:x}", Sha256::digest(&bytes)));
+        assert_eq!(
+            Document::from_hashed(&path, file).unwrap().metadata.id,
+            format!("{:x}", Sha256::digest(&bytes))
+        );
+    }
 
     #[test]
     fn hashing_requires_eof_and_bounds_each_step() {

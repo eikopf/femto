@@ -8,6 +8,7 @@ pub struct Reconnecting {
     peer: Peer,
     retry: Retry,
     origin: Instant,
+    sleep_stopping: bool,
 }
 
 impl Reconnecting {
@@ -17,13 +18,23 @@ impl Reconnecting {
             peer,
             retry: Retry::default(),
             origin: Instant::now(),
+            sleep_stopping: false,
         })
     }
 
     pub fn stop(&mut self) {
+        self.sleep_stopping = true;
         self.retry.stop();
         if let Some(attempt) = &mut self.attempt {
             attempt.stop();
+        }
+    }
+
+    pub fn resume_after_sleep(&mut self) {
+        if self.sleep_stopping {
+            self.sleep_stopping = false;
+            let elapsed = self.origin.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+            self.retry.resume(elapsed);
         }
     }
 
@@ -41,6 +52,7 @@ impl Reconnecting {
             let finished = match attempt.poll() {
                 Ok(finished) => finished,
                 Err(error) => {
+                    self.sleep_stopping = false;
                     self.retry.stop();
                     return Err(error);
                 }
@@ -51,6 +63,7 @@ impl Reconnecting {
                 // host and controller, including the callback task and queues.
                 drop(self.attempt.take());
                 if !stack_released() {
+                    self.sleep_stopping = false;
                     self.retry.stop();
                     return Err("Bluetooth stack was not fully released".into());
                 }
@@ -63,6 +76,7 @@ impl Reconnecting {
         }
         if self.retry.take_attempt(elapsed) {
             if !stack_released() {
+                self.sleep_stopping = false;
                 self.retry.stop();
                 return Err("Bluetooth stack occupied before retry".into());
             }
@@ -77,6 +91,7 @@ impl Reconnecting {
                     self.attempt = Some(attempt);
                 }
                 Err(error) => {
+                    self.sleep_stopping = false;
                     self.retry.stop();
                     return Err(error);
                 }

@@ -209,33 +209,50 @@ pub struct Screen {
 
 impl Screen {
     pub fn prepare_sleep(&mut self) -> Result<(), String> {
-        #[cfg(feature = "bluetooth")]
-        {
-            if let Some(bluetooth) = &mut self.bluetooth {
-                match bluetooth.stop_and_wait(Duration::from_secs(5)) {
-                    Ok(true) => {}
-                    Ok(false) => return Err("Bluetooth still stopping; retry sleep".into()),
-                    Err(error) => {
-                        log::warn!("Bluetooth shutdown fallback: {error}");
-                    }
-                }
-            }
-            drop(self.bluetooth.take());
-        }
         if !self.tailnet.close_and_wait(Duration::from_secs(5)) {
             return Err("Tailnet still stopping; retry sleep".into());
         }
         if !self.catalog.cancel_and_wait(Duration::from_secs(5)) {
             return Err("Catalog request still stopping; retry sleep".into());
         }
-        self.set_light(0, 0)?;
-        self.display
-            .sleep()
-            .map_err(|e| format!("Panel sleep: {e:?}"))?;
-        if let Some(wifi) = &mut self.wifi {
-            wifi.stop()?;
+        let mut panel_touched = false;
+        let mut wifi_touched = false;
+        let result = (|| {
+            #[cfg(feature = "bluetooth")]
+            if let Some(bluetooth) = &mut self.bluetooth {
+                if !bluetooth.stop_and_wait(Duration::from_secs(5))? {
+                    return Err("Bluetooth still stopping; retry sleep".into());
+                }
+            }
+            self.set_light(0, 0)?;
+            panel_touched = true;
+            self.display
+                .sleep()
+                .map_err(|e| format!("Panel sleep: {e:?}"))?;
+            if let Some(wifi) = &mut self.wifi {
+                wifi_touched = true;
+                wifi.stop()?;
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            #[cfg(feature = "bluetooth")]
+            if let Some(bluetooth) = &mut self.bluetooth {
+                bluetooth.resume_after_sleep();
+            }
+            if panel_touched {
+                if let Err(error) = self.display.initialize() {
+                    log::warn!("Panel wake after cancelled sleep: {error:?}");
+                }
+                self.fast_count = 5;
+            }
+            if wifi_touched && let Some(wifi) = &mut self.wifi {
+                if let Err(error) = wifi.resume_after_sleep() {
+                    log::warn!("{error}");
+                }
+            }
         }
-        Ok(())
+        result
     }
     pub fn poll_wifi(&mut self) {
         #[cfg(feature = "bluetooth")]

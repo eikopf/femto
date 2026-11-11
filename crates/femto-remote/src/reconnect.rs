@@ -66,6 +66,14 @@ impl Retry {
         self.stopped = true;
         self.due = None;
     }
+    /// Resumes after a cancelled sleep. An active owner must still finish teardown.
+    pub fn resume(&mut self, now_ms: u64) {
+        self.stopped = false;
+        self.delay = INITIAL_DELAY_MS;
+        if !self.active {
+            self.due = now_ms.checked_add(self.delay);
+        }
+    }
     pub fn is_stopped(&self) -> bool {
         self.stopped
     }

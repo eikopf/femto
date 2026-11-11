@@ -88,6 +88,27 @@ __OWNER__
             assert!(owner.poll_at(base + Duration::from_secs(4)).unwrap());
             assert!(owner.poll_at(base + Duration::from_secs(200)).unwrap());
             drop(owner);
+            // Aborted sleep resumes retries only after the old owner releases the SDK.
+            for completed in [false, true] {
+                let mut owner = open();
+                owner.stop();
+                if completed {
+                    owner.attempt.as_mut().unwrap().done = true;
+                    assert!(owner.poll_at(owner.origin).unwrap());
+                }
+                let opens = OPENS.load(SeqCst);
+                owner.resume_after_sleep();
+                if !completed {
+                    assert!(!owner.poll_at(owner.origin + Duration::from_secs(50)).unwrap());
+                    assert_eq!(OPENS.load(SeqCst), opens);
+                    owner.attempt.as_mut().unwrap().done = true;
+                    assert!(!owner.poll_at(owner.origin + Duration::from_secs(51)).unwrap());
+                }
+                assert!(!owner.poll_at(owner.origin + Duration::from_secs(100)).unwrap());
+                assert_eq!(OPENS.load(SeqCst), opens + 1);
+                assert_eq!(LIVE.load(SeqCst), 1);
+                drop(owner);
+            }
             // Cancelling during backoff creates no replacement driver.
             let mut owner = open();
             owner.attempt.as_mut().unwrap().done = true;
@@ -98,7 +119,9 @@ __OWNER__
             // A failed acknowledgement drain must not retry.
             let mut owner = open();
             owner.attempt.as_mut().unwrap().fail = true;
+            owner.stop();
             assert!(owner.poll_at(owner.origin).is_err());
+            owner.resume_after_sleep();
             assert!(owner.retry.is_stopped());
             drop(owner);
             // A driver that did not release the SDK cannot be replaced.

@@ -136,4 +136,17 @@ impl Station {
             .stop()
             .map_err(|e| format!("Wi-Fi shutdown: {e}"))
     }
+
+    pub fn resume_after_sleep(&mut self) -> Result<(), String> {
+        if !self.driver.is_started().map_err(|e| e.to_string())? {
+            self.driver
+                .start()
+                .map_err(|e| format!("Wi-Fi restart: {e}"))?;
+        }
+        self.retry = Retry::default();
+        self.started = Instant::now();
+        self.next_poll = self.started;
+        self.next_clock_attempt = self.started;
+        Ok(())
+    }
 }

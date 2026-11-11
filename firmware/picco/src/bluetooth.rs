@@ -61,6 +61,12 @@ impl Service {
         }
     }
 
+    pub fn resume_after_sleep(&mut self) {
+        if let Self::Probe(probe) = self {
+            probe.resume_after_sleep();
+        }
+    }
+
     pub fn poll_input(
         &mut self,
         reader: &femto_reader::state::ReaderState,

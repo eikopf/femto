@@ -37,6 +37,8 @@ Tests cover unequal chapter weights, real EPUB ZIP sizes, monotonic page turns t
 `tests/fixtures/navigation.epub` includes a nested navigation document, cross-chapter footnotes after several pages of text, an inline anchor, an escaped anchor attribute, styled link text, an external URL, and a missing target. Tests verify source ranges, percent decoding, traversal rejection, contents/link selection, repeated reflow with save/reopen, same-page jump anchors, bookmark toggling, back history, book switching, invalid resume offsets, and terminal commands. The native simulator uses the same controller actions; its separate Xvfb smoke test verifies native menu input and reading-state persistence.
 
 
+Direct page turns that fail while opening a destination chapter retain the current page and show a recoverable menu error. The previous-page action and library menu remain available. Firmware also converts errors from input dispatch into menu errors instead of stopping the reader.
+
 ## Persistent library metadata cache
 
 The simulator and Picco use a disposable `.femto-library-cache.json` index in the configured library root. Startup scans and the shared Rescan action load the same index. The existing `Library::scan` and `scan_with_limit` APIs remain uncached and do not write an index; `scan_cached` and `LibraryScan::cached` opt in. The cache holds book paths, content IDs, titles, authors, and languages. It does not hold chapter layout or rendered pages.

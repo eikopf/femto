@@ -197,7 +197,14 @@ fn run() -> Result<(), String> {
                 input::Event::Turn(Turn::Next) => ui.turn(&mut reader, true),
                 input::Event::Tap { x, y } => ui.tap(&mut reader, x.into(), y.into()),
             };
-            let mut effect = effect.map_err(|e| e.to_string())?;
+            let mut effect = match effect {
+                Ok(effect) => effect,
+                Err(error) => {
+                    ui.open();
+                    ui.show_error(error.to_string());
+                    Effect::Redraw
+                }
+            };
             if let Some(rotation) = ui.take_rotation_request() {
                 if let Err(error) = ui.rotate(&reader, rotation) {
                     ui.show_error(error.to_string());

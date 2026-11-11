@@ -2151,3 +2151,46 @@ fn dictionary_chooser_persists_and_restores_the_selected_filename() {
         assert!(reader.state.save(&state_path).is_err());
     }
 }
+
+#[test]
+fn missing_next_chapter_keeps_reader_usable_and_shows_error() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("missing-chapter.epub");
+    let mut bytes = include_bytes!("../../../tests/fixtures/sample.epub").to_vec();
+    // Rename the ZIP local and central directory entries without changing the OPF.
+    let name = b"EPUB/two.xhtml";
+    let mut renamed = 0;
+    for offset in 0..=bytes.len() - name.len() {
+        if &bytes[offset..offset + name.len()] == name {
+            bytes[offset..offset + name.len()].copy_from_slice(b"EPUB/bad.xhtml");
+            renamed += 1;
+        }
+    }
+    assert_eq!(renamed, 2);
+    std::fs::write(&path, bytes).unwrap();
+    let mut reader = Reader::new(
+        Document::open(path).unwrap(),
+        Fonts::new(
+            Font::from_bytes(include_bytes!("../../../tests/fixtures/DejaVuSerif.ttf").to_vec())
+                .unwrap(),
+        ),
+        ReaderState::default(),
+    )
+    .unwrap();
+    let mut ui = ReaderUi::default();
+    for _ in 1..reader.page_count() {
+        ui.turn(&mut reader, true).unwrap();
+    }
+    let before = reader.position();
+    let pixels = reader.render(2).unwrap();
+    assert_eq!(ui.turn(&mut reader, true).unwrap(), Effect::Redraw);
+    assert!(ui.is_open());
+    assert!(ui.error_message().unwrap().contains("BOOK_RESOURCE_READ"));
+    assert_eq!(reader.position(), before);
+    assert_eq!(reader.render(2).unwrap(), pixels);
+    ui.render(&mut reader, 2).unwrap();
+    ui.back(&mut reader).unwrap();
+    assert!(!ui.is_open());
+    ui.turn(&mut reader, false).unwrap();
+    assert!(reader.position() < before);
+}

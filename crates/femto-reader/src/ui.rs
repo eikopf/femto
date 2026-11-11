@@ -360,9 +360,20 @@ impl ReaderUi {
         {
             return Ok(Effect::Unchanged);
         }
-        match reader.begin_navigation(action)? {
+        let result = reader.begin_navigation(action).and_then(|job| match job {
             Some(job) => Ok(self.start_navigation(job)),
             None => reader.dispatch(action),
+        });
+        match result {
+            Ok(effect) => Ok(effect),
+            Err(error) => {
+                if self.panel.is_some() {
+                    return Err(error);
+                }
+                self.open();
+                self.show_error(error.to_string());
+                Ok(Effect::Redraw)
+            }
         }
     }
     fn start_navigation(&mut self, job: Navigating) -> Effect {

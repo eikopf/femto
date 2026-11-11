@@ -579,6 +579,41 @@
           "text": " .block { display: block; } .inline { display: inline; } .inherit { display: inherit; } .preserve { white-space: pre; } "
         }
       ]
+    },
+    {
+      "file": "kosync-case.epub",
+      "sha256": "01117ac73f01fa7ee624caf45fe4345c7e7430fa65bf2500931f031bbc92dd4e",
+      "nodes": [
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0",
+          "text": "Upper "
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/span[1]/text()[1].0",
+          "text": "inline"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[1]/text()[2].0",
+          "text": " tail"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[2]/text()[1].0",
+          "text": "Lower paragraph"
+        },
+        {
+          "path": "/body[1]/DocFragment[1]/body[1]/p[3]/text()[1].0",
+          "text": "Third paragraph"
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/h1[1]/text()[1].0",
+          "text": "Another chapter"
+        },
+        {
+          "path": "/body[1]/DocFragment[2]/body[1]/p[1]/text()[1].0",
+          "text": "Chapter navigation resumes at a stable source location."
+        }
+      ],
+      "non_body_nodes": []
     }
   ]
 }

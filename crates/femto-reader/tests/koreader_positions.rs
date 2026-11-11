@@ -65,3 +65,43 @@ fn invalid_and_non_epub_positions_fail_without_state_mutation() {
     let mut text = Document::from_text("Text", "Sample").unwrap();
     assert!(text.koreader_position(Locator::default()).is_err());
 }
+
+#[test]
+fn case_normalization_preserves_sibling_indices_and_inline_paths() {
+    let mut document = document("kosync-case.epub");
+    for (path, block, byte) in [
+        ("p[1]/text()[1].0", 0, 0),
+        ("p[1]/span[1]/text()[1].0", 0, 6),
+        ("p[2]/text()[1].0", 1, 0),
+        ("p[3]/text()[1].0", 2, 0),
+    ] {
+        let path = format!("/body[1]/DocFragment[1]/body[1]/{path}");
+        let location = Locator {
+            chapter: 0,
+            block,
+            byte,
+        };
+        assert_eq!(document.resolve_koreader_position(&path).unwrap(), location);
+        assert_eq!(document.koreader_position(location).unwrap(), path);
+    }
+}
+
+#[test]
+fn split_entities_leave_other_positions_in_the_chapter_available() {
+    let mut document = document("kosync-entity-boundary.epub");
+    for (block, suffix) in ["mp;Z", "38;Z", "x26;Z"].iter().enumerate() {
+        for (byte, node, offset) in [(0, 1, 0), (8190, 1, 8190), (8191, 2, suffix.len() - 1)] {
+            let location = Locator {
+                chapter: 0,
+                block,
+                byte,
+            };
+            let path = format!(
+                "/body[1]/DocFragment[1]/body[1]/p[{}]/text()[{node}].{offset}",
+                block + 1
+            );
+            assert_eq!(document.koreader_position(location).unwrap(), path);
+            assert_eq!(document.resolve_koreader_position(&path).unwrap(), location);
+        }
+    }
+}

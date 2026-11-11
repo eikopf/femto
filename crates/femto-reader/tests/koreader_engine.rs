@@ -91,6 +91,8 @@ fn exported_positions_resolve_in_the_official_engine() {
         "lists.epub",
         "tab-size.epub",
         "kosync-css.epub",
+        "kosync-case.epub",
+        "kosync-entity-boundary.epub",
     ] {
         let path = root.join("tests/fixtures").join(name);
         let mut document = Document::open(&path).unwrap();

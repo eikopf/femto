@@ -138,7 +138,7 @@ fn visit(
                 }
                 let name = std::str::from_utf8(element.local_name().as_ref())
                     .map_err(|_| unsupported())?
-                    .to_owned();
+                    .to_ascii_lowercase();
                 if name.len() > 256 {
                     return Err(unsupported());
                 }
@@ -206,7 +206,11 @@ fn visit(
             }
             Event::End(element) => {
                 if let Some(frame) = stack.last() {
-                    if element.local_name().as_ref() != frame.step.name.as_bytes() {
+                    if !element
+                        .local_name()
+                        .as_ref()
+                        .eq_ignore_ascii_case(frame.step.name.as_bytes())
+                    {
                         return Err(unsupported());
                     }
                     stack.pop();

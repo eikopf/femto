@@ -9,7 +9,7 @@ import subprocess
 root = Path(__file__).resolve().parent.parent
 os.chdir(root)
 books = []
-for name in ["sample.epub", "whitespace.epub", "navigation.epub", "lists.epub", "tab-size.epub", "kosync-css.epub"]:
+for name in ["sample.epub", "whitespace.epub", "navigation.epub", "lists.epub", "tab-size.epub", "kosync-css.epub", "kosync-case.epub"]:
     output = subprocess.check_output(["./scripts/koreader-position-oracle", "tests/fixtures/" + name], text=True)
     nodes = []
     non_body_nodes = []

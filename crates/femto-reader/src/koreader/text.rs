@@ -43,7 +43,13 @@ pub fn text_nodes(
         }
         let end = characters[count - 1].0 + characters[count - 1].1.len_utf8();
         let chunk = &remaining[..end];
-        let mut node = decode(chunk, base + consumed, preserve, cdata)?;
+        let mut node = decode(
+            chunk,
+            base + consumed,
+            preserve,
+            cdata,
+            end < remaining.len(),
+        )?;
         if first && strip_first_newline && node.text.starts_with('\n') {
             node.text.remove(0);
             node.origins.remove(0);
@@ -54,7 +60,13 @@ pub fn text_nodes(
     }
     Ok(())
 }
-fn decode(raw: &str, base: usize, preserve: bool, cdata: bool) -> Result<TextNode> {
+fn decode(
+    raw: &str,
+    base: usize,
+    preserve: bool,
+    cdata: bool,
+    continues: bool,
+) -> Result<TextNode> {
     let mut text = String::new();
     let mut origins = Vec::new();
     let mut chars = raw.char_indices().peekable();
@@ -63,10 +75,27 @@ fn decode(raw: &str, base: usize, preserve: bool, cdata: bool) -> Result<TextNod
     let mut column = 0usize;
     while let Some((byte, ch)) = chars.next() {
         if ch == '&' && !cdata {
-            let length = raw[byte..]
-                .find(';')
-                .ok_or_else(|| Error::Document("split KOReader entity".into()))?
-                + 1;
+            let Some(length) = raw[byte..].find(';').map(|end| end + 1) else {
+                if !continues {
+                    return Err(Error::Document("unterminated KOReader entity".into()));
+                }
+                // The engine decodes each raw chunk separately. It drops a trailing
+                // ampersand or incomplete numeric reference, but retains named fragments.
+                let fragment = &raw[byte..];
+                if fragment != "&" && !fragment.starts_with("&#") {
+                    for (offset, ch) in fragment.char_indices() {
+                        emit(
+                            ch,
+                            base + byte + offset,
+                            preserve,
+                            &mut text,
+                            &mut origins,
+                            &mut column,
+                        );
+                    }
+                }
+                break;
+            };
             let entity = &raw[byte..byte + length];
             let decoded = quick_xml::escape::unescape(entity)
                 .map_err(|_| Error::Document("unsupported KOReader entity".into()))?;
@@ -192,6 +221,25 @@ mod tests {
         assert_eq!(chunks[0].text.chars().count(), 8001);
         assert_eq!(chunks[1].text.len(), 500);
         assert_eq!(chunks[1].raw.start, 32001);
+    }
+    #[test]
+    fn entities_crossing_a_chunk_boundary_match_the_engine_probe() {
+        for entity in ["&amp;", "&#38;", "&#x26;"] {
+            for cut in 1..entity.len() {
+                let prefix = "a".repeat(8192 - cut);
+                let raw = format!("{prefix}{entity}Z");
+                let chunks = nodes(&raw, false, false, false);
+                let fragment = if cut == 1 || entity.starts_with("&#") {
+                    ""
+                } else {
+                    &entity[..cut]
+                };
+                assert_eq!(chunks.len(), 2, "{entity} cut {cut}");
+                assert_eq!(chunks[0].text, format!("{prefix}{fragment}"));
+                assert_eq!(chunks[1].text, format!("{}Z", &entity[cut..]));
+                assert_eq!(chunks[1].origins[0], 8192);
+            }
+        }
     }
     #[test]
     fn preformatted_text_strips_initial_newline_and_expands_tabs() {

@@ -17,6 +17,9 @@ cases = [
     {"name": "cdata", "raw": "a &amp;  b", "preserve": False, "cdata": True},
     {"name": "line-endings", "raw": "a\r\nb\n\rc\rd\ne", "preserve": True},
 ]
+for entity in ["&amp;", "&#38;", "&#x26;"]:
+    for cut in range(1, len(entity)):
+        cases.append({"name": f"split-{entity}-{cut}", "raw": "a" * (8192 - cut) + entity + "Z", "preserve": False})
 with tempfile.TemporaryDirectory(prefix="femto-koreader-text-") as temporary:
     book = Path(temporary) / "positions.epub"
     body = []

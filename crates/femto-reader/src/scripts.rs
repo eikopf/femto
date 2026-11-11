@@ -13,8 +13,8 @@ struct Opening {
 
 pub(crate) const LINE_BYTES: usize = 4096;
 
-struct Runs<'a> {
-    graphemes: unicode_segmentation::GraphemeIndices<'a>,
+struct Runs {
+    cursor: usize,
     base: usize,
     end: usize,
     start: usize,
@@ -22,10 +22,10 @@ struct Runs<'a> {
     openings: Vec<Opening>,
     pairing: bool,
 }
-impl<'a> Runs<'a> {
-    fn new(text: &'a str, base: usize) -> Self {
+impl Runs {
+    fn new(text: &str, base: usize) -> Self {
         Self {
-            graphemes: text.grapheme_indices(true),
+            cursor: 0,
             base,
             end: text.len(),
             start: 0,
@@ -35,10 +35,12 @@ impl<'a> Runs<'a> {
         }
     }
 }
-impl Iterator for Runs<'_> {
-    type Item = (Range<usize>, Script);
-    fn next(&mut self) -> Option<Self::Item> {
-        for (offset, grapheme) in self.graphemes.by_ref() {
+impl Runs {
+    fn next(&mut self, text: &str) -> Option<(Range<usize>, Script)> {
+        let resume = self.cursor;
+        for (relative, grapheme) in text[resume..].grapheme_indices(true) {
+            let offset = resume + relative;
+            self.cursor = offset + grapheme.len();
             let mut next = ScriptExtension::for_str(grapheme);
             if next.is_empty() {
                 // Keep incompatible marks and unknown characters in their grapheme.
@@ -118,22 +120,22 @@ impl Iterator for Runs<'_> {
 }
 
 /// Forward-only paragraph scan retaining only runs intersecting a line window.
-pub(crate) struct Window<'a> {
-    runs: Runs<'a>,
+pub(crate) struct Window {
+    runs: Runs,
     cached: Vec<(Range<usize>, Script)>,
 }
-impl<'a> Window<'a> {
-    pub(crate) fn new(text: &'a str) -> Self {
+impl Window {
+    pub(crate) fn new(text: &str) -> Self {
         Self {
             runs: Runs::new(text, 0),
             cached: Vec::new(),
         }
     }
-    pub(crate) fn prepare(&mut self, start: usize) {
+    pub(crate) fn prepare(&mut self, text: &str, start: usize) {
         let end = start.saturating_add(LINE_BYTES);
         self.cached.retain(|(range, _)| range.end > start);
         while self.cached.last().is_none_or(|(range, _)| range.end < end) {
-            let Some(run) = self.runs.next() else {
+            let Some(run) = self.runs.next(text) else {
                 break;
             };
             if run.0.end <= start {
@@ -154,7 +156,10 @@ impl<'a> Window<'a> {
 
 #[cfg(test)]
 fn runs(text: &str, base: usize) -> Vec<(Range<usize>, Script)> {
-    Runs::new(text, base).collect()
+    {
+        let mut runs = Runs::new(text, base);
+        std::iter::from_fn(|| runs.next(text)).collect()
+    }
 }
 
 fn choose(scripts: ScriptExtension) -> Script {
@@ -189,15 +194,15 @@ mod tests {
         let text = format!("a ({} ) end", "α ".repeat(6000));
         let close = text.find(')').unwrap();
         let mut window = Window::new(&text);
-        window.prepare(0);
-        window.prepare(9000);
-        window.prepare(close);
+        window.prepare(&text, 0);
+        window.prepare(&text, 9000);
+        window.prepare(&text, close);
         assert_eq!(
             within(window.ranges(), close..close + 1).collect::<Vec<_>>(),
             [(close..close + 1, Script::Latin)]
         );
         let mut resumed = Window::new(&text);
-        resumed.prepare(close);
+        resumed.prepare(&text, close);
         assert_eq!(resumed.ranges(), window.ranges());
         assert!(window.cached.len() <= 2);
     }
@@ -208,7 +213,7 @@ mod tests {
         let all = runs(&text, 0);
         let mut window = Window::new(&text);
         for start in [0, 93, 4095, 8190, 51000, text.len()] {
-            window.prepare(start);
+            window.prepare(&text, start);
             let end = start.saturating_add(LINE_BYTES).min(text.len());
             assert_eq!(
                 within(window.ranges(), start..end).collect::<Vec<_>>(),
@@ -220,7 +225,7 @@ mod tests {
         }
         assert!(window.ranges().is_empty());
         let mut empty = Window::new("");
-        empty.prepare(0);
+        empty.prepare("", 0);
         assert!(empty.ranges().is_empty());
     }
 

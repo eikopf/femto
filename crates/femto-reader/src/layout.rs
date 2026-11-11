@@ -402,6 +402,29 @@ pub(crate) fn paginate_step_until(
     start_at: Locator,
     end_at: Option<Locator>,
     begin_at: Option<Locator>,
+    sink: impl FnMut(Page) -> Result<bool>,
+) -> Result<PageStep> {
+    paginate_step_with_context(
+        chapter,
+        fonts,
+        config,
+        start_at,
+        end_at,
+        begin_at,
+        &mut PaginationContext::default(),
+        sink,
+    )
+}
+
+#[allow(clippy::too_many_arguments)] // Same pagination inputs plus retained cursor analysis.
+pub(crate) fn paginate_step_with_context(
+    chapter: &Chapter,
+    fonts: &Fonts,
+    config: LayoutConfig,
+    start_at: Locator,
+    end_at: Option<Locator>,
+    begin_at: Option<Locator>,
+    context: &mut PaginationContext,
     mut sink: impl FnMut(Page) -> Result<bool>,
 ) -> Result<PageStep> {
     if let Some(begin) = begin_at {
@@ -598,7 +621,25 @@ pub(crate) fn paginate_step_until(
             crate::document::BaseDirection::Ltr => Some(unicode_bidi::Level::ltr()),
             crate::document::BaseDirection::Rtl => Some(unicode_bidi::Level::rtl()),
         };
-        let mut shaping = Shaping::new(&paragraph.text, base);
+        if context
+            .paragraph
+            .as_ref()
+            .is_none_or(|(index, _, _)| *index != block_index)
+        {
+            // Release the previous block before allocating its replacement.
+            context.paragraph = None;
+            let hyphens = if matches!(block, Block::Text(_)) {
+                hyphen_points(paragraph, &chapter.language, config.hyphenation)
+            } else {
+                Vec::new()
+            };
+            context.paragraph = Some((block_index, Shaping::new(&paragraph.text, base), hyphens));
+            #[cfg(test)]
+            {
+                context.analyses += 1;
+            }
+        }
+        let (_, shaping, hyphens) = context.paragraph.as_mut().unwrap();
         let marker = if let Some(text) = paragraph.list.as_ref().map(|item| &item.marker_label) {
             let style = paragraph
                 .spans
@@ -637,11 +678,6 @@ pub(crate) fn paginate_step_until(
             return Err(Error::Layout("list marker exceeds reading width"));
         }
         let column = available - gutter;
-        let hyphens = if matches!(block, Block::Text(_)) {
-            hyphen_points(paragraph, &chapter.language, config.hyphenation)
-        } else {
-            Vec::new()
-        };
         let mut start = if block_index == start_at.block {
             start_at.byte
         } else {
@@ -674,15 +710,15 @@ pub(crate) fn paginate_step_until(
                 0.0
             };
             let line_available = column - indent;
-            shaping.scripts.prepare(start);
+            shaping.scripts.prepare(&paragraph.text, start);
             let (end, mut line) = break_line(
                 paragraph,
-                &shaping,
+                shaping,
                 start,
                 line_available,
                 fonts,
                 config.font_size,
-                &hyphens,
+                hyphens,
             )?;
             line.start = Locator {
                 chapter: chapter.index,
@@ -1069,24 +1105,78 @@ fn image_limit(limit: Option<epub_stream::css::ImageLimit>, available: u32) -> R
     Ok(resolved.min(f64::from(available)).floor() as u32)
 }
 
-struct Shaping<'a> {
-    bidi: BidiInfo<'a>,
-    scripts: crate::scripts::Window<'a>,
+struct Shaping {
+    bidi: BidiAnalysis,
+    scripts: crate::scripts::Window,
 }
-impl<'a> Shaping<'a> {
-    fn new(text: &'a str, base: Option<unicode_bidi::Level>) -> Self {
+
+struct BidiAnalysis {
+    original_classes: Vec<unicode_bidi::BidiClass>,
+    levels: Vec<unicode_bidi::Level>,
+    paragraphs: Vec<unicode_bidi::ParagraphInfo>,
+}
+
+impl BidiAnalysis {
+    fn visual_runs(
+        &self,
+        text: &str,
+        range: Range<usize>,
+    ) -> Result<(Vec<unicode_bidi::Level>, Vec<Range<usize>>)> {
+        let para = self
+            .paragraphs
+            .iter()
+            .find(|para| para.range.contains(&range.start))
+            .ok_or(Error::Layout("missing bidi paragraph"))?;
+        // Preserve resolved paragraph context while applying UAX L1/L2 to
+        // line-sized scratch buffers. The crate otherwise clones every level
+        // in the paragraph on each candidate line fit.
+        let line_bidi = BidiInfo {
+            text: &text[range.clone()],
+            original_classes: self.original_classes[range.clone()].to_vec(),
+            levels: self.levels[range.clone()].to_vec(),
+            paragraphs: vec![],
+        };
+        let line_para = unicode_bidi::ParagraphInfo {
+            range: 0..range.len(),
+            level: para.level,
+        };
+        let (levels, local_runs) = line_bidi.visual_runs(&line_para, 0..range.len());
+        let runs = local_runs
+            .into_iter()
+            .map(|run| run.start + range.start..run.end + range.start)
+            .collect();
+        Ok((levels, runs))
+    }
+}
+
+impl Shaping {
+    fn new(text: &str, base: Option<unicode_bidi::Level>) -> Self {
         let mut scripts = crate::scripts::Window::new(text);
-        scripts.prepare(0);
+        scripts.prepare(text, 0);
+        let bidi = BidiInfo::new(text, base);
         Self {
-            bidi: BidiInfo::new(text, base),
+            bidi: BidiAnalysis {
+                original_classes: bidi.original_classes,
+                levels: bidi.levels,
+                paragraphs: bidi.paragraphs,
+            },
             scripts,
         }
     }
 }
 
+/// Retains only the paragraph at the cooperative pagination cursor. Its owner
+/// must keep the chapter, layout configuration and preview range unchanged.
+#[derive(Default)]
+pub(crate) struct PaginationContext {
+    paragraph: Option<(usize, Shaping, Vec<usize>)>,
+    #[cfg(test)]
+    pub(crate) analyses: usize,
+}
+
 fn shape_hyphen(
     p: &Paragraph,
-    shaping: &Shaping<'_>,
+    shaping: &Shaping,
     range: Range<usize>,
     fonts: &Fonts,
     size: f32,
@@ -1163,7 +1253,7 @@ fn break_opportunities(text: &str) -> impl Iterator<Item = (usize, BreakOpportun
 
 fn break_line(
     p: &Paragraph,
-    shaping: &Shaping<'_>,
+    shaping: &Shaping,
     start: usize,
     width: f32,
     fonts: &Fonts,
@@ -1233,7 +1323,7 @@ fn break_line(
 
 fn shape(
     p: &Paragraph,
-    shaping: &Shaping<'_>,
+    shaping: &Shaping,
     range: Range<usize>,
     fonts: &Fonts,
     size: f32,
@@ -1277,26 +1367,29 @@ fn shape(
         .iter()
         .find(|para| para.range.contains(&range.start))
         .ok_or(Error::Layout("missing bidi paragraph"))?;
-    let (mut levels, mut runs) = shaping.bidi.visual_runs(para, range.clone());
+    let (mut levels, mut runs) = shaping.bidi.visual_runs(&p.text, range.clone())?;
     if show_soft_hyphen {
         let mark = range.end - '\u{ad}'.len_utf8();
         if let Some((previous, _)) = p.text[range.start..mark].char_indices().next_back() {
             // UAX L1 resets the invisible trailing BN character to paragraph
             // level. A displayed hyphen belongs to the preceding word instead.
             let level = shaping.bidi.levels[range.start + previous];
-            levels[mark..range.end].fill(level);
+            levels[mark - range.start..range.len()].fill(level);
             let mut logical: Vec<Range<usize>> = Vec::new();
             for (offset, c) in p.text[range.clone()].char_indices() {
                 let byte = range.start + offset;
                 if let Some(last) = logical.last_mut()
-                    && levels[last.start] == levels[byte]
+                    && levels[last.start - range.start] == levels[byte - range.start]
                 {
                     last.end = byte + c.len_utf8();
                 } else {
                     logical.push(byte..byte + c.len_utf8());
                 }
             }
-            let run_levels: Vec<_> = logical.iter().map(|run| levels[run.start]).collect();
+            let run_levels: Vec<_> = logical
+                .iter()
+                .map(|run| levels[run.start - range.start])
+                .collect();
             runs = BidiInfo::reorder_visual(&run_levels)
                 .into_iter()
                 .map(|index| logical[index].clone())
@@ -1305,7 +1398,7 @@ fn shape(
     }
     let mut tabs = Vec::new();
     for run in runs {
-        let rtl = levels[run.start].is_rtl();
+        let rtl = levels[run.start - range.start].is_rtl();
         let mut spans: Vec<_> = p
             .spans
             .iter()
@@ -1715,6 +1808,51 @@ mod raster_cache_tests {
                                     uncached.renders
                                 );
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod bidi_scratch_tests {
+    use super::*;
+
+    #[test]
+    fn line_sized_reordering_matches_full_paragraph_oracle() {
+        for text in [
+            "abc אבג 123 (דה) xyz  ",
+            "אבג abc \t  ",
+            "a \u{2067}אבג 12\u{2069} z \u{202b}rtl\u{202c} ",
+            "a\u{ad}bc אב\u{ad}גד ",
+            "abc אבג\nדהו def\u{2029}ג abc ",
+            "a\u{202a}b\u{202c}\u{200f}  ",
+        ] {
+            for base in [
+                None,
+                Some(unicode_bidi::Level::ltr()),
+                Some(unicode_bidi::Level::rtl()),
+            ] {
+                let oracle = BidiInfo::new(text, base);
+                let shaping = Shaping::new(text, base);
+                for para in &oracle.paragraphs {
+                    let boundaries: Vec<_> = text
+                        .char_indices()
+                        .map(|(i, _)| i)
+                        .chain(std::iter::once(text.len()))
+                        .filter(|i| para.range.start <= *i && *i <= para.range.end)
+                        .collect();
+                    for (i, &start) in boundaries.iter().enumerate() {
+                        for &end in &boundaries[i + 1..] {
+                            let range = start..end;
+                            let (expected, expected_runs) = oracle.visual_runs(para, range.clone());
+                            let (actual, actual_runs) =
+                                shaping.bidi.visual_runs(text, range.clone()).unwrap();
+                            assert_eq!(actual.len(), range.len());
+                            assert_eq!(actual, expected[range.clone()], "{text:?} {range:?}");
+                            assert_eq!(actual_runs, expected_runs, "{text:?} {range:?}");
                         }
                     }
                 }

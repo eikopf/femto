@@ -5,7 +5,10 @@ use std::sync::Arc;
 use crate::{
     Error, Result,
     document::Chapter,
-    layout::{Fonts, LayoutConfig, Locator, Page, paginate_from, paginate_step_until},
+    layout::{
+        Fonts, LayoutConfig, Locator, Page, PaginationContext, paginate_from, paginate_step_until,
+        paginate_step_with_context,
+    },
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,6 +132,7 @@ pub struct PageIndexer {
     selected: usize,
     retained: Option<Page>,
     missing: usize,
+    context: PaginationContext,
 }
 
 impl PageIndexer {
@@ -178,6 +182,7 @@ impl PageIndexer {
             selected: 0,
             retained: None,
             missing: 0,
+            context: PaginationContext::default(),
         })
     }
     pub fn page_count(&self) -> usize {
@@ -194,13 +199,14 @@ impl PageIndexer {
             return Err(Error::Limit("chapter page index"));
         }
         let mut produced = None;
-        let result = paginate_step_until(
+        let result = paginate_step_with_context(
             &self.chapter,
             fonts,
             self.config,
             start,
             self.end,
             self.begin,
+            &mut self.context,
             |page| {
                 produced = Some(page);
                 Ok(false)
@@ -356,6 +362,97 @@ mod note_range_tests {
                     |_| panic!("invalid range emitted a page")
                 )
                 .is_err()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod analysis_cache_tests {
+    use super::*;
+    use crate::{document::Document, layout::Font};
+
+    #[test]
+    #[ignore = "manual release-mode scaling measurement"]
+    fn long_paragraph_indexing_scaling() {
+        let fonts = Fonts::new(
+            Font::from_bytes(include_bytes!("../../../tests/fixtures/DejaVuSans.ttf").to_vec())
+                .unwrap(),
+        );
+        for words in [16_000, 32_000, 64_000] {
+            let text = "word ".repeat(words);
+            let mut document = Document::from_text("Scaling", &text).unwrap();
+            let mut job = PageIndexer::new(
+                document.chapter(0).unwrap(),
+                LayoutConfig::default(),
+                Locator::default(),
+            )
+            .unwrap();
+            let started = std::time::Instant::now();
+            while !job.step(&fonts).unwrap() {}
+            eprintln!(
+                "bytes={} pages={} elapsed={:?}",
+                text.len(),
+                job.page_count(),
+                started.elapsed()
+            );
+            assert_eq!(job.context.analyses, 1);
+        }
+    }
+
+    #[test]
+    fn incremental_pages_reuse_analysis_and_match_fresh_reconstruction() {
+        let fonts = Fonts::new(
+            Font::from_bytes(include_bytes!("../../../tests/fixtures/DejaVuSans.ttf").to_vec())
+                .unwrap(),
+        );
+        let text = format!(
+            "{}\n\n{}",
+            "Latin (אבג) soft\u{ad}hyphen αβγ ".repeat(180),
+            "אבג Latin xyz ".repeat(180)
+        );
+        let mut document = Document::from_text("Cache", &text).unwrap();
+        let chapter = document.chapter(0).unwrap();
+        let config = LayoutConfig {
+            width: 200,
+            height: 240,
+            margin: 12,
+            ..Default::default()
+        };
+        let mut expected = Vec::new();
+        paginate_from(&chapter, &fonts, config, Locator::default(), |page| {
+            expected.push(page);
+            Ok(true)
+        })
+        .unwrap();
+        // A target after the chapter retains the page produced at each step.
+        let target = Locator {
+            chapter: usize::MAX,
+            ..Default::default()
+        };
+        let mut job = PageIndexer::new(chapter.clone(), config, target).unwrap();
+        loop {
+            let finished = job.step(&fonts).unwrap();
+            let actual = job.retained.as_ref().unwrap();
+            let page = &expected[job.page_count() - 1];
+            assert_eq!(actual.start, page.start);
+            assert_eq!(actual.end, page.end);
+            assert_eq!(format!("{:?}", actual.lines), format!("{:?}", page.lines));
+            if finished {
+                break;
+            }
+        }
+        assert!(job.page_count() > 10);
+        assert_eq!(job.context.analyses, chapter.blocks.len());
+        let mut cache = job.finish().unwrap();
+        assert_eq!(cache.pages.len(), expected.len());
+        for (index, page) in expected.iter().enumerate() {
+            cache.select(index, &fonts).unwrap();
+            assert_eq!(cache.page.start, page.start);
+            assert_eq!(cache.page.end, page.end);
+            assert_eq!(
+                format!("{:?}", cache.page.lines),
+                format!("{:?}", page.lines)
             );
         }
     }

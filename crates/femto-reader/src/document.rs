@@ -334,7 +334,7 @@ impl Document {
         let mut hashing = FileHash::new(File::open(path)?);
         loop {
             if let Some(file) = hashing.step()? {
-                return Self::from_hashed_format(path, file, format);
+                return Self::from_identified_format(path, file, format);
             }
         }
     }
@@ -351,15 +351,19 @@ impl Document {
             check()?;
             if let Some(file) = hashing.step()? {
                 check()?;
-                return Self::from_hashed(path, file);
+                return Self::from_identified(path, file);
             }
         }
     }
-    pub(crate) fn from_hashed(path: &Path, file: HashedFile) -> Result<Self> {
-        Self::from_hashed_format(path, file, None)
+    pub(crate) fn from_identified(path: &Path, file: IdentifiedFile) -> Result<Self> {
+        Self::from_identified_format(path, file, None)
     }
-    fn from_hashed_format(path: &Path, hashed: HashedFile, format: Option<&str>) -> Result<Self> {
-        let HashedFile { mut file, id } = hashed;
+    fn from_identified_format(
+        path: &Path,
+        hashed: IdentifiedFile,
+        format: Option<&str>,
+    ) -> Result<Self> {
+        let IdentifiedFile { mut file, id } = hashed;
         file.seek(SeekFrom::Start(0))?;
         let extension = path
             .extension()
@@ -1089,13 +1093,23 @@ impl Document {
 /// Owns the same file description through hashing and metadata parsing.
 pub(crate) struct FileHash {
     file: Option<File>,
-    digest: Sha256,
+    digest: Option<crate::hashing::Hasher>,
+    stamp: Option<crate::library_cache::FileStamp>,
 }
-pub(crate) struct HashedFile {
+pub(crate) struct IdentifiedFile {
     file: File,
     id: String,
 }
-impl HashedFile {
+impl IdentifiedFile {
+    pub(crate) fn into_hash(self) -> FileHash {
+        FileHash::new(self.file)
+    }
+    pub(crate) fn cached(file: File, id: String) -> Self {
+        Self { file, id }
+    }
+    pub(crate) fn stamp(&self) -> Option<crate::library_cache::FileStamp> {
+        crate::library_cache::FileStamp::read(&self.file)
+    }
     pub(crate) fn id(&self) -> &str {
         &self.id
     }
@@ -1103,12 +1117,16 @@ impl HashedFile {
 impl FileHash {
     pub(crate) fn new(file: File) -> Self {
         Self {
+            stamp: crate::library_cache::FileStamp::read(&file),
             file: Some(file),
-            digest: Sha256::new(),
+            digest: None,
         }
     }
     /// Batches hash reads until the budget expires. One read can exceed the budget.
-    pub(crate) fn step_for(&mut self, budget: std::time::Duration) -> Result<Option<HashedFile>> {
+    pub(crate) fn step_for(
+        &mut self,
+        budget: std::time::Duration,
+    ) -> Result<Option<IdentifiedFile>> {
         let start = std::time::Instant::now();
         loop {
             let result = self.step()?;
@@ -1119,27 +1137,40 @@ impl FileHash {
     }
 
     /// Hashes at most 8192 bytes; only EOF produces a parser-ready file.
-    pub(crate) fn step(&mut self) -> Result<Option<HashedFile>> {
+    pub(crate) fn step(&mut self) -> Result<Option<IdentifiedFile>> {
+        let result = self.step_inner();
+        if result.is_err() {
+            self.file = None;
+            self.digest = None;
+        }
+        result
+    }
+
+    fn step_inner(&mut self) -> Result<Option<IdentifiedFile>> {
         let file = self
             .file
             .as_mut()
             .ok_or_else(|| Error::Document("file hash already completed".into()))?;
+        if self.digest.is_none() {
+            self.digest = Some(crate::hashing::Hasher::new()?);
+        }
         let mut bytes = [0; 8192];
-        let count = match file.read(&mut bytes) {
-            Ok(count) => count,
-            Err(error) => {
-                self.file = None;
-                return Err(error.into());
-            }
-        };
+        let count = file.read(&mut bytes)?;
         if count == 0 {
-            let id = format!("{:x}", std::mem::take(&mut self.digest).finalize());
-            return Ok(Some(HashedFile {
+            if let (Some(before), Some(after)) =
+                (self.stamp, crate::library_cache::FileStamp::read(file))
+                && before != after
+            {
+                return Err(Error::Document("file changed during hashing".into()));
+            }
+            let digest = self.digest.take().unwrap().finish()?;
+            let id = crate::hashing::hex(&digest);
+            return Ok(Some(IdentifiedFile {
                 file: self.file.take().unwrap(),
                 id,
             }));
         }
-        self.digest.update(&bytes[..count]);
+        self.digest.as_mut().unwrap().update(&bytes[..count])?;
         Ok(None)
     }
 }
@@ -1184,6 +1215,28 @@ mod hashed_file_tests {
     use super::*;
 
     #[test]
+    fn mutation_during_hashing_discards_the_digest_and_file() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("book.txt");
+        std::fs::write(&path, vec![b'a'; 8192]).unwrap();
+        let mut hashing = FileHash::new(File::open(&path).unwrap());
+        assert!(hashing.step().unwrap().is_none());
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"changed")
+            .unwrap();
+        assert!(hashing.step().unwrap().is_none());
+        let error = hashing.step().err().unwrap();
+        assert!(error.to_string().contains("file changed during hashing"));
+        assert!(hashing.file.is_none());
+        assert!(hashing.digest.is_none());
+        assert!(hashing.step().is_err());
+    }
+
+    #[test]
     fn hash_budget_batches_reads_without_changing_identity_or_consuming_parser_handle() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("book.txt");
@@ -1202,7 +1255,7 @@ mod hashed_file_tests {
             .unwrap();
         assert_eq!(file.id(), format!("{:x}", Sha256::digest(&bytes)));
         assert_eq!(
-            Document::from_hashed(&path, file).unwrap().metadata.id,
+            Document::from_identified(&path, file).unwrap().metadata.id,
             format!("{:x}", Sha256::digest(&bytes))
         );
     }
@@ -1221,7 +1274,7 @@ mod hashed_file_tests {
             let file = hashing.step().unwrap().unwrap();
             assert_eq!(file.id(), format!("{:x}", Sha256::digest(&bytes)));
             assert!(hashing.step().is_err());
-            let document = Document::from_hashed(&path, file).unwrap();
+            let document = Document::from_identified(&path, file).unwrap();
             assert_eq!(
                 document.metadata.id,
                 format!("{:x}", Sha256::digest(&bytes))
@@ -1246,7 +1299,7 @@ mod hashed_file_tests {
         };
         std::fs::rename(&path, dir.path().join("original.epub")).unwrap();
         std::fs::write(&path, b"invalid replacement").unwrap();
-        let parsed = Document::from_hashed(&path, file).unwrap();
+        let parsed = Document::from_identified(&path, file).unwrap();
         assert_eq!(parsed.metadata.id, expected.metadata.id);
         assert_eq!(parsed.metadata.title, expected.metadata.title);
         assert_eq!(

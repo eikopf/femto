@@ -4,10 +4,12 @@ use femto_reader::{
     document::Document,
     journal::StateJournal,
     layout::{Font, Fonts},
-    state::{Library, LibraryScan, ReaderState},
+    state::{Library, ReaderState},
     ui::ReaderUi,
 };
 use std::time::{Duration, Instant};
+#[cfg(not(esp_idf_mbedtls_hardware_sha))]
+compile_error!("Picco book hashing requires CONFIG_MBEDTLS_HARDWARE_SHA=y");
 #[cfg(feature = "bluetooth")]
 mod bluetooth;
 mod catalog;
@@ -32,6 +34,7 @@ mod wifi;
 fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
+    log::info!("Book SHA-256 backend: {}", femto_reader::hashing::BACKEND);
     if let Err(error) = run() {
         log::error!("Reader stopped: {error}");
     }
@@ -75,22 +78,22 @@ fn run() -> Result<(), String> {
     let (width, height) = orientation(state.rotation).dimensions();
     state.layout.width = width as u32;
     state.layout.height = height as u32;
-    let (library, resume_hint) = if screen.storage.is_some() {
-        startup_library(&mut screen, &fonts, &state)?
-    } else {
-        (Library::default(), None)
-    };
-    if unsafe { esp_idf_svc::sys::esp_sleep_get_wakeup_cause() }
-        != esp_idf_svc::sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_UNDEFINED
-    {
-        if let Some(path) = resume_hint.or_else(|| {
-            library
-                .recent(&state)
-                .first()
-                .map(|entry| entry.path.clone())
-        }) {
-            candidates.push((path, true));
+    if let Err(error) = screen.set_light(state.frontlight.brightness, state.frontlight.warmth) {
+        log::warn!("Startup frontlight unavailable: {error}");
+    }
+    let mut library = if screen.storage.is_some() {
+        match Library::load_cached("/sdcard/femto", 256) {
+            Ok(library) => library,
+            Err(error) => {
+                log::warn!("Library cache unavailable: {error}");
+                Library::default()
+            }
         }
+    } else {
+        Library::default()
+    };
+    if let Some(entry) = library.recent(&state).first() {
+        candidates.push((entry.path.clone(), true));
     }
     if screen.storage.is_some() {
         for path in ["/sdcard/femto/book.epub", "/sdcard/femto/book.txt"] {
@@ -101,6 +104,17 @@ fn run() -> Result<(), String> {
         }
     }
     let (mut reader, resumed) = startup_reader(&mut screen, fonts, state, candidates)?;
+    if screen.storage.is_some()
+        && !library
+            .entries
+            .iter()
+            .any(|entry| entry.metadata.id == reader.document.metadata.id)
+    {
+        match Library::load_cached("/sdcard/femto", 256) {
+            Ok(updated) => library = updated,
+            Err(error) => log::warn!("Library cache refresh unavailable: {error}"),
+        }
+    }
     let mut ui = ReaderUi::default();
     if screen.storage.is_some() {
         let path = std::path::PathBuf::from("/sdcard/femto/dictionary.ifo");
@@ -455,83 +469,6 @@ fn run() -> Result<(), String> {
     }
 }
 
-fn startup_library(
-    screen: &mut panel::Screen,
-    fonts: &Fonts,
-    state: &ReaderState,
-) -> Result<(Library, Option<std::path::PathBuf>), String> {
-    let mut scan = match LibraryScan::cached("/sdcard/femto", 256) {
-        Ok(scan) => scan,
-        Err(error) => {
-            log::warn!("Library scan unavailable: {error}");
-            return Ok((Library::default(), None));
-        }
-    };
-    if let Err(error) = screen.set_light(state.frontlight.brightness, state.frontlight.warmth) {
-        log::warn!("Startup frontlight unavailable: {error}");
-    }
-    let config = femto_reader::layout::LayoutConfig {
-        width: state.layout.width,
-        height: state.layout.height,
-        ..Default::default()
-    };
-    let mut message = Document::from_text(
-        "Scanning library",
-        "Scanning library\n\nPress a button or tap to skip.\n\nThe library menu can rescan later.",
-    )
-    .map_err(|e| e.to_string())?;
-    let chapter = message.chapter(0).map_err(|e| e.to_string())?;
-    let pages =
-        femto_reader::layout::paginate(&chapter, fonts, config).map_err(|e| e.to_string())?;
-    let pixels = femto_reader::layout::rasterize_display(
-        pages.pages.first().ok_or("Missing scan status page")?,
-        fonts,
-        config,
-        state.text_raster,
-        if cfg!(feature = "grayscale") { 4 } else { 2 },
-        |_| {
-            Err(femto_reader::Error::Document(
-                "Scan status has no resources".into(),
-            ))
-        },
-    )
-    .map_err(|e| e.to_string())?;
-    let mut plane =
-        vec![255; femto_picco_board::PLANE_BYTES * if cfg!(feature = "grayscale") { 2 } else { 1 }];
-    pack_pixels(&pixels, state.rotation, &mut plane)?;
-    drop(pixels);
-    screen.present_oriented(&plane, orientation(state.rotation))?;
-    drop(plane);
-    drop(pages);
-    drop(chapter);
-    drop(message);
-    loop {
-        std::thread::sleep(Duration::from_millis(10));
-        screen.poll_wifi();
-        if screen.event().is_some() {
-            log::info!("Startup library scan skipped; cached index preserved");
-            let hint = scan.resume_hint(state);
-            return Ok((scan.cancel(), hint));
-        }
-        match scan.step_for(Duration::from_millis(5)) {
-            Ok(Some(library)) => {
-                log::info!(
-                    "Library: {} books, {} errors",
-                    library.entries.len(),
-                    library.errors.len()
-                );
-                return Ok((library, None));
-            }
-            Ok(None) => {}
-            Err(error) => {
-                log::warn!("Library scan failed: {error}");
-                let hint = scan.resume_hint(state);
-                return Ok((scan.cancel(), hint));
-            }
-        }
-    }
-}
-
 fn startup_reader(
     screen: &mut panel::Screen,
     fonts: Fonts,
@@ -545,9 +482,6 @@ fn startup_reader(
         )
     };
     let rotation = state.rotation;
-    if let Err(error) = screen.set_light(state.frontlight.brightness, state.frontlight.warmth) {
-        log::warn!("Startup frontlight unavailable: {error}");
-    }
     let mut startup =
         ReaderStartup::from_document(specimen().map_err(|e| e.to_string())?, fonts, state)
             .map_err(|e| e.to_string())?;
@@ -555,7 +489,7 @@ fn startup_reader(
     let mut plane =
         vec![255; femto_picco_board::PLANE_BYTES * if cfg!(feature = "grayscale") { 2 } else { 1 }];
     'books: for (path, resumed) in candidates {
-        if let Err(error) = startup.open_file(&path) {
+        if let Err(error) = startup.open_cached_file(&path, "/sdcard/femto", 256) {
             log::warn!("Cannot open {}: {error}", path.display());
             continue;
         }

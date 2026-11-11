@@ -35,7 +35,7 @@ use clap::Parser;
 use femto_reader::{
     controller::{Action, Effect, Reader, ReaderStartup},
     layout::{Font, Fonts},
-    state::{LibraryScan, ReaderState},
+    state::{Library, ReaderState},
     ui::ReaderUi,
 };
 use minifb::{InputCallback, Key, MouseButton, MouseMode, Window, WindowOptions};
@@ -187,7 +187,31 @@ fn main() -> Result<()> {
     window.set_target_fps(30);
     let loading = vec![0x00ff_ffff; width * height];
     window.update_with_buffer(&loading, width, height)?;
-    let mut startup = ReaderStartup::from_file(args.book, fonts, state)?;
+    #[cfg(unix)]
+    let library_directory = args.library.or_else(|| args.catalog_directory.clone());
+    #[cfg(not(unix))]
+    let library_directory = args.library;
+    #[cfg(unix)]
+    if let (Some(directory), Some(library)) = (&args.catalog_directory, &library_directory) {
+        anyhow::ensure!(
+            directory
+                .canonicalize()?
+                .starts_with(library.canonicalize()?),
+            "catalog directory must be within the library directory"
+        );
+    }
+    let cached_root = library_directory.as_ref().filter(|directory| {
+        args.book
+            .canonicalize()
+            .ok()
+            .zip(directory.canonicalize().ok())
+            .is_some_and(|(book, root)| book.starts_with(root))
+    });
+    let mut startup = if let Some(root) = cached_root {
+        ReaderStartup::from_cached_file(args.book, root, 4096, fonts, state)?
+    } else {
+        ReaderStartup::from_file(args.book, fonts, state)?
+    };
     loop {
         let cancelled = keyboard
             .borrow_mut()
@@ -259,48 +283,14 @@ fn main() -> Result<()> {
         }));
         ui.set_catalog_available(true);
     }
-    #[cfg(unix)]
-    let library = args.library.or_else(|| args.catalog_directory.clone());
-    #[cfg(not(unix))]
-    let library = args.library;
-    #[cfg(unix)]
-    if let (Some(directory), Some(library)) = (&args.catalog_directory, &library) {
-        anyhow::ensure!(
-            directory
-                .canonicalize()?
-                .starts_with(library.canonicalize()?),
-            "catalog directory must be within the library directory"
-        );
-    }
-    if let Some(directory) = library {
-        let mut scan = LibraryScan::cached(&directory, 4096)?;
+    let library = library_directory
+        .as_ref()
+        .map(|directory| Library::load_cached(directory, 4096))
+        .transpose()?
+        .unwrap_or_default();
+    ui.set_library(library);
+    if let Some(directory) = library_directory {
         ui.configure_library_scan(directory, 4096)?;
-        let preview: Vec<u32> = reader
-            .render(args.levels)?
-            .into_iter()
-            .map(|value| u32::from(value) * 0x010101)
-            .collect();
-        window.set_title("Femto - Scanning library - Esc: skip");
-        window.update_with_buffer(&preview, width, height)?;
-        loop {
-            if !window.is_open() {
-                return Ok(());
-            }
-            let skipped = keyboard
-                .borrow_mut()
-                .pressed
-                .drain(..)
-                .any(|event| event == InputEvent::Key(Key::Escape));
-            if skipped || window.is_key_down(Key::Escape) {
-                ui.set_library(scan.cancel());
-                break;
-            }
-            if let Some(library) = scan.step_for(std::time::Duration::from_millis(5))? {
-                ui.set_library(library);
-                break;
-            }
-            window.update();
-        }
     }
     window.set_target_fps(30);
     let mut pixels = Vec::new();

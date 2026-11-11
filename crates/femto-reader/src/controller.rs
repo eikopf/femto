@@ -122,9 +122,90 @@ enum OpeningPhase {
     Hashing {
         path: std::path::PathBuf,
         file: crate::document::FileHash,
+        cache_root: Option<(std::path::PathBuf, usize)>,
+    },
+    Cached {
+        path: std::path::PathBuf,
+        file: Option<crate::document::IdentifiedFile>,
+        stamp: Option<crate::library_cache::FileStamp>,
+        root: std::path::PathBuf,
+        limit: usize,
     },
     Indexing(Box<IndexedOpening>),
 }
+impl OpeningPhase {
+    fn cached(path: &std::path::Path, root: &std::path::Path, limit: usize) -> Result<Self> {
+        let root = root.canonicalize()?;
+        let crate::library_cache::OpenedBook {
+            path,
+            file,
+            identity,
+        } = crate::library_cache::Cache::open_book(&root, path, limit)?;
+        Ok(match identity {
+            Some((id, stamp)) => Self::Cached {
+                path,
+                stamp: Some(stamp),
+                file: Some(crate::document::IdentifiedFile::cached(file, id)),
+                root,
+                limit,
+            },
+            None => Self::Hashing {
+                path,
+                file: crate::document::FileHash::new(file),
+                cache_root: Some((root, limit)),
+            },
+        })
+    }
+    fn read_document(&mut self, budget: std::time::Duration) -> Result<Option<Document>> {
+        match self {
+            Self::Cached {
+                path,
+                file,
+                stamp,
+                root,
+                limit,
+            } => {
+                let file = file
+                    .take()
+                    .ok_or_else(|| Error::Document("cached opening already consumed".into()))?;
+                if file.stamp() != *stamp {
+                    *self = Self::Hashing {
+                        path: path.clone(),
+                        file: file.into_hash(),
+                        cache_root: Some((root.clone(), *limit)),
+                    };
+                    return self.read_document(budget);
+                }
+                Ok(Some(Document::from_identified(path, file)?))
+            }
+            Self::Hashing {
+                path,
+                file,
+                cache_root,
+            } => {
+                let Some(file) = file.step_for(budget)? else {
+                    return Ok(None);
+                };
+                let stamp = file.stamp();
+                let document = Document::from_identified(path, file)?;
+                if let Some((root, limit)) = cache_root {
+                    // This index is disposable; failure to persist it must not
+                    // prevent reading the successfully opened document.
+                    let _ = crate::library_cache::Cache::record_open(
+                        root,
+                        path,
+                        &document.metadata,
+                        stamp,
+                        *limit,
+                    );
+                }
+                Ok(Some(document))
+            }
+            Self::Indexing(_) => Ok(None),
+        }
+    }
+}
+
 struct IndexedOpening {
     typography: BookTypography,
     document: Document,
@@ -150,10 +231,41 @@ impl ReaderStartup {
         let path = path.as_ref().to_owned();
         let file = crate::document::FileHash::new(std::fs::File::open(&path)?);
         Ok(Self {
-            phase: OpeningPhase::Hashing { path, file },
+            phase: OpeningPhase::Hashing {
+                path,
+                file,
+                cache_root: None,
+            },
             fonts,
             state,
         })
+    }
+
+    /// Reuses a cached identity only when the opened file's size and mtime match.
+    /// A miss hashes cooperatively and refreshes the disposable metadata cache.
+    pub fn from_cached_file(
+        path: impl AsRef<std::path::Path>,
+        root: impl AsRef<std::path::Path>,
+        limit: usize,
+        fonts: Fonts,
+        state: ReaderState,
+    ) -> Result<Self> {
+        state.layout.validate()?;
+        Ok(Self {
+            phase: OpeningPhase::cached(path.as_ref(), root.as_ref(), limit)?,
+            fonts,
+            state,
+        })
+    }
+
+    pub fn open_cached_file(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+        root: impl AsRef<std::path::Path>,
+        limit: usize,
+    ) -> Result<()> {
+        self.phase = OpeningPhase::cached(path.as_ref(), root.as_ref(), limit)?;
+        Ok(())
     }
 
     pub fn from_document(document: Document, fonts: Fonts, state: ReaderState) -> Result<Self> {
@@ -168,7 +280,11 @@ impl ReaderStartup {
     pub fn open_file(&mut self, path: impl AsRef<std::path::Path>) -> Result<()> {
         let path = path.as_ref().to_owned();
         let file = crate::document::FileHash::new(std::fs::File::open(&path)?);
-        self.phase = OpeningPhase::Hashing { path, file };
+        self.phase = OpeningPhase::Hashing {
+            path,
+            file,
+            cache_root: None,
+        };
         Ok(())
     }
 
@@ -204,7 +320,7 @@ impl ReaderStartup {
 
     pub fn indexed_pages(&self) -> usize {
         match &self.phase {
-            OpeningPhase::Hashing { .. } => 0,
+            OpeningPhase::Hashing { .. } | OpeningPhase::Cached { .. } => 0,
             OpeningPhase::Indexing(job) => job.indexer.page_count(),
         }
     }
@@ -218,17 +334,13 @@ impl ReaderStartup {
     /// Batches hashing within the budget; indexing still processes one page.
     /// Metadata and chapter parsing at EOF can exceed the budget.
     pub fn step_for(&mut self, budget: std::time::Duration) -> Result<bool> {
-        match &mut self.phase {
-            OpeningPhase::Hashing { path, file } => {
-                if let Some(file) = file.step_for(budget)? {
-                    let document = Document::from_hashed(path, file)?;
-                    self.phase =
-                        OpeningPhase::Indexing(Box::new(prepare_opening(document, &self.state)?));
-                }
-                Ok(false)
-            }
-            OpeningPhase::Indexing(job) => job.indexer.step(&self.fonts),
+        if let OpeningPhase::Indexing(job) = &mut self.phase {
+            return job.indexer.step(&self.fonts);
         }
+        if let Some(document) = self.phase.read_document(budget)? {
+            self.phase = OpeningPhase::Indexing(Box::new(prepare_opening(document, &self.state)?));
+        }
+        Ok(false)
     }
 
     pub fn finish(mut self) -> Result<Reader> {
@@ -288,7 +400,7 @@ fn prepare_opening(mut document: Document, state: &ReaderState) -> Result<Indexe
 impl BookOpening {
     pub fn indexed_pages(&self) -> usize {
         match &self.phase {
-            OpeningPhase::Hashing { .. } => 0,
+            OpeningPhase::Hashing { .. } | OpeningPhase::Cached { .. } => 0,
             OpeningPhase::Indexing(opening) => opening.indexer.page_count(),
         }
     }
@@ -605,12 +717,30 @@ impl Reader {
         let path = path.as_ref().to_owned();
         let file = crate::document::FileHash::new(std::fs::File::open(&path)?);
         Ok(BookOpening {
-            phase: OpeningPhase::Hashing { path, file },
+            phase: OpeningPhase::Hashing {
+                path,
+                file,
+                cache_root: None,
+            },
             origin: self.document.metadata.id.clone(),
             origin_position: self.position,
             config: self.state.layout,
         })
     }
+    pub fn begin_open_cached_file(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        root: impl AsRef<std::path::Path>,
+        limit: usize,
+    ) -> Result<BookOpening> {
+        Ok(BookOpening {
+            phase: OpeningPhase::cached(path.as_ref(), root.as_ref(), limit)?,
+            origin: self.document.metadata.id.clone(),
+            origin_position: self.position,
+            config: self.state.layout,
+        })
+    }
+
     /// Parses the destination before starting cooperative page indexing.
     pub fn begin_open(&self, document: Document) -> Result<BookOpening> {
         Ok(BookOpening {
@@ -648,16 +778,13 @@ impl Reader {
         budget: std::time::Duration,
     ) -> Result<bool> {
         self.check_opening(opening)?;
-        match &mut opening.phase {
-            OpeningPhase::Hashing { path, file } => {
-                if let Some(file) = file.step_for(budget)? {
-                    let document = Document::from_hashed(path, file)?;
-                    opening.phase = self.begin_open(document)?.phase;
-                }
-                Ok(false)
-            }
-            OpeningPhase::Indexing(job) => job.indexer.step(&self.fonts),
+        if let OpeningPhase::Indexing(job) = &mut opening.phase {
+            return job.indexer.step(&self.fonts);
         }
+        if let Some(document) = opening.phase.read_document(budget)? {
+            opening.phase = self.begin_open(document)?.phase;
+        }
+        Ok(false)
     }
 
     /// Renders and validates the destination before replacing visible state.
@@ -1605,5 +1732,201 @@ mod selection_coverage_tests {
         assert_eq!(coverage.len(), 48_000);
         assert_eq!(coverage.capacity(), capacity);
         assert!(coverage.iter().all(|byte| *byte == u8::MAX));
+    }
+}
+
+#[cfg(test)]
+mod cached_open_tests {
+    use super::*;
+    use crate::{layout::Font, state::Library};
+    use std::{fs, path::Path, time::Duration};
+
+    fn start(path: &Path, root: &Path, limit: usize) -> ReaderStartup {
+        let fonts = Fonts::new(
+            Font::from_bytes(include_bytes!("../../../tests/fixtures/DejaVuSans.ttf").to_vec())
+                .unwrap(),
+        );
+        ReaderStartup::from_cached_file(path, root, limit, fonts, ReaderState::default()).unwrap()
+    }
+    fn parse(startup: &mut ReaderStartup) -> String {
+        loop {
+            if let OpeningPhase::Indexing(job) = &startup.phase {
+                return job.document.metadata.id.clone();
+            }
+            assert!(!startup.step().unwrap());
+        }
+    }
+    fn cache_json(root: &Path) -> serde_json::Value {
+        serde_json::from_slice(&fs::read(root.join(".femto-library-cache.json")).unwrap()).unwrap()
+    }
+    fn set_cache(root: &Path, value: &serde_json::Value) {
+        fs::write(
+            root.join(".femto-library-cache.json"),
+            serde_json::to_vec(value).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn selected_book_populates_cache_and_warm_open_skips_hashing_without_rewriting() {
+        let dir = tempfile::tempdir().unwrap();
+        let book = dir.path().join("book.txt");
+        fs::write(&book, "chapter ".repeat(4000)).unwrap();
+        fs::write(dir.path().join("unopened.epub"), "invalid unrelated book").unwrap();
+        assert!(
+            Library::load_cached(dir.path(), 8)
+                .unwrap()
+                .entries
+                .is_empty()
+        );
+        let mut cold = start(&book, dir.path(), 8);
+        assert!(matches!(cold.phase, OpeningPhase::Hashing { .. }));
+        let id = parse(&mut cold);
+        let snapshot = Library::load_cached(dir.path(), 8).unwrap();
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.entries[0].metadata.id, id);
+        let path = dir.path().join(".femto-library-cache.json");
+        let modified = fs::metadata(&path).unwrap().modified().unwrap() - Duration::from_secs(60);
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        let bytes = fs::read(&path).unwrap();
+        let mut warm = start(&book, dir.path(), 8);
+        assert!(matches!(warm.phase, OpeningPhase::Cached { .. }));
+        assert!(!warm.step().unwrap());
+        assert!(matches!(warm.phase, OpeningPhase::Indexing(_)));
+        assert_eq!(parse(&mut warm), id);
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        assert_eq!(fs::metadata(path).unwrap().modified().unwrap(), modified);
+    }
+
+    #[test]
+    fn legacy_cache_displays_metadata_but_hashes_once_even_with_a_stamp_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let book = dir.path().join("book.txt");
+        fs::write(&book, "book text").unwrap();
+        parse(&mut start(&book, dir.path(), 8));
+        let mut legacy = cache_json(dir.path());
+        legacy["version"] = 1.into();
+        // A v1 cache cannot authorize cached identity even if it contains
+        // an unknown stamp field copied from a newer writer.
+        set_cache(dir.path(), &legacy);
+        assert_eq!(
+            Library::load_cached(dir.path(), 8).unwrap().entries.len(),
+            1
+        );
+        let mut upgrading = start(&book, dir.path(), 8);
+        assert!(matches!(upgrading.phase, OpeningPhase::Hashing { .. }));
+        parse(&mut upgrading);
+        assert_eq!(cache_json(dir.path())["version"], 2);
+        assert!(matches!(
+            start(&book, dir.path(), 8).phase,
+            OpeningPhase::Cached { .. }
+        ));
+        fs::remove_file(&book).unwrap();
+        // Loading the menu does not stat or open every cached document.
+        assert_eq!(
+            Library::load_cached(dir.path(), 8).unwrap().entries.len(),
+            1
+        );
+    }
+
+    #[test]
+    fn size_and_mtime_changes_rehash_and_explicit_scan_verifies_preserved_stamps() {
+        let dir = tempfile::tempdir().unwrap();
+        let book = dir.path().join("book.txt");
+        fs::write(&book, "first").unwrap();
+        let first = parse(&mut start(&book, dir.path(), 8));
+        fs::write(&book, "second-longer").unwrap();
+        let mut resized = start(&book, dir.path(), 8);
+        assert!(matches!(resized.phase, OpeningPhase::Hashing { .. }));
+        let second = parse(&mut resized);
+        assert_ne!(first, second);
+        let file = fs::File::options().write(true).open(&book).unwrap();
+        let modified = file.metadata().unwrap().modified().unwrap() + Duration::from_secs(2);
+        file.set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        let mut retimed = start(&book, dir.path(), 8);
+        assert!(matches!(retimed.phase, OpeningPhase::Hashing { .. }));
+        assert_eq!(parse(&mut retimed), second);
+        fs::write(&book, "third--longer").unwrap();
+        file.set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert!(matches!(
+            start(&book, dir.path(), 8).phase,
+            OpeningPhase::Cached { .. }
+        ));
+        let verified = Library::scan_cached(dir.path(), 8).unwrap();
+        assert_ne!(verified.entries[0].metadata.id, second);
+        assert_eq!(
+            parse(&mut start(&book, dir.path(), 8)),
+            verified.entries[0].metadata.id
+        );
+    }
+
+    #[test]
+    fn cached_open_keeps_its_handle_and_rechecks_pending_handle_mutation() {
+        let dir = tempfile::tempdir().unwrap();
+        let book = dir.path().join("book.txt");
+        fs::write(&book, "original").unwrap();
+        let original = parse(&mut start(&book, dir.path(), 8));
+        let mut opened = start(&book, dir.path(), 8);
+        fs::rename(&book, dir.path().join("old.txt")).unwrap();
+        fs::write(&book, "replacement text").unwrap();
+        assert_eq!(parse(&mut opened), original);
+        let replacement = parse(&mut start(&book, dir.path(), 8));
+        assert_ne!(replacement, original);
+        let mut pending = start(&book, dir.path(), 8);
+        assert!(matches!(pending.phase, OpeningPhase::Cached { .. }));
+        fs::write(&book, "changed while pending").unwrap();
+        assert!(!pending.step().unwrap());
+        assert!(matches!(pending.phase, OpeningPhase::Hashing { .. }));
+        assert_ne!(parse(&mut pending), replacement);
+    }
+
+    #[test]
+    fn cache_capacity_stays_loadable_and_failed_cache_writes_do_not_block_reading() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["one.txt", "two.txt", "three.txt"] {
+            let book = dir.path().join(name);
+            fs::write(&book, name).unwrap();
+            parse(&mut start(&book, dir.path(), 2));
+            let snapshot = Library::load_cached(dir.path(), 2).unwrap();
+            assert!(snapshot.errors.is_empty());
+            assert!(snapshot.entries.len() <= 2);
+            assert!(snapshot.entries.iter().any(|entry| entry.path == book));
+        }
+        fs::remove_file(dir.path().join(".femto-library-cache.json")).unwrap();
+        fs::create_dir(dir.path().join(".femto-library-cache.json")).unwrap();
+        let book = dir.path().join("one.txt");
+        parse(&mut start(&book, dir.path(), 2));
+    }
+
+    #[test]
+    fn cached_paths_cannot_escape_the_selected_library() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("library");
+        fs::create_dir(&root).unwrap();
+        let book = root.join("book.txt");
+        fs::write(&book, "inside").unwrap();
+        parse(&mut start(&book, &root, 8));
+        let outside = dir.path().join("outside.txt");
+        fs::write(&outside, "outside").unwrap();
+        let mut corrupt = cache_json(&root);
+        corrupt["entries"][0]["path"] = serde_json::to_value(root.join("../outside.txt")).unwrap();
+        set_cache(&root, &corrupt);
+        let snapshot = Library::load_cached(&root, 8).unwrap();
+        assert!(snapshot.entries.is_empty());
+        assert!(!snapshot.errors.is_empty());
+        assert!(OpeningPhase::cached(&outside, &root, 8).is_err());
+        #[cfg(unix)]
+        {
+            fs::remove_file(&book).unwrap();
+            std::os::unix::fs::symlink(&outside, &book).unwrap();
+            assert!(OpeningPhase::cached(&book, &root, 8).is_err());
+        }
     }
 }

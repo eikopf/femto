@@ -37,6 +37,8 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
     library = Path(directory) / "books"
     library.mkdir()
     shutil.copyfile("tests/fixtures/sample.epub", library / "sample.epub")
+    unopened = library / "unopened.txt"
+    unopened.write_text("This book remains undiscovered until an explicit rescan.")
     read_fd, write_fd = os.pipe()
     server = subprocess.Popen(["Xvfb", "-noreset", "-displayfd", str(write_fd), "-screen", "0", "800x1000x24", "-nolisten", "tcp"], pass_fds=(write_fd,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     os.close(write_fd)
@@ -57,7 +59,8 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
             data = json.loads(state.read_text())
             return next(iter(data["books"].values()), None)
 
-        def start(book="tests/fixtures/sample.epub", wait_ready=True, extra=()):
+        def start(book=None, wait_ready=True, extra=()):
+            book = str(book or library / "sample.epub")
             process = subprocess.Popen(["target/debug/femto-simulator", book, "--font", "tests/fixtures/DejaVuSerif.ttf", "--fallback-font", "tests/fixtures/DejaVuSans.ttf", "--state", str(state), "--library", str(library), *extra], env=env, stderr=subprocess.PIPE)
             window = wait_for(lambda: xdo("search", "--name", "^Femto").stdout.strip(), process, "native window")
             assert xdo("windowfocus", window).returncode == 0
@@ -66,6 +69,15 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
             return process, window
 
         app, window = start()
+        cache = library / ".femto-library-cache.json"
+        cached_paths = {entry["path"] for entry in json.loads(cache.read_text())["entries"]}
+        assert str(library / "sample.epub") in cached_paths
+        assert str(unopened) not in cached_paths, "First startup must not scan other books"
+        # The library menu discovers other books only through explicit Rescan.
+        assert xdo("key", "--delay", "100", "Tab", *(["Down"] * 8), "Return", *(["Down"] * 4), "Return").returncode == 0
+        wait_for(lambda: cache.exists() and "Scanning library" not in xdo("getwindowname", window).stdout, app, "explicit first library scan")
+        wait_for(lambda: str(unopened) in {entry["path"] for entry in json.loads(cache.read_text())["entries"]}, app, "explicit scan discovers unopened book")
+        assert xdo("key", "--delay", "100", "BackSpace", "BackSpace").returncode == 0
         assert xdo("key", "Right").returncode == 0
         first = wait_for(lambda: saved() and saved()["position"]["block"] > 0 and saved(), app, "page turn")
         assert xdo("key", "b").returncode == 0
@@ -102,15 +114,13 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         assert app.wait(timeout=10) == 0, app.stderr.read().decode()
         assert state.read_bytes() == saved_before_cancel
         cache = library / ".femto-library-cache.json"
-        cached_before_skip = cache.read_bytes()
+        cached_before_reopen = cache.read_bytes()
         slow_scan = library / "slow-scan.epub"
         slow_scan.write_bytes(b"x" * (2 * 1024 * 1024))
-        app, window = start(wait_ready=False)
-        wait_for(lambda: "Scanning library" in xdo("getwindowname", window).stdout, app, "startup library scan")
-        assert xdo("key", "Escape").returncode == 0
-        wait_for(lambda: " - page " in xdo("getwindowname", window).stdout, app, "skipped startup scan")
+        app, window = start()
+        assert "Scanning library" not in xdo("getwindowname", window).stdout
         assert state.read_bytes() == saved_before_cancel
-        assert cache.read_bytes() == cached_before_skip
+        assert cache.read_bytes() == cached_before_reopen
         assert xdo("key", "q").returncode == 0
         assert app.wait(timeout=10) == 0, app.stderr.read().decode()
         slow_scan.unlink()

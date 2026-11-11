@@ -1355,12 +1355,19 @@ impl ReaderUi {
                 Ok(Effect::Redraw)
             }
             Command::Book(index) => match self.library.entries.get(index) {
-                Some(entry) => reader.begin_open_file(&entry.path).map(|opening| {
-                    self.opening = Some(opening);
-                    self.panel = Some(Panel::Opening);
-                    self.selected = 0;
-                    Effect::Redraw
-                }),
+                Some(entry) => {
+                    let opening = if let Some((root, limit)) = &self.scan_root {
+                        reader.begin_open_cached_file(&entry.path, root, *limit)
+                    } else {
+                        reader.begin_open_file(&entry.path)
+                    };
+                    opening.map(|opening| {
+                        self.opening = Some(opening);
+                        self.panel = Some(Panel::Opening);
+                        self.selected = 0;
+                        Effect::Redraw
+                    })
+                }
                 None => Err(crate::Error::Document("library entry unavailable".into())),
             },
             Command::CancelReflow => Ok(self.cancel_reflow()),

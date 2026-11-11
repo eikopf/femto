@@ -511,6 +511,9 @@ impl LibraryScan {
             match hashing.step_for(budget) {
                 Ok(Some(file)) => {
                     let (path, _) = self.hashing.take().unwrap();
+                    if let Some(cache) = &mut self.cache {
+                        cache.remember_stamp(&path, file.stamp());
+                    }
                     if let Some(metadata) = self
                         .cache
                         .as_ref()
@@ -519,7 +522,7 @@ impl LibraryScan {
                         self.cache_hits += 1;
                         self.library.entries.push(LibraryEntry { path, metadata });
                     } else {
-                        let result = Document::from_hashed(&path, file);
+                        let result = Document::from_identified(&path, file);
                         self.record_book(path, result);
                     }
                 }
@@ -653,6 +656,20 @@ impl LibraryScan {
 }
 
 impl Library {
+    /// Loads cached metadata without traversing the library or hashing books.
+    /// Entries remain hints until the selected file is opened and checked.
+    pub fn load_cached(root: impl AsRef<Path>, limit: usize) -> Result<Self> {
+        if !(1..=4096).contains(&limit) {
+            return Err(Error::Limit("library limit"));
+        }
+        let root = fs::canonicalize(root)?;
+        let (cache, warning) = crate::library_cache::Cache::open(&root, limit);
+        let mut library = cache.into_snapshot();
+        if let Some(warning) = warning {
+            library.record_error(warning);
+        }
+        Ok(library)
+    }
     pub fn scan(root: impl AsRef<Path>) -> Result<Self> {
         Self::scan_with_limit(root, 4096)
     }
@@ -709,7 +726,7 @@ impl Library {
     }
 }
 
-fn library_key(text: &str) -> String {
+pub(crate) fn library_key(text: &str) -> String {
     text.nfc()
         .collect::<String>()
         .to_lowercase()

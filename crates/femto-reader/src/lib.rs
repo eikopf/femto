@@ -8,6 +8,7 @@ pub mod document;
 pub mod download;
 pub mod fontset;
 mod glyph_cache;
+pub mod hashing;
 pub mod image;
 pub mod journal;
 pub mod koreader;

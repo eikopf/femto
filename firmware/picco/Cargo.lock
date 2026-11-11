@@ -947,6 +947,7 @@ name = "femto-reader"
 version = "0.1.0"
 dependencies = [
  "epub-stream",
+ "esp-idf-sys",
  "femto-remote",
  "hypher",
  "png",

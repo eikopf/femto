@@ -5,6 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+esp-idf-sha256 = ["dep:esp-idf-sys"]
+
+[target.'cfg(target_os = "espidf")'.dependencies]
+esp-idf-sys = { version = "=0.38.1", optional = true }
+
 [dependencies]
 femto-remote = { path = "../femto-remote" }
 quireink-stardict.workspace = true

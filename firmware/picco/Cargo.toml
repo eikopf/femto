@@ -15,7 +15,7 @@ bluetooth = []
 esp-idf-svc = "=0.53.0"
 log = "=0.4.29"
 zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
-femto-reader = { path = "../../crates/femto-reader" }
+femto-reader = { path = "../../crates/femto-reader", features = ["esp-idf-sha256"] }
 femto-remote = { path = "../../crates/femto-remote" }
 femto-picco-board = { path = "../../crates/femto-picco" }
 femto-catalog = { path = "../../crates/femto-catalog" }

@@ -35,6 +35,7 @@ fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
     log::info!("Book SHA-256 backend: {}", femto_reader::hashing::BACKEND);
+    report_heap("boot");
     if let Err(error) = run() {
         log::error!("Reader stopped: {error}");
     }
@@ -43,8 +44,28 @@ fn main() {
     }
 }
 
+fn report_heap(stage: &str) {
+    use esp_idf_svc::sys;
+    let stack_free = unsafe { sys::uxTaskGetStackHighWaterMark(core::ptr::null_mut()) };
+    log::info!("Stack {stage}: minimum_free={stack_free}");
+    for (kind, caps) in [
+        ("internal", sys::MALLOC_CAP_INTERNAL | sys::MALLOC_CAP_8BIT),
+        ("psram", sys::MALLOC_CAP_SPIRAM | sys::MALLOC_CAP_8BIT),
+    ] {
+        let (free, largest, minimum) = unsafe {
+            (
+                sys::heap_caps_get_free_size(caps),
+                sys::heap_caps_get_largest_free_block(caps),
+                sys::heap_caps_get_minimum_free_size(caps),
+            )
+        };
+        log::info!("Heap {stage} {kind}: free={free} largest={largest} minimum={minimum}");
+    }
+}
+
 fn run() -> Result<(), String> {
     let mut screen = panel::open()?;
+    report_heap("peripherals");
     let default_font =
         || Font::from_bytes(include_bytes!("../../../tests/fixtures/DejaVuSerif.ttf").to_vec());
     let fonts = if screen.storage.is_some() {
@@ -103,7 +124,9 @@ fn run() -> Result<(), String> {
             }
         }
     }
+    report_heap("before layout");
     let (mut reader, resumed) = startup_reader(&mut screen, fonts, state, candidates)?;
+    report_heap("reader ready");
     if screen.storage.is_some()
         && !library
             .entries
@@ -462,8 +485,8 @@ fn run() -> Result<(), String> {
             }
         }
         if heap_report.elapsed() >= Duration::from_secs(10) {
-            let free = unsafe { esp_idf_svc::sys::esp_get_free_heap_size() };
-            log::info!("free heap: {free} bytes; battery: {:?}", screen.battery());
+            report_heap("running");
+            log::info!("battery: {:?}", screen.battery());
             heap_report = Instant::now();
         }
     }

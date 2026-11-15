@@ -159,8 +159,14 @@ pub mod vfs {
                 }
             })?;
 
-            unsafe {
-                sys::f_mount(handle, drive_path.as_ptr(), 0); // TODO
+            let result = unsafe { sys::f_mount(handle, drive_path.as_ptr(), 1) };
+            if result != sys::FRESULT_FR_OK {
+                log::warn!("FAT mount failed: {result}");
+                unsafe {
+                    sys::f_mount(core::ptr::null_mut(), drive_path.as_ptr(), 0);
+                    sys::esp_vfs_fat_unregister_path(path.as_ptr());
+                }
+                return Err(sys::EspError::from_infallible::<{ sys::ESP_FAIL }>());
             }
 
             let drive = fatfs.borrow_mut().drive();

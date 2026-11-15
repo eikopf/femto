@@ -40,6 +40,11 @@ pub fn mount(
     config.speed_khz = 20_000;
     config.command_timeout_ms = 1000;
     let card = SdCardDriver::new_mmc(host, &config).map_err(|e| e.to_string())?;
+    log::info!(
+        "SD card: {} sectors of {} bytes",
+        card.card().csd.capacity,
+        card.card().csd.sector_size
+    );
     let fat = Fatfs::new_sdcard(0, card).map_err(|e| e.to_string())?;
     MountedFatfs::mount(fat, "/sdcard", 8).map_err(|e| e.to_string())
 }

@@ -2,6 +2,8 @@
 
 This directory contains `esp-idf-svc` 0.53.0 from crates.io. The archive SHA-256 is `80528df10e8ee316043f0a53bcbec3126a217168813afdcae11078a5f34e60c9`. `LICENSE-APACHE` and `LICENSE-MIT` retain the upstream licenses.
 
+FAT volume paths use the FatFs `0:` through `9:` syntax. The upstream helper returns a binary drive byte without a colon, including an empty path for drive zero. VFS mounting now requests an immediate filesystem check, propagates failure, and unregisters the failed mount before releasing the card. It never formats storage. The drive-prefix regression compiles the production helper; physical testing confirms that unsupported media reports mount failure before file access.
+
 The GATT client destructor replaces the SDK callback with a static no-op after unsubscribing application state. ESP-IDF 5.5.2 rejects a null callback in `esp_ble_gattc_register_callback`; the upstream destructor passes null and unwraps the resulting error. The replacement accepts late events without dereferencing their parameters or retaining driver/application state. Singleton release still precedes the driver's drop. GAP teardown is unchanged because its pinned SDK API accepts null.
 
 This patch removes the deterministic null-callback error. It does not establish physical teardown timing, completion of asynchronous application unregistration, or safe event generations for future reconnect support. Other SDK errors can still make the destructor panic.

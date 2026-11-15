@@ -209,11 +209,12 @@ impl<T> Fatfs<T> {
         Ok(MountedFatfs { fs: self, fatfs })
     }
 
-    pub(crate) fn drive_path_from(drive: u8) -> [core::ffi::c_char; 2] {
-        [drive as _, 0]
+    pub(crate) fn drive_path_from(drive: u8) -> [core::ffi::c_char; 3] {
+        assert!(drive < 10);
+        [(b'0' + drive) as _, b':' as _, 0]
     }
 
-    pub(crate) fn drive_path(&self) -> [core::ffi::c_char; 2] {
+    pub(crate) fn drive_path(&self) -> [core::ffi::c_char; 3] {
         Self::drive_path_from(self.drive)
     }
 }

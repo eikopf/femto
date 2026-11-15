@@ -1,0 +1,707 @@
+{
+  "date": "2026-11-15",
+  "feature": "First physical Picco boot, resource diagnosis, recovery-preserving update, and USB navigation",
+  "source_commit": "f6dc74e716f06277bdee6f99b1e450388bdfcf8d",
+  "original_source_commit": "bc50b1b365d7d2b9ca35ceea3806b512dd14bf13",
+  "hardware": {
+    "chip": "ESP32-S3 revision 0.2",
+    "flash_bytes": 16777216,
+    "psram_bytes": 8388608,
+    "panel": "SE0400NQW47",
+    "cpu_hz": 160000000,
+    "secure_boot": false,
+    "flash_encryption": false
+  },
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "227caaea4f705efb386914f1fe2e98f218832e0b42d96efa22df93d56cc934bc",
+    "bytes": 5324832,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "bluetooth": false,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "installation": {
+    "app_offset": 917504,
+    "original_flash_sha256": "9b88c996a7190c269573f7b611e74209904d37826a55292b6c15e667d574053e",
+    "original_backup_device_digest_verified": true,
+    "final_readback": {
+      "bytes": 16777216,
+      "sha256": "25cfdbe88ab5e1d777e8dac7dba1b4093a8521afa4c308cb58ab7262695750d9",
+      "matches_plan": true,
+      "checks": [
+        {
+          "name": "candidate",
+          "offset": 917504,
+          "bytes": 5324832,
+          "expected_sha256": "227caaea4f705efb386914f1fe2e98f218832e0b42d96efa22df93d56cc934bc",
+          "actual_sha256": "227caaea4f705efb386914f1fe2e98f218832e0b42d96efa22df93d56cc934bc",
+          "matches": true,
+          "first_mismatch_offset": null
+        },
+        {
+          "name": "erased_tail",
+          "offset": 6242336,
+          "bytes": 4064,
+          "expected_sha256": "3a677c0052a9d0e2cc7507e92f29aeaec1eb6df09ac4197efbaf4a612b74ed8e",
+          "actual_sha256": "3a677c0052a9d0e2cc7507e92f29aeaec1eb6df09ac4197efbaf4a612b74ed8e",
+          "matches": true,
+          "first_mismatch_offset": null
+        },
+        {
+          "name": "preserved_prefix",
+          "offset": 0,
+          "bytes": 917504,
+          "expected_sha256": "96106172fe07bda10c5525d9214750365b3b4f66c459d522d3962b8708f04a23",
+          "actual_sha256": "96106172fe07bda10c5525d9214750365b3b4f66c459d522d3962b8708f04a23",
+          "matches": true,
+          "first_mismatch_offset": null
+        },
+        {
+          "name": "preserved_suffix",
+          "offset": 6246400,
+          "bytes": 10530816,
+          "expected_sha256": "b38d0b045e5ddf1a2836ecbe74158b5ead076f12b90539b58a6742fdaf448434",
+          "actual_sha256": "b38d0b045e5ddf1a2836ecbe74158b5ead076f12b90539b58a6742fdaf448434",
+          "matches": true,
+          "first_mismatch_offset": null
+        }
+      ]
+    },
+    "rom_entry": "esptool 5.6.0 default-reset",
+    "app_start": "esptool 5.6.0 watchdog-reset",
+    "ordinary_hard_reset_booted_app": false,
+    "original_firmware_restore_tested": false,
+    "boox_recovery_boot_tested": false
+  },
+  "commands": [
+    {
+      "command": "./scripts/check",
+      "exit_code": 0,
+      "scope": "Shared source, parser, and FAT regression; before the final USB driver adapter change and host console tests"
+    },
+    {
+      "command": "./scripts/build-picco",
+      "exit_code": 0,
+      "scope": "Final firmware including installed USB driver"
+    },
+    {
+      "command": "python -m unittest discover -s tests/firmware -v",
+      "exit_code": 0,
+      "passed": 21
+    },
+    {
+      "command": "cargo fmt --manifest-path firmware/picco/Cargo.toml --check",
+      "exit_code": 0
+    }
+  ],
+  "navigation_assertions": [
+    {
+      "command": "status",
+      "elapsed_seconds": 0.056,
+      "status": {
+        "page": 0,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28556,
+          "internal": {
+            "free": 195027,
+            "largest": 104448,
+            "minimum": 152827
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "prev",
+      "elapsed_seconds": 0.09,
+      "status": {
+        "page": 0,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28556,
+          "internal": {
+            "free": 195027,
+            "largest": 104448,
+            "minimum": 152827
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "next",
+      "elapsed_seconds": 2.24,
+      "status": {
+        "page": 1,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28556,
+          "internal": {
+            "free": 190887,
+            "largest": 75776,
+            "minimum": 151955
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "next",
+      "elapsed_seconds": 2.16,
+      "status": {
+        "page": 2,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 194767,
+            "largest": 77824,
+            "minimum": 150051
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "next",
+      "elapsed_seconds": 1.97,
+      "status": {
+        "page": 3,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 193687,
+            "largest": 77824,
+            "minimum": 150051
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "next",
+      "elapsed_seconds": 0.079,
+      "status": {
+        "page": 3,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 193687,
+            "largest": 77824,
+            "minimum": 150051
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "prev",
+      "elapsed_seconds": 2.161,
+      "status": {
+        "page": 2,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 194775,
+            "largest": 83968,
+            "minimum": 150051
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "prev",
+      "elapsed_seconds": 2.239,
+      "status": {
+        "page": 1,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 190923,
+            "largest": 75776,
+            "minimum": 150051
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "prev",
+      "elapsed_seconds": 2.32,
+      "status": {
+        "page": 0,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 193991,
+            "largest": 73728,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "next",
+      "elapsed_seconds": 2.231,
+      "status": {
+        "page": 1,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 190903,
+            "largest": 75776,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "next",
+      "elapsed_seconds": 2.158,
+      "status": {
+        "page": 2,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 194751,
+            "largest": 77824,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "next",
+      "elapsed_seconds": 1.98,
+      "status": {
+        "page": 3,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 193715,
+            "largest": 79872,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "next",
+      "elapsed_seconds": 0.079,
+      "status": {
+        "page": 3,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 193715,
+            "largest": 79872,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "prev",
+      "elapsed_seconds": 2.16,
+      "status": {
+        "page": 2,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 194783,
+            "largest": 77824,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "prev",
+      "elapsed_seconds": 2.24,
+      "status": {
+        "page": 1,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 190891,
+            "largest": 75776,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "prev",
+      "elapsed_seconds": 2.309,
+      "status": {
+        "page": 0,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 193983,
+            "largest": 73728,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "next",
+      "elapsed_seconds": 2.23,
+      "status": {
+        "page": 1,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 190887,
+            "largest": 71680,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "next",
+      "elapsed_seconds": 2.169,
+      "status": {
+        "page": 2,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 194771,
+            "largest": 73728,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "next",
+      "elapsed_seconds": 1.982,
+      "status": {
+        "page": 3,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 193699,
+            "largest": 73728,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "next",
+      "elapsed_seconds": 0.077,
+      "status": {
+        "page": 3,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 193707,
+            "largest": 73728,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "prev",
+      "elapsed_seconds": 2.15,
+      "status": {
+        "page": 2,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 194775,
+            "largest": 73728,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "prev",
+      "elapsed_seconds": 2.23,
+      "status": {
+        "page": 1,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 190923,
+            "largest": 73728,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "prev",
+      "elapsed_seconds": 2.31,
+      "status": {
+        "page": 0,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28508,
+          "internal": {
+            "free": 194023,
+            "largest": 71680,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7519540
+          }
+        }
+      }
+    },
+    {
+      "command": "select",
+      "elapsed_seconds": 1.58,
+      "status": {
+        "page": 0,
+        "pages": 4,
+        "menu": true,
+        "memory_bytes": {
+          "stack_minimum_free": 28428,
+          "internal": {
+            "free": 194023,
+            "largest": 71680,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7471408
+          }
+        }
+      }
+    },
+    {
+      "command": "back",
+      "elapsed_seconds": 1.25,
+      "status": {
+        "page": 0,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28428,
+          "internal": {
+            "free": 194023,
+            "largest": 71680,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7471408
+          }
+        }
+      }
+    },
+    {
+      "command": "status",
+      "elapsed_seconds": 0.071,
+      "status": {
+        "page": 0,
+        "pages": 4,
+        "menu": false,
+        "memory_bytes": {
+          "stack_minimum_free": 28428,
+          "internal": {
+            "free": 194023,
+            "largest": 71680,
+            "minimum": 149155
+          },
+          "psram": {
+            "free": 7904568,
+            "largest": 7864320,
+            "minimum": 7471408
+          }
+        }
+      }
+    }
+  ],
+  "remaining_findings": [
+    "SD reports 499744768 sectors of 512 bytes; FAT mount returns FR_NO_FILESYSTEM; no formatting attempted",
+    "Startup frontlight I2C operation returns ESP_FAIL",
+    "ADC readings exceed configured battery percentage range; charger status unavailable",
+    "Visual panel quality, touch/buttons, SD books/persistence, network services, sleep/wake and original firmware rollback unqualified"
+  ],
+  "files_sha256": {
+    "crates/femto-picco/src/console.rs": "a5007b6550d0218888959daf40786101d5fb6f7a79b35f1b510ef20e21203eab",
+    "crates/femto-picco/src/lib.rs": "dc757ee8e993e9adbbaaec386d7ed99191d0c428155e7f954df38dafe6f60699",
+    "docs/diagnostics.md": "8ba78f13db9c21ad2152b7ac5a12465d244bdafc6e1c1ba32c0ea5dc941ce3a4",
+    "firmware/picco/sdkconfig.defaults": "fd0c233b7cf331ed0c893d9ea265e6a27eb2d6c94cbe3baf216092f81914a9ff",
+    "firmware/picco/src/console.rs": "915b8bbc032ac24d6b455d8995ba97eac3ad1db39859d3e8baebc3c158fc23fe",
+    "firmware/picco/src/main.rs": "80e3438ef44114b5605aad00d232fb5873e7fae99a923a5790a1d4653d030561",
+    "firmware/picco/src/storage.rs": "d9e12ae95384ee0359475779df781fbad50f91403d8a7799ae84995d6e662a82",
+    "scripts/picco-console.py": "b0de54cba87e248036aa3d7625842482671a665c09f53642b28fd63d8ac6f8f5",
+    "tests/firmware/test_console_host.py": "8356319ce68ec8237ae43e27d7b676af9add628c8cfeafec7d8f2fe312fa23be",
+    "tests/firmware/test_fat_drive.py": "5f08cc940552604ce37127938bc845bf4fe181a28cdbdf7ae32572e0084aba7b",
+    "vendor/esp-idf-svc/FEMTO.md": "6cd1174eab6f8ed11040974eef64b865d38dd6bb072f91ab377cd00724c3f92c",
+    "vendor/esp-idf-svc/src/fs/fatfs.rs": "ce811da0a20adb3963898163710358f624697977217bd3c8e4a97c3e6611b91b",
+    "vendor/esp-idf-svc/src/io.rs": "56a7c39cc3602b5333487c956fc950a1720f168d0887080283deab806192542f"
+  },
+  "logs_sha256": {
+    "output/device-2026-11-15/check-final.log": "e6250767f9318eed9d2ddc90f23ead7873dac0cf1bc5a9b73b273fbf4dcdc935",
+    "output/device-2026-11-15/console-final-check.log": "2b92e0bddd9aa4465d88d8524e9b1e5c6fb6c289330344c5c42a9091e252ebb2",
+    "output/device-2026-11-15/rebuild-driver.log": "9c34c721b1bb3842da19611c224790fd37a1674c192bc30a28848a9f5138ebf3",
+    "output/device-2026-11-15/driver-boot.log": "f2fd34f48f8e6efb3ffff6db0e8c1bdfc93fc26bc1ff7bd2baab21b25e501c92",
+    "output/device-2026-11-15/navigation.json": "f8a461dbb980a05a974033afe222228fea921c01ccd4b2f6da2d4013c1532e4d",
+    "output/device-2026-11-15/write-driver.log": "ad1605bb5ad40d9b587804e978adef0a45ed947079c3015a9af887aab0d1c958",
+    "output/device-2026-11-15/readback-qualified.log": "079eb34cd53c02de787e19cbaa0821fd45ce417eac371fbdcf73e9a00b1a9a7d",
+    "output/device-2026-11-15/readback-qualified-verification.json": "b86b54cd82d68ca3594822b8dc2a88331a8d02249226b2c6ac7f1204d9e80349"
+  },
+  "privacy": "Raw flash images and logs remain in the ignored, access-restricted local output directory."
+}

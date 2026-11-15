@@ -1,6 +1,6 @@
 # Prototype qualification
 
-Femto implements the portable reader, host simulator, Picco adapters, services, and reusable Rust tailnet client. Physical Picco operation remains unverified. The implementation is not yet qualified as a usable device firmware release.
+Femto implements the portable reader, host simulator, Picco adapters, services, and reusable Rust tailnet client. Initial physical Picco testing establishes boot and embedded-specimen operation on one SE0400NQW47 device. The implementation is not yet qualified as a usable device firmware release.
 
 The implementation status and the validation scope are separate. Host tests can establish parser behavior, source-position preservation, protocol transitions, and selected resource limits. Firmware compilation establishes that the pinned ESP-IDF APIs link. Neither establishes panel behavior, available heap, physical storage reliability, or recovery after an interrupted installation.
 
@@ -46,14 +46,22 @@ Expired transport sessions are removed by `Network::tick` through `DataPlane::ma
 
 | Requirement | Current evidence | Required physical evidence |
 | --- | --- | --- |
-| Boot and reader integration | Pinned Xtensa/ESP-IDF builds link the shared reader and services | Boot logs, successful book open, page turns and stable runtime |
+| Boot and reader integration | Physical boot, embedded four-page TXT specimen and 26 USB navigation/status checks on one SE0400NQW47 Picco | SD book opening, broader corpus and sustained runtime |
 | Display, refresh and rotation | SSD1677/SSD2677 drivers, orientation/bitplane host tests and compiled adapters | Panel identification, refresh/ghosting, grayscale, transitions and input alignment |
 | Frontlight and battery | Dual-channel control, calibrated ADC path, charger-status decoding and fault-model tests | Brightness/warmth behavior, voltage accuracy, bus/rail interactions and power use |
 | Storage and Wi-Fi | SDMMC/FAT, journal, station reconnect, verified-TLS adapters and clock-readiness gates compile | Mount/read/write, card removal, interrupted persistence, association/DHCP, clock and TLS |
 | Sleep/wake | Joined services, journal-gated sleep and GPIO wake compile; state transitions have host tests | Shutdown timing, wake source, resume, power draw and repeated cycles |
-| Recovery-preserving update | Backup-bound offline planner, image validation and whole-flash readback comparison | Identified device, full backup provenance, eFuse/security state, partition layout, tested recovery entry, controlled write/readback and rollback |
+| Recovery-preserving update | Device identity/security inspection, verified full original backup, application-only writes, ROM re-entry and whole-flash readback comparison | Original-firmware rollback, BOOX recovery boot and interrupted installation |
 
-No Picco serial device was visible during the local USB inventory. Hardware access has been requested; no physical boot, flash, or recovery test has been performed. The [firmware instructions](picco-firmware.md) retain the installation gates. A generated offline plan does not authorize or prove a device write.
+The first physical session on 2026-11-15 identified an ESP32-S3 revision 0.2 with 16 MiB flash and 8 MiB PSRAM. Secure boot and flash encryption are disabled. A complete original-flash backup was verified against the device before application-only writes at `0xE0000`. Full-flash readback verified preservation outside the application erase range. Raw backups remain private, ignored local artifacts.
+
+Automatic ROM entry works through USB Serial/JTAG. Ordinary hard reset left this device in ROM download mode; esptool's watchdog reset booted the application without a button press. This establishes a host-driven testing loop. Restoring the original application and booting the BOOX recovery application remain untested.
+
+The original 16 KiB main task stack overflowed during specimen layout and reported allocation failure with PSRAM still available. The 64 KiB allocation and stack watchpoint permit startup and runtime memory reporting. The attached card reports 499,744,768 sectors of 512 bytes, but FatFs returns `FR_NO_FILESYSTEM`. No formatting was attempted. Journal persistence, SD EPUB opening, Wi-Fi configuration, and sleep/wake remain unqualified. Startup also reports a frontlight I2C error, and ADC readings exceed the configured percentage range; lighting, charging status, and voltage calibration require further investigation. Visual panel quality and physical touch/button operation have not been observed.
+
+USB testing traverses all four specimen pages forward and backward three times, checks both book boundaries, opens and closes the menu, and returns to page zero. All 26 command/status assertions pass. Page-turn command-to-status times are approximately two seconds, including rendering and the panel driver's refresh completion. Afterward, PSRAM free space remains 7,904,568 bytes, internal free space is 194,023 bytes, and the main stack has at least 28,428 unused bytes. This short run does not establish long-term leak freedom or visual correctness. [Physical-session evidence](../tests/evidence/picco-first-device-2026-11-15.json) records the tested image, source hashes, commands, and observations.
+
+The [firmware instructions](picco-firmware.md) retain the installation gates. A generated offline plan does not authorize or prove a device write.
 
 ## Extensions and exclusions
 

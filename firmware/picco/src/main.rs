@@ -14,6 +14,7 @@ compile_error!("Picco book hashing requires CONFIG_MBEDTLS_HARDWARE_SHA=y");
 mod bluetooth;
 mod catalog;
 mod clock;
+mod console;
 pub mod control;
 pub mod identity;
 mod input;
@@ -216,10 +217,31 @@ fn run() -> Result<(), String> {
     let mut idle =
         femto_picco_board::idle::Idle::new(0, reader.state.idle_sleep.minutes() * 60 * 1000);
     let mut heap_report = Instant::now();
+    let mut console = console::Console::open();
     loop {
         std::thread::sleep(Duration::from_millis(10));
         screen.poll_wifi();
-        let event = screen.event().or_else(|| {
+        let diagnostic_event = console.poll().and_then(|command| {
+            use femto_picco_board::console::Command;
+            log::info!("USB command: {command:?}");
+            match command {
+                Command::Status => {
+                    report_heap("usb status");
+                    log::info!(
+                        "USB status: page={} pages={} menu={}",
+                        reader.page_index(),
+                        reader.page_count(),
+                        ui.is_open()
+                    );
+                    None
+                }
+                Command::Next => Some(input::Event::Turn(Turn::Next)),
+                Command::Previous => Some(input::Event::Turn(Turn::Previous)),
+                Command::Select => Some(input::Event::Select),
+                Command::Back => Some(input::Event::Back),
+            }
+        });
+        let event = diagnostic_event.or_else(|| screen.event()).or_else(|| {
             screen
                 .remote_turn(&reader.state, !ui.is_open())
                 .map(input::Event::Turn)

@@ -5,6 +5,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 pub mod battery;
 pub mod clock;
+pub mod console;
 pub mod frontlight;
 pub mod idle;
 pub mod input;

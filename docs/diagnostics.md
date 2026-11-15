@@ -1,4 +1,16 @@
-# Network diagnostics
+# Diagnostics
+
+## Picco USB console and memory
+
+The USB Serial/JTAG console accepts `femto status`, `femto next`, `femto prev`, `femto select`, and `femto back`, each terminated by a newline. Input commands use the same reader/menu event path as physical controls. They are available to a physically connected host without authentication. There is no network command listener, file access command, or credential command. Only one host process should own the console at a time.
+
+`python scripts/picco-console.py --port /dev/serial/by-id/<Picco> next` sends a page-turn command followed by a status query. The JSON response reports the zero-based page, page count, menu state, and memory counters in bytes. `--expect-page N` makes an unexpected page fail the command. The tool does not change modem control lines or reset the device. A status reply proves software processing; it does not prove that pixels appeared correctly on the panel. Menu navigation can change settings through the ordinary UI.
+
+The USB driver uses 256-byte RX and TX buffers. The parser retains at most 24 bytes and discards overlong input through the next line ending. It accepts only exact command strings. Each reader poll consumes at most 32 bytes and returns at most one command. Host output lines are bounded to 4 KiB and requests have a timeout. ESP-IDF 5.5.2 nonblocking VFS reads require the installed driver's RX ring; the default polling console does not provide it.
+
+Startup and ten-second runtime reports include free bytes, largest free block, and minimum free bytes for internal RAM and PSRAM separately. The stack low-water mark reports minimum unused bytes for the main reader task. Its allocation is 64 KiB, and ESP-IDF's end-of-stack watchpoint is enabled. Other tasks have separate stacks; these reports do not measure them. The first physical boot with the previous 16 KiB allocation overflowed during layout and reported an apparent allocation failure despite available PSRAM.
+
+## Network diagnostics
 
 `Network::diagnostics()` returns an allocation-free snapshot under the network owner's existing exclusive access. Host applications can call `host_runtime::Runtime::diagnostics()`, which takes the control worker's authorization lock. Picco emits `Tailnet diagnostics: ...` at most once per 30 seconds during successful active polling. A stopped or failing poll loop can prevent that line; absence of a line does not establish inactivity.
 

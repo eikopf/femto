@@ -1,7 +1,41 @@
 //! Read-only Picco battery interpretation from calibrated ADC samples and charger status.
 //! Voltage tables follow the pinned FreeInk reference; see THIRD-PARTY.md.
-pub const CHARGER_ADDRESS: u8 = 0x03;
 pub const STATUS_REGISTER: u8 = 0x08;
+
+pub trait Registers {
+    type Error;
+    fn read(&mut self, address: u8, register: u8) -> Result<u8, Self::Error>;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Charger {
+    Aw32001,
+    Sgm41562,
+}
+
+impl Charger {
+    /// Probe documented identity registers without changing charger settings.
+    pub fn detect<R: Registers>(bus: &mut R) -> Option<Self> {
+        if bus.read(0x49, 0x0a).ok() == Some(0x49) {
+            Some(Self::Aw32001)
+        } else if matches!(bus.read(0x03, 0x0b).ok(), Some(1 | 2)) {
+            Some(Self::Sgm41562)
+        } else {
+            None
+        }
+    }
+
+    pub fn address(self) -> u8 {
+        match self {
+            Self::Aw32001 => 0x49,
+            Self::Sgm41562 => 0x03,
+        }
+    }
+
+    pub fn status<R: Registers>(self, bus: &mut R) -> Result<u8, R::Error> {
+        bus.read(self.address(), STATUS_REGISTER)
+    }
+}
 const CHARGING: [u16; 21] = [
     4305, 4305, 4300, 4290, 4235, 4187, 4124, 4078, 4045, 4013, 3984, 3961, 3941, 3923, 3906, 3894,
     3876, 3840, 3805, 3760, 3500,

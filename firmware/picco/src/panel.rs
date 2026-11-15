@@ -451,6 +451,7 @@ pub fn open() -> Result<Screen, String> {
             None
         }
     };
+    let mut first_battery = true;
     let input = crate::input::InputTask::start(
         PinDriver::input(p.pins.gpio21, Pull::Up).map_err(|e| e.to_string())?,
         PinDriver::input(p.pins.gpio9, Pull::Up).map_err(|e| e.to_string())?,
@@ -458,7 +459,25 @@ pub fn open() -> Result<Screen, String> {
         touch,
         move || {
             let adc = battery_adc.as_mut()?;
-            Some([adc.read().ok()?, adc.read().ok()?, adc.read().ok()?])
+            if first_battery {
+                first_battery = false;
+                // The first conversion after configuration is elevated on the Picco.
+                // Discard it and allow the ADC input to settle before publishing voltage.
+                let _ = adc.read_raw();
+                delay(20);
+            }
+            let raw = [
+                adc.read_raw().ok()?,
+                adc.read_raw().ok()?,
+                adc.read_raw().ok()?,
+            ];
+            let mv = [
+                adc.raw_to_mv(raw[0]).ok()?,
+                adc.raw_to_mv(raw[1]).ok()?,
+                adc.raw_to_mv(raw[2]).ok()?,
+            ];
+            log::debug!("Battery ADC raw={raw:?} calibrated_mv={mv:?}");
+            Some(mv)
         },
     )?;
     #[cfg(feature = "bluetooth")]

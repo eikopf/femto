@@ -1,4 +1,50 @@
 use femto_picco_board::battery::{Power, Sample};
+
+#[test]
+fn charger_identity_selects_only_supported_addresses() {
+    use femto_picco_board::battery::{Charger, Registers};
+    struct Bus {
+        aw: Result<u8, ()>,
+        sgm: Result<u8, ()>,
+        status_address: Option<u8>,
+    }
+    impl Registers for Bus {
+        type Error = ();
+        fn read(&mut self, address: u8, register: u8) -> Result<u8, ()> {
+            match (address, register) {
+                (0x49, 0x0a) => self.aw,
+                (0x03, 0x0b) => self.sgm,
+                (address, 0x08) if Some(address) == self.status_address => Ok(0x7a),
+                _ => Err(()),
+            }
+        }
+    }
+    for (aw, sgm, expected) in [
+        (Ok(0x49), Err(()), Some(Charger::Aw32001)),
+        (Ok(0x49), Ok(1), Some(Charger::Aw32001)),
+        (Err(()), Ok(1), Some(Charger::Sgm41562)),
+        (Ok(0xff), Ok(2), Some(Charger::Sgm41562)),
+        (Err(()), Err(()), None),
+        (Ok(0), Ok(0), None),
+        (Ok(0xff), Ok(0xff), None),
+    ] {
+        let mut bus = Bus {
+            aw,
+            sgm,
+            status_address: expected.map(Charger::address),
+        };
+        assert_eq!(Charger::detect(&mut bus), expected);
+        if let Some(charger) = expected {
+            let status = charger.status(&mut bus).unwrap();
+            assert_eq!(
+                Sample::from_readings(Some([2160; 3]), Some(status)).power,
+                Some(Power::Complete)
+            );
+            bus.status_address = None;
+            assert!(charger.status(&mut bus).is_err());
+        }
+    }
+}
 #[test]
 fn charger_state_is_decoded_from_one_status_byte() {
     for raw in 0..=255 {

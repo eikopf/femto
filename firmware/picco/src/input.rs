@@ -34,6 +34,7 @@ pub struct TouchDevice {
     gestures: Touch,
     enabled: bool,
     frontlight: femto_picco_board::frontlight::Frontlight,
+    charger: Option<femto_picco_board::battery::Charger>,
 }
 
 impl TouchDevice {
@@ -49,11 +50,19 @@ impl TouchDevice {
             gestures: Touch::default(),
             enabled: true,
             frontlight: Default::default(),
+            charger: None,
         };
         if let Err(error) = device.initialize() {
             log::warn!("Touch disabled during initialization: {error}");
             device.enabled = false;
         }
+        device.charger =
+            femto_picco_board::battery::Charger::detect(&mut ChargerRegisters(&mut device.bus));
+        log::info!(
+            "Touch ready={}; charger={:?}",
+            device.enabled,
+            device.charger
+        );
         Ok(device)
     }
 
@@ -172,24 +181,32 @@ impl TouchDevice {
 }
 
 struct LightRegisters<'a>(&'a mut I2cDriver<'static>);
+struct ChargerRegisters<'a>(&'a mut I2cDriver<'static>);
+
+impl femto_picco_board::battery::Registers for ChargerRegisters<'_> {
+    type Error = String;
+    fn read(&mut self, address: u8, register: u8) -> Result<u8, String> {
+        read_register(self.0, address, register)
+    }
+}
+
+fn read_register(bus: &mut I2cDriver<'static>, address: u8, register: u8) -> Result<u8, String> {
+    let mut value = [0];
+    let timeout = TickType::new_millis(50).ticks();
+    bus.write_read(address, &[register], &mut value, timeout)
+        .map_err(|error| format!("I2C address={address:#04x} register={register:#04x}: {error}"))?;
+    Ok(value[0])
+}
+
 impl femto_picco_board::frontlight::Registers for LightRegisters<'_> {
     type Error = String;
     fn read(&mut self, register: u8) -> Result<u8, String> {
-        let mut value = [0];
-        self.0
-            .write_read(
-                0x38,
-                &[register],
-                &mut value,
-                TickType::new_millis(20).ticks(),
-            )
-            .map_err(|e| e.to_string())?;
-        Ok(value[0])
+        read_register(self.0, 0x38, register)
     }
     fn write(&mut self, register: u8, value: u8) -> Result<(), String> {
         self.0
             .write(0x38, &[register, value], TickType::new_millis(20).ticks())
-            .map_err(|e| e.to_string())
+            .map_err(|e| format!("frontlight write register {register:#04x}: {e}"))
     }
     fn delay_ms(&mut self, ms: u32) {
         thread::sleep(Duration::from_millis(ms.into()));
@@ -243,17 +260,11 @@ impl InputTask {
                     if battery_at.is_none_or(|at| at.elapsed() >= Duration::from_secs(30)) {
                         let adc_mv = read_battery();
                         let charger = touch.as_mut().and_then(|device| {
-                            let mut status = [0];
                             device
-                                .bus
-                                .write_read(
-                                    femto_picco_board::battery::CHARGER_ADDRESS,
-                                    &[femto_picco_board::battery::STATUS_REGISTER],
-                                    &mut status,
-                                    TickType::new_millis(50).ticks(),
-                                )
+                                .charger?
+                                .status(&mut ChargerRegisters(&mut device.bus))
+                                .inspect_err(|error| log::warn!("Charger status read: {error}"))
                                 .ok()
-                                .map(|_| status[0])
                         });
                         let now = Instant::now();
                         if let Ok(mut slot) = battery_sample.lock() {

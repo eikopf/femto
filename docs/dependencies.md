@@ -128,3 +128,11 @@ Picco patches `esp-idf-svc` 0.53.0 through `vendor/esp-idf-svc`. The published a
 The vendored `esp-idf-svc` GATT event handler also handles the pinned SDK's null unregister-event payload. The host callback regression uses the production handler body; physical SDK scheduling remains unqualified.
 
 The Bluetooth initialization guard in vendored `bt.rs` releases successfully initialized stages after controller-enable or host-enable failure. A host initialization failure retains uncertain state because ESP-IDF 5.5.2 can allocate workers before setting its public initialized status. The production-body host test injects initialization and cleanup failures; it does not execute SDK allocation paths. The original initialization error remains the returned result, and cleanup failures are logged without unwinding through a panic.
+
+## Picco FatFs and SDMMC patches
+
+`nix/firmware.nix` applies two patches to ESP-IDF 5.5.2. `esp-idf-exfat.patch` enables FatFs exFAT support and defines the disabled volume-label option as zero for ordinary C expressions. UTF-8 API names and heap-based long filenames are enabled in `sdkconfig.defaults`. Rust bindings are generated against the patched SDK; the firmware rejects builds with exFAT disabled to prevent silently losing support for the tested card.
+
+`esp-idf-sdmmc-unused-slot.patch` skips teardown of unused slots. Their zero-initialized pin fields otherwise reset GPIO0, disabling the Picco peripheral rail when an SD mount fails. Active-slot teardown remains unchanged.
+
+After building firmware, `tests/firmware/check_sdk.py --idf "$IDF_PATH" --sdkconfig PATH_TO_GENERATED_SDKCONFIG_H` runs inside `nix-shell nix/firmware.nix`. The generated header is under the `esp-idf-sys` build output's `build/config` directory. The fixture runs the actual patched FatFs sources with AddressSanitizer and UndefinedBehaviorSanitizer against disposable memory-backed media. Its mock mutexes do not test RTOS concurrency. A second fixture executes the SDK teardown function and reproduces the original unused-slot regression with the guard removed. The ordinary `scripts/check` does not build the SDK and does not run this separate fixture.

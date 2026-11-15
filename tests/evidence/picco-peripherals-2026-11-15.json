@@ -1,0 +1,116 @@
+{
+  "date": "2026-11-15",
+  "feature": "Picco exFAT, peripheral rail preservation, charger identity and ADC startup settling",
+  "source_commit": "e58f4c945a99898dfe2c586a645566394d1f573d",
+  "firmware_manifest": {
+    "image": "femto-picco.bin",
+    "sha256": "34e2032f1f10e378bc25072603aa0b1380a92674a0f6e2bf8b580fc14647293e",
+    "bytes": 5331264,
+    "chip": "esp32s3",
+    "display_levels": 2,
+    "bluetooth": false,
+    "reference_app_offset": "0xE0000",
+    "reference_app_size": "0xE70000",
+    "hardware_verified": false,
+    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation."
+  },
+  "checks": {
+    "host_suite": "scripts/check passed",
+    "sdk": "Patched FatFs FAT16/FAT32/exFAT UTF-8 persistence, seek, rename and truncate under ASan/UBSan; SDK unused-slot cleanup regression passed",
+    "firmware": "Monochrome non-Bluetooth build passed; other variants not rebuilt in this session",
+    "sd": "Existing exFAT partition mounted without formatting; journal restored page 1 after firmware update and reboot",
+    "charger": "Read-only AW32001-compatible identity at 0x49; status 0x7a reports external power and charge completion; no charger configuration writes",
+    "adc": "Diagnostic raw readings fell from [2664,2663,2661] to [2574,2575,2573] after a requested 10ms delay (20ms by log timestamps) and remained stable after subsequent 50ms and 200ms delays. Final image discards one conversion and waits 20ms; first published reading 4334mV, Complete, 100 percent",
+    "frontlight": "No startup error; USB menu brighter/dimmer/warmer/cooler commands completed without logged I2C error; optical output unobserved",
+    "input": "Touch initialization succeeded; USB menu navigation and page turns completed; no physical button or touch presses observed",
+    "position_before_reboot": {
+      "page": 1,
+      "pages": 4,
+      "menu": false,
+      "memory_bytes": {
+        "stack_minimum_free": 28556,
+        "internal": {
+          "free": 189907,
+          "largest": 73728,
+          "minimum": 151007
+        },
+        "psram": {
+          "free": 7861488,
+          "largest": 7733248,
+          "minimum": 7476460
+        }
+      }
+    },
+    "position_after_reboot": {
+      "page": 1,
+      "pages": 4,
+      "menu": false,
+      "memory_bytes": {
+        "stack_minimum_free": 28812,
+        "internal": {
+          "free": 189855,
+          "largest": 71680,
+          "minimum": 149891
+        },
+        "psram": {
+          "free": 7861488,
+          "largest": 7733248,
+          "minimum": 7476460
+        }
+      }
+    },
+    "final_status": {
+      "page": 0,
+      "pages": 4,
+      "menu": false,
+      "memory_bytes": {
+        "stack_minimum_free": 28556,
+        "internal": {
+          "free": 192967,
+          "largest": 100352,
+          "minimum": 150823
+        },
+        "psram": {
+          "free": 7861488,
+          "largest": 7733248,
+          "minimum": 7476460
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Absolute battery voltage and percentage require independent measurement",
+    "Physical frontlight output and display readability/ghosting unobserved",
+    "Physical touch/button behavior unobserved",
+    "SDK teardown guard tested with production-function host fixture, not physical card removal",
+    "No interrupted SD write, sleep/wake, Wi-Fi, or large EPUB qualification in this run"
+  ],
+  "private_artifact_sha256": {
+    "final-fixes-build.log": "6fc76aaf3d8c01bdce7e29657a960b33cc7390b0df6387edf8b4ec690cbc167f",
+    "fixes-check.log": "bdad3ab5e37aae6df6385e8810eb89bb5c5c9fa0eae98556953d77b09d5801d2",
+    "final-sdk-tests.log": "b818b421aa85438063149ba8c9b54a4153a47de74e17947176402c25703e8b46",
+    "battery-tests.log": "6003ea8d503163a46849612cf3f5e97e346f3c7a398ddec660891be885469b4c",
+    "final-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "final-fixes-boot.log": "62cc1e13cd498291983eaa41ddaf63684b4ddb38e6e33384d5198be2ad4bb19f",
+    "charger-adc-boot.log": "382c4afe88573e6a61aa2b32ed6e4857481afce7c9a5232331952aa69b559bf2",
+    "light-navigation.log": "6acc09ad9ac87478454c8b33d715162353f8e6078d9689fc791c9afc0c98788c",
+    "pre-reboot-page.json": "2473a2cc542f75cf7e6ef03c00d34f5d460de7359f04d16ecbfd895c97ef1abd",
+    "restored-page.json": "a7a88fc477368991cf7743f96cd93bc5cda667bb967a32ce51a7c7c65dc7bc2f",
+    "final-restart-boot.log": "5a3e20e5184f05e1a859d1cd2996532cab3bc7672e4d289db6ee915cfe91318c",
+    "final-status.json": "a4e23e644956ce07ff8b3bb7e8d96289e000631ffe11653c18a53c8804c5eef8"
+  },
+  "flash_readback": {
+    "bytes": 16777216,
+    "sha256": "225a9358029c14a87a881310a5dcb377622963e0832ee04c4e7a57ddb0aa8550",
+    "original_sha256": "9b88c996a7190c269573f7b611e74209904d37826a55292b6c15e667d574053e",
+    "application_partition": [
+      917504,
+      16056320
+    ],
+    "checks": {
+      "application_image_matches": true,
+      "before_application_preserved": true,
+      "after_application_preserved": true
+    }
+  }
+}

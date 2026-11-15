@@ -1,0 +1,14 @@
+--- a/components/esp_driver_sdmmc/src/sdmmc_host.c
++++ b/components/esp_driver_sdmmc/src/sdmmc_host.c
+@@ -881,6 +881,11 @@
+ 
+ static void sdmmc_host_deinit_slot_internal(int slot)
+ {
++    // An unused slot owns no pins. Its zeroed GPIO fields are not GPIO0 claims.
++    if (s_host_ctx.slot_ctx[slot].slot_width == 0) {
++        return;
++    }
++
+     sdmmc_slot_io_info_t* gpio = &s_host_ctx.slot_ctx[slot].slot_gpio_num;
+     // Disconnect signals and reset used GPIO pins
+     reset_pin_if_valid(gpio->cd);

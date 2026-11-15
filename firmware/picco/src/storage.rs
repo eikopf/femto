@@ -12,6 +12,11 @@ use esp_idf_svc::{
 
 pub type Storage = MountedFatfs<Fatfs<SdCardDriver<SdMmcHostDriver<'static>>>>;
 
+const _: () = assert!(
+    esp_idf_svc::sys::FF_FS_EXFAT == 1,
+    "Picco requires the exFAT-enabled ESP-IDF from nix/firmware.nix"
+);
+
 #[allow(clippy::too_many_arguments)]
 pub fn mount(
     slot: SDMMC1<'static>,

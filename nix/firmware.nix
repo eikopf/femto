@@ -9,7 +9,9 @@ let
   };
   rust = pkgs.callPackage (rustSource + "/pkgs/rust-xtensa-bin.nix") { };
   espDev = builtins.getFlake "github:mirrexagon/nixpkgs-esp-dev/5287d6e1ca9e15ebd5113c41b9590c468e1e001b";
-  idf = espDev.packages.${builtins.currentSystem}.esp-idf-xtensa;
+  idf = espDev.packages.${builtins.currentSystem}.esp-idf-xtensa.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ ./esp-idf-exfat.patch ./esp-idf-sdmmc-unused-slot.patch ];
+  });
 in pkgs.mkShell {
   packages = [ pkgs.bubblewrap rust pkgs.cargo idf pkgs.pkg-config pkgs.cmake pkgs.ninja pkgs.git pkgs.llvmPackages.libclang pkgs.ldproxy ];
   LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";

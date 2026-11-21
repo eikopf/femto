@@ -1,4 +1,5 @@
 //! Bounded OPDS catalog projection, independent of network and reader frontends.
+mod atom;
 pub mod auth;
 pub mod browser;
 pub mod deadline;
@@ -86,6 +87,7 @@ impl Link {
                     .eq_ignore_ascii_case("application/epub+zip")
             })
             && (self.has_relation("download")
+                || self.has_relation(atom::ACQUISITION)
                 || self.has_relation("http://opds-spec.org/acquisition/open-access"))
         {
             self.resolved.as_deref()
@@ -255,6 +257,10 @@ impl Catalog {
             return Err(Error::Limit("feed bytes"));
         }
         let base = web_url(None, source)?;
+        // OPDS 1.x feeds are Atom documents; OPDS 2 feeds are JSON.
+        if bytes.iter().find(|byte| !byte.is_ascii_whitespace()) == Some(&b'<') {
+            return atom::parse(bytes, base, source);
+        }
         let value = json::parse(bytes)?;
         if !value.is_object()
             || !["navigation", "publications", "groups"]

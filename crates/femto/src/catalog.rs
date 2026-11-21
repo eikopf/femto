@@ -428,11 +428,19 @@ pub(crate) fn browse_transport<T: Transport>(
                 .and_then(|n| n.parse::<usize>().ok())
                 .and_then(|n| n.checked_sub(1))
         {
-            match browser.search_url(number, query) {
-                Ok(source) => {
-                    if let Err(error) =
-                        browser.follow(&source, |source| load(transport, &mut interrupts, source))
-                    {
+            match browser.search(number, query) {
+                Ok(search) => {
+                    let found = browser.follow("", |_| {
+                        let operation = interrupts.begin();
+                        femto_catalog::http::fetch_search(
+                            transport,
+                            &search,
+                            args.deadline(args.timeout),
+                            operation.flag(),
+                            auth,
+                        )
+                    });
+                    if let Err(error) = found {
                         eprintln!(
                             "Catalog request failed: {}",
                             serde_json::to_string(&error.to_string())?

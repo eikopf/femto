@@ -11,7 +11,19 @@ pub struct Browser {
 pub struct Destination<'a> {
     pub label: &'a str,
     pub source: &'a str,
+    /// Moves within or out of the current listing rather than into a section.
+    pub paging: bool,
 }
+
+/// Feed-level relations offered as destinations, with their labels.
+const PAGING: [(&str, &str); 6] = [
+    ("next", "Next page"),
+    ("previous", "Previous page"),
+    ("first", "First page"),
+    ("last", "Last page"),
+    ("up", "Up"),
+    ("start", "Catalog home"),
+];
 
 impl Browser {
     pub fn new(current: Catalog) -> Self {
@@ -71,14 +83,15 @@ impl Browser {
             .iter()
             .filter(|link| link.has_relation("search"))
     }
-    pub fn search_url(&self, index: usize, query: &str) -> crate::Result<String> {
+    pub fn search(&self, index: usize, query: &str) -> crate::Result<crate::search::Search> {
         self.searches()
             .nth(index)
             .ok_or(crate::Error::Field("search number"))?
-            .search_url(&self.current.source, query)
+            .search(&self.current.source, query)
     }
+    /// Sections first, then paging links that lead somewhere else.
     pub fn destinations(&self) -> Vec<Destination<'_>> {
-        fn destination(link: &Link) -> Option<Destination<'_>> {
+        fn feed(link: &Link) -> Option<&str> {
             if link.templated || link.indirect {
                 return None;
             }
@@ -89,31 +102,46 @@ impl Browser {
                 .split(';')
                 .next()?
                 .trim();
-            if !kind.eq_ignore_ascii_case("application/opds+json") {
+            if !kind.eq_ignore_ascii_case("application/opds+json")
+                && !kind.eq_ignore_ascii_case("application/atom+xml")
+            {
                 return None;
             }
-            Some(Destination {
-                label: link.title.as_deref().unwrap_or_else(|| {
-                    link.relations
-                        .first()
-                        .map(String::as_str)
-                        .unwrap_or("Catalog")
-                }),
-                source: link.resolved.as_deref()?,
-            })
+            link.resolved.as_deref()
         }
-        self.current
+        let sections = self
+            .current
             .navigation
             .iter()
             .chain(self.current.groups.iter().flat_map(|g| &g.navigation))
             .chain(self.current.facets.iter().flat_map(|f| &f.links))
             .chain(self.current.groups.iter().flat_map(|g| &g.links))
-            .chain(self.current.links.iter().filter(|l| {
-                ["next", "previous", "first", "last", "start", "up"]
-                    .iter()
-                    .any(|rel| l.has_relation(rel))
-            }))
-            .filter_map(destination)
-            .collect()
+            .filter_map(|link| {
+                Some(Destination {
+                    label: link.title.as_deref().unwrap_or_else(|| {
+                        link.relations
+                            .first()
+                            .map(String::as_str)
+                            .unwrap_or("Catalog")
+                    }),
+                    source: feed(link)?,
+                    paging: false,
+                })
+            });
+        let paging = PAGING.iter().filter_map(|(relation, label)| {
+            let link = self
+                .current
+                .links
+                .iter()
+                .find(|link| link.has_relation(relation))?;
+            let source = feed(link)?;
+            // A link back to the page being shown is not a destination.
+            (source != self.current.source).then_some(Destination {
+                label: link.title.as_deref().unwrap_or(label),
+                source,
+                paging: true,
+            })
+        });
+        sections.chain(paging).collect()
     }
 }

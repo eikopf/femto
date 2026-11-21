@@ -63,5 +63,6 @@ fn unsupported_destinations_are_not_browsable() {
     catalog.facets[0].links[1].indirect = true;
     let browser = Browser::new(catalog);
     assert_eq!(browser.destinations().len(), 1);
-    assert_eq!(browser.destinations()[0].label, "next");
+    assert_eq!(browser.destinations()[0].label, "Next page");
+    assert!(browser.destinations()[0].paging);
 }

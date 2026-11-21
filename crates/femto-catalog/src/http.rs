@@ -290,18 +290,21 @@ pub struct Download {
 #[derive(Clone, Copy)]
 enum Kind {
     Feed,
+    Description,
     Epub,
 }
 impl Kind {
     fn limit(self) -> usize {
         match self {
             Self::Feed => MAX_FEED_BYTES,
+            Self::Description => 64 * 1024,
             Self::Epub => MAX_EPUB_BYTES,
         }
     }
     fn accept(self) -> &'static str {
         match self {
-            Self::Feed => "application/opds+json, application/json",
+            Self::Feed => "application/opds+json, application/json, application/atom+xml",
+            Self::Description => "application/opensearchdescription+xml, application/xml, text/xml",
             Self::Epub => "application/epub+zip, application/octet-stream",
         }
     }
@@ -340,6 +343,34 @@ pub fn fetch(
     cancelled: Arc<AtomicBool>,
 ) -> Result<Catalog, Error> {
     fetch_authenticated(transport, source, deadline, cancelled, None)
+}
+
+/// Loads search results, first reading the OpenSearch description if one is needed.
+pub fn fetch_search(
+    transport: &mut impl Transport,
+    search: &crate::search::Search,
+    deadline: Instant,
+    cancelled: Arc<AtomicBool>,
+    auth: Option<&crate::auth::BasicAuth>,
+) -> Result<Catalog, Error> {
+    use crate::search::Search;
+    let source = match search {
+        Search::Feed(source) => source.clone(),
+        Search::Described { description, query } => {
+            let mut bytes = Vec::new();
+            let found = receive(
+                transport,
+                description,
+                deadline,
+                cancelled.clone(),
+                auth,
+                Kind::Description,
+                &mut bytes,
+            )?;
+            crate::search::described_url(&bytes, &found.source, query)?
+        }
+    };
+    fetch_authenticated(transport, &source, deadline, cancelled, auth)
 }
 
 pub fn fetch_authenticated(

@@ -1,4 +1,20 @@
-use femto_catalog::{Catalog, browser::Browser, search::MAX_QUERY_BYTES};
+use femto_catalog::{
+    Catalog,
+    browser::Browser,
+    search::{MAX_QUERY_BYTES, Search},
+};
+/// OPDS 2 templates resolve without the network.
+trait Direct {
+    fn search_url(&self, index: usize, query: &str) -> Result<String, femto_catalog::Error>;
+}
+impl Direct for Browser {
+    fn search_url(&self, index: usize, query: &str) -> Result<String, femto_catalog::Error> {
+        match self.search(index, query)? {
+            Search::Feed(source) => Ok(source),
+            Search::Described { .. } => panic!("unexpected description"),
+        }
+    }
+}
 fn browser(template: &str) -> Browser {
     let value = serde_json::json!({"metadata":{"title":"Search"},"links":[{"rel":"self","href":"/"},{"rel":"search","type":"application/opds+json; charset=utf-8","templated":true,"href":template}],"publications":[]});
     Browser::new(

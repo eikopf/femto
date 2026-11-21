@@ -116,19 +116,24 @@ def listing(port, directory):
 def frame(port, output, rotate):
     """Save the framebuffer; it is what the firmware drew, not a photo of the glass."""
     from PIL import Image
-    port.write(b"femto frame\n")
-    data, size = bytearray(), None
-    for line in port.lines(echo=False):
-        begin = re.search(rb"USB frame: begin (\d+)", line)
-        if begin:
-            size = int(begin[1])
-        elif b"USB frame: end" in line:
+    # Log lines from other device threads can interleave with the dump, so
+    # only complete rows count and a damaged dump is requested again.
+    for _ in range(4):
+        port.write(b"femto frame\n")
+        data, size = bytearray(), None
+        for line in port.lines(echo=False):
+            begin = re.search(rb"USB frame: begin (\d+)", line)
+            if begin:
+                size = int(begin[1])
+            elif b"USB frame: end" in line:
+                break
+            elif size is not None:
+                row = re.fullmatch(rb"USB frame: ((?:[0-9a-f]{2}){1,64})\r?", line)
+                if row:
+                    data.extend(bytes.fromhex(row[1].decode("ascii")))
+        if size in (48000, 96000) and len(data) == size:
             break
-        elif size is not None:
-            row = re.search(rb"USB frame: ([0-9a-f]+)", line)
-            if row:
-                data.extend(bytes.fromhex(row[1].decode("ascii")))
-    if size is None or len(data) != size or size not in (48000, 96000):
+    else:
         raise ValueError(f"incomplete frame: {len(data)} of {size} bytes")
     if size == 48000:
         image = Image.frombytes("1", (800, 480), bytes(data))

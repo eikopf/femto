@@ -85,7 +85,7 @@ fn download_publishes_valid_epub_and_starts_library_rescan() {
         .unwrap();
     menu.event(CatalogEvent::Open, &mut jobs, &mut ui).unwrap();
     finish(&mut menu, &mut jobs, &mut ui);
-    menu.event(CatalogEvent::Activate(2), &mut jobs, &mut ui)
+    menu.event(CatalogEvent::Activate(0), &mut jobs, &mut ui)
         .unwrap();
     menu.event(CatalogEvent::Activate(2), &mut jobs, &mut ui)
         .unwrap();
@@ -118,7 +118,7 @@ fn download_publishes_valid_epub_and_starts_library_rescan() {
     );
     // A repeated acquisition must leave the existing book untouched.
     menu.event(CatalogEvent::Open, &mut jobs, &mut ui).unwrap();
-    menu.event(CatalogEvent::Activate(2), &mut jobs, &mut ui)
+    menu.event(CatalogEvent::Activate(0), &mut jobs, &mut ui)
         .unwrap();
     menu.event(CatalogEvent::Activate(2), &mut jobs, &mut ui)
         .unwrap();
@@ -165,7 +165,7 @@ fn invalid_and_cancelled_downloads_leave_no_published_or_partial_book() {
             assert!(Instant::now() < end);
             std::thread::sleep(Duration::from_millis(1));
         }
-        menu.event(CatalogEvent::Activate(2), &mut jobs, &mut ui)
+        menu.event(CatalogEvent::Activate(0), &mut jobs, &mut ui)
             .unwrap();
         menu.event(CatalogEvent::Activate(2), &mut jobs, &mut ui)
             .unwrap();

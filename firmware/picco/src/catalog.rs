@@ -1,4 +1,4 @@
-use femto_catalog::{auth::BasicAuth, browser::Browser, worker::Worker};
+use femto_catalog::{auth::BasicAuth, browser::Browser, search::Search, worker::Worker};
 use femto_reader::ui::{CatalogEvent, ReaderUi};
 use std::{
     fs::File,
@@ -231,6 +231,15 @@ impl CatalogMenu {
         worker: &mut Jobs,
         ui: &mut ReaderUi,
     ) -> Result<(), String> {
+        self.request(Search::Feed(source), back, worker, ui)
+    }
+    fn request(
+        &mut self,
+        target: Search,
+        back: bool,
+        worker: &mut Jobs,
+        ui: &mut ReaderUi,
+    ) -> Result<(), String> {
         let auth = self.auth.clone();
         let factory = self.transport.clone();
         let origins = self.origins.clone();
@@ -238,9 +247,9 @@ impl CatalogMenu {
         let id = worker
             .submit(deadline, move |_, cancel| {
                 let mut transport = request_transport(factory.as_ref(), &origins)?;
-                let feed = femto_catalog::http::fetch_authenticated(
+                let feed = femto_catalog::http::fetch_search(
                     &mut transport,
-                    &source,
+                    &target,
                     deadline,
                     cancel,
                     auth.as_ref(),
@@ -307,8 +316,9 @@ impl CatalogMenu {
             ui.open();
             return Ok(());
         };
-        let mut rows = vec!["Refresh".into()];
-        let mut actions = vec![Action::Refresh];
+        // Search, then sections and books, then paging and refresh.
+        let mut rows = Vec::new();
+        let mut actions = Vec::new();
         for (index, link) in browser.searches().enumerate() {
             rows.push(
                 link.title
@@ -317,14 +327,24 @@ impl CatalogMenu {
             );
             actions.push(Action::Search(index));
         }
-        for destination in browser.destinations() {
+        let destinations = browser.destinations();
+        for destination in destinations.iter().filter(|d| !d.paging) {
             rows.push(destination.label.to_owned());
             actions.push(Action::Follow(destination.source.to_owned()));
         }
         for (index, publication) in browser.publications().enumerate() {
-            rows.push(format!("Book: {}", publication.title));
+            rows.push(match publication.authors.first() {
+                Some(author) => format!("{} - {author}", publication.title),
+                None => publication.title.clone(),
+            });
             actions.push(Action::Publication(index));
         }
+        for destination in destinations.iter().filter(|d| d.paging) {
+            rows.push(destination.label.to_owned());
+            actions.push(Action::Follow(destination.source.to_owned()));
+        }
+        rows.push("Refresh".into());
+        actions.push(Action::Refresh);
         ui.set_catalog_view(&browser.current().title, &rows)
             .map_err(|e| e.to_string())?;
         self.actions = actions;
@@ -345,13 +365,13 @@ impl CatalogMenu {
         match event {
             CatalogEvent::Search => {
                 let index = self.search.ok_or("No catalog search selected")?;
-                let source = self
+                let search = self
                     .browser
                     .as_ref()
                     .ok_or("No catalog loaded")?
-                    .search_url(index, ui.query())
+                    .search(index, ui.query())
                     .map_err(|e| e.to_string())?;
-                self.start(source, false, worker, ui)
+                self.request(search, false, worker, ui)
             }
             CatalogEvent::Open if self.browser.is_none() => {
                 self.start(self.source.clone(), false, worker, ui)
@@ -551,7 +571,7 @@ mod tests {
             .unwrap();
         finish(&mut menu, &mut worker, &mut ui);
         assert_eq!(menu.browser.as_ref().unwrap().current().title, "/start");
-        menu.event(CatalogEvent::Activate(2), &mut worker, &mut ui)
+        menu.event(CatalogEvent::Activate(0), &mut worker, &mut ui)
             .unwrap();
         assert!(menu.detail);
         menu.event(CatalogEvent::Back, &mut worker, &mut ui)
@@ -608,7 +628,7 @@ mod tests {
         menu.event(CatalogEvent::Open, &mut worker, &mut ui)
             .unwrap();
         finish(&mut menu, &mut worker, &mut ui);
-        menu.event(CatalogEvent::Activate(1), &mut worker, &mut ui)
+        menu.event(CatalogEvent::Activate(0), &mut worker, &mut ui)
             .unwrap();
         assert!(ui.is_editing());
         assert!(
@@ -634,14 +654,14 @@ mod tests {
             menu.browser.as_ref().unwrap().current().title,
             "/searchable"
         );
-        menu.event(CatalogEvent::Activate(1), &mut worker, &mut ui)
+        menu.event(CatalogEvent::Activate(0), &mut worker, &mut ui)
             .unwrap();
         menu.event(CatalogEvent::Back, &mut worker, &mut ui)
             .unwrap();
         assert!(!ui.is_editing());
         assert!(!worker.is_busy());
         assert_eq!(menu.browser.as_ref().unwrap().history_len(), 0);
-        menu.event(CatalogEvent::Activate(1), &mut worker, &mut ui)
+        menu.event(CatalogEvent::Activate(0), &mut worker, &mut ui)
             .unwrap();
         ui.type_char('x');
         menu.event(CatalogEvent::Search, &mut worker, &mut ui)

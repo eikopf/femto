@@ -1,69 +1,195 @@
 #!/usr/bin/env python3
-"""Send a bounded USB reader command without resetting the Picco."""
+"""Drive the Picco USB console without resetting the device."""
 import argparse
+import glob
 import json
 import os
 import re
 import select
+import sys
 import time
 import tty
+import zlib
+
+CHUNK_BYTES = 2048
+EVENTS = ["next", "prev", "select", "back", "power"]
+
+
+class Port:
+    def __init__(self, path, timeout):
+        self.fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        tty.setraw(self.fd)
+        self.deadline = time.monotonic() + timeout
+        self.pending = bytearray()
+        # The device drops input sent immediately after the port opens. Drain
+        # old output meanwhile so a previous reply cannot satisfy this request.
+        settled = time.monotonic() + 0.3
+        while select.select([self.fd], [], [], max(0, settled - time.monotonic()))[0]:
+            if not os.read(self.fd, 4096):
+                raise OSError("USB disconnected")
+
+    def write(self, data):
+        while data:
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0 or not select.select([], [self.fd], [], remaining)[1]:
+                raise TimeoutError("USB write timed out")
+            data = data[os.write(self.fd, data):]
+
+    def lines(self, echo=True):
+        """Yield complete device lines until the deadline."""
+        while True:
+            while b"\n" in self.pending:
+                line, _, self.pending = self.pending.partition(b"\n")
+                if echo:
+                    print(line.decode("utf-8", "replace"), file=sys.stderr, flush=True)
+                yield bytes(line)
+            if len(self.pending) > 4096:
+                raise ValueError("USB line exceeds 4096 bytes")
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0 or not select.select([self.fd], [], [], remaining)[0]:
+                raise TimeoutError("No Femto reply received")
+            data = os.read(self.fd, 4096)
+            if not data:
+                raise OSError("USB disconnected")
+            self.pending.extend(data)
+
+    def file_result(self, on_line=lambda line: None, echo=True):
+        for line in self.lines(echo):
+            if b"USB file: done" in line:
+                return
+            error = re.search(rb"USB file: error (.*)", line)
+            if error:
+                raise RuntimeError(error[1].decode("utf-8", "replace").strip())
+            on_line(line)
+
+
+def status(port, expect_page):
+    memory = {}
+    for line in port.lines():
+        stack = re.search(rb"Stack usb status: minimum_free=(\d+)", line)
+        if stack:
+            memory["stack_minimum_free"] = int(stack[1])
+        heap = re.search(rb"Heap usb status (internal|psram): free=(\d+) largest=(\d+) minimum=(\d+)", line)
+        if heap:
+            memory[heap[1].decode("ascii")] = dict(
+                free=int(heap[2]), largest=int(heap[3]), minimum=int(heap[4]))
+        match = re.search(rb"USB status: page=(\d+) pages=(\d+) menu=(true|false)", line)
+        if match:
+            result = dict(page=int(match[1]), pages=int(match[2]), menu=match[3] == b"true")
+            result["memory_bytes"] = memory
+            print(json.dumps(result))
+            return 0 if expect_page is None or result["page"] == expect_page else 1
+
+
+def put(port, source, destination):
+    with open(source, "rb") as file:
+        data = file.read()
+    port.write(f"femto put {len(data)} {zlib.crc32(data):08x} {destination}\n".encode())
+
+    def acknowledge(line):
+        ack = re.search(rb"USB put: ack (\d+)", line)
+        if ack:
+            port.deadline = time.monotonic() + 30
+            port.write(data[int(ack[1]):int(ack[1]) + CHUNK_BYTES])
+
+    started = time.monotonic()
+    port.file_result(acknowledge, echo=False)
+    print(json.dumps(dict(path=destination, bytes=len(data),
+                          seconds=round(time.monotonic() - started, 2))))
+
+
+def listing(port, directory):
+    entries = []
+
+    def collect(line):
+        entry = re.search(rb"USB ls: ([df]) (\d+) (.*)", line)
+        if entry:
+            entries.append(dict(kind="directory" if entry[1] == b"d" else "file",
+                                bytes=int(entry[2]),
+                                name=entry[3].decode("utf-8", "replace").rstrip("\r")))
+
+    port.write(f"femto ls {directory}".rstrip().encode() + b"\n")
+    port.file_result(collect, echo=False)
+    print(json.dumps(entries, indent=1, ensure_ascii=False))
+
+
+def frame(port, output):
+    """Save the framebuffer in native panel orientation; it is not a photo of the glass."""
+    from PIL import Image
+    port.write(b"femto frame\n")
+    data, size = bytearray(), None
+    for line in port.lines(echo=False):
+        begin = re.search(rb"USB frame: begin (\d+)", line)
+        if begin:
+            size = int(begin[1])
+        elif b"USB frame: end" in line:
+            break
+        elif size is not None:
+            row = re.search(rb"USB frame: ([0-9a-f]+)", line)
+            if row:
+                data.extend(bytes.fromhex(row[1].decode("ascii")))
+    if size is None or len(data) != size or size not in (48000, 96000):
+        raise ValueError(f"incomplete frame: {len(data)} of {size} bytes")
+    if size == 48000:
+        image = Image.frombytes("1", (800, 480), bytes(data))
+    else:
+        high = Image.frombytes("1", (800, 480), bytes(data[:48000])).convert("L")
+        low = Image.frombytes("1", (800, 480), bytes(data[48000:])).convert("L")
+        image = Image.blend(low, high, 2 / 3)
+    image.save(output)
+    print(json.dumps(dict(output=output, bytes=size)))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", required=True)
-    parser.add_argument("command", choices=["status", "next", "prev", "select", "back"])
+    parser.add_argument("--port")
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--expect-page", type=int)
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ["status", "reboot", *EVENTS]:
+        commands.add_parser(name)
+    tap = commands.add_parser("tap", help="tap at reader-view coordinates")
+    tap.add_argument("x", type=int)
+    tap.add_argument("y", type=int)
+    upload = commands.add_parser("put", help="copy a file below /sdcard/femto")
+    upload.add_argument("source")
+    upload.add_argument("destination")
+    commands.add_parser("ls").add_argument("directory", nargs="?", default="")
+    commands.add_parser("rm").add_argument("path")
+    commands.add_parser("frame").add_argument("output")
     args = parser.parse_args()
     if not 0 < args.timeout <= 300:
         parser.error("timeout must be between 0 and 300 seconds")
-    fd = os.open(args.port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    path = args.port
+    if path is None:
+        found = glob.glob("/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_*-if00")
+        if len(found) != 1:
+            parser.error("--port is required unless exactly one Picco is connected")
+        path = found[0]
+    port = Port(path, args.timeout)
     try:
-        tty.setraw(fd)
-        # Drain old output so a previous status cannot satisfy this request.
-        while select.select([fd], [], [], 0)[0]:
-            if not os.read(fd, 4096):
-                raise OSError("USB disconnected")
-        commands = f"femto {args.command}\n"
-        if args.command != "status":
-            commands += "femto status\n"
-        data = commands.encode("ascii")
-        deadline = time.monotonic() + args.timeout
-        while data:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0 or not select.select([], [fd], [], remaining)[1]:
-                raise TimeoutError("USB write timed out")
-            data = data[os.write(fd, data):]
-        pending = bytearray()
-        memory = {}
-        while time.monotonic() < deadline:
-            if not select.select([fd], [], [], max(0, deadline - time.monotonic()))[0]:
-                break
-            data = os.read(fd, 4096)
-            if not data:
-                raise OSError("USB disconnected")
-            pending.extend(data)
-            while b"\n" in pending:
-                line, _, pending = pending.partition(b"\n")
-                stack = re.search(rb"Stack usb status: minimum_free=(\d+)", line)
-                if stack:
-                    memory["stack_minimum_free"] = int(stack[1])
-                heap = re.search(rb"Heap usb status (internal|psram): free=(\d+) largest=(\d+) minimum=(\d+)", line)
-                if heap:
-                    memory[heap[1].decode("ascii")] = dict(
-                        free=int(heap[2]), largest=int(heap[3]), minimum=int(heap[4]))
-                match = re.search(rb"USB status: page=(\d+) pages=(\d+) menu=(true|false)", line)
-                if match:
-                    status = dict(page=int(match[1]), pages=int(match[2]), menu=match[3] == b"true")
-                    status["memory_bytes"] = memory
-                    print(json.dumps(status))
-                    return 0 if args.expect_page is None or status["page"] == args.expect_page else 1
-            if len(pending) > 4096:
-                raise ValueError("USB line exceeds 4096 bytes")
-        raise TimeoutError("No Femto status received")
+        if args.command == "put":
+            put(port, args.source, args.destination)
+        elif args.command == "ls":
+            listing(port, args.directory)
+        elif args.command == "rm":
+            port.write(f"femto rm {args.path}\n".encode())
+            port.file_result(echo=False)
+        elif args.command == "frame":
+            frame(port, args.output)
+        elif args.command == "reboot":
+            port.write(b"femto reboot\n")
+        else:
+            commands = f"femto {args.command}\n"
+            if args.command == "tap":
+                commands = f"femto tap {args.x} {args.y}\n"
+            if args.command != "status":
+                commands += "femto status\n"
+            port.write(commands.encode("ascii"))
+            return status(port, args.expect_page)
+        return 0
     finally:
-        os.close(fd)
+        os.close(port.fd)
 
 
 if __name__ == "__main__":

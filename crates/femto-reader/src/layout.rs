@@ -142,6 +142,18 @@ pub struct Font {
     data: Vec<u8>,
     key: CacheKey,
     offset: u32,
+    /// Results that depend only on the font data and are otherwise recomputed
+    /// for every candidate line.
+    shaping: std::sync::Mutex<ShapingCache>,
+}
+
+type PlanKey = (Direction, rustybuzz::Script, Option<rustybuzz::Language>);
+
+#[derive(Default)]
+struct ShapingCache {
+    /// Vertical glyph extents in font units; `None` for glyphs without outlines.
+    extents: std::collections::HashMap<u16, Option<(i16, i16)>>,
+    plans: Vec<(PlanKey, rustybuzz::ShapePlan)>,
 }
 
 impl Font {
@@ -175,7 +187,42 @@ impl Font {
         let face = FontRef::from_index(&data, 0).ok_or(Error::Font)?;
         Face::from_slice(&data, 0).ok_or(Error::Font)?;
         let (key, offset) = (face.key, face.offset);
-        Ok(Self { data, key, offset })
+        Ok(Self {
+            data,
+            key,
+            offset,
+            shaping: Default::default(),
+        })
+    }
+    /// Shapes with a plan retained per direction, script and language.
+    fn shape(&self, face: &Face<'_>, buffer: UnicodeBuffer) -> rustybuzz::GlyphBuffer {
+        const PLANS: usize = 16;
+        let key = (buffer.direction(), buffer.script(), buffer.language());
+        let mut cache = self.shaping.lock().unwrap_or_else(|e| e.into_inner());
+        let index = match cache.plans.iter().position(|(known, _)| *known == key) {
+            Some(index) => index,
+            None => {
+                if cache.plans.len() == PLANS {
+                    cache.plans.clear();
+                }
+                let plan = rustybuzz::ShapePlan::new(face, key.0, Some(key.1), key.2.as_ref(), &[]);
+                cache.plans.push((key, plan));
+                cache.plans.len() - 1
+            }
+        };
+        rustybuzz::shape_with_plan(face, &cache.plans[index].1, buffer)
+    }
+    fn vertical_extents(&self, face: &Face<'_>, glyph: u16) -> Option<(i16, i16)> {
+        *self
+            .shaping
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extents
+            .entry(glyph)
+            .or_insert_with(|| {
+                face.glyph_bounding_box(rustybuzz::ttf_parser::GlyphId(glyph))
+                    .map(|bounds| (bounds.y_min, bounds.y_max))
+            })
     }
     fn swash(&self) -> FontRef<'_> {
         FontRef {
@@ -192,6 +239,8 @@ pub struct Fonts {
     pub italic: Option<Font>,
     pub bold_italic: Option<Font>,
     pub fallback: Vec<Font>,
+    /// Glyph masks shared by every page and menu rendered with these fonts.
+    masks: std::sync::Mutex<crate::glyph_cache::GlyphCache>,
 }
 
 impl Fonts {
@@ -202,7 +251,18 @@ impl Fonts {
             italic: None,
             bold_italic: None,
             fallback: Vec::new(),
+            masks: std::sync::Mutex::new(crate::glyph_cache::GlyphCache::new(512 * 1024, 1024)),
         }
+    }
+    /// Identifies the font slots and raster settings that determine a mask.
+    fn mask_tag(&self, text: crate::display::TextRaster) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for id in 0..4 + self.fallback.len() as u8 {
+            self.get(id).key.value().hash(&mut hasher);
+        }
+        (text.hinting, text.stroke.to_bits()).hash(&mut hasher);
+        hasher.finish()
     }
     fn select(&self, style: TextStyle) -> (u8, &Font) {
         if style.bold
@@ -1251,6 +1311,30 @@ fn break_opportunities(text: &str) -> impl Iterator<Item = (usize, BreakOpportun
     )
 }
 
+/// Byte offset at which unshaped advances of the regular face exceed `width`.
+/// Only a starting point for the line fit; shaping decides.
+fn estimated_fit(p: &Paragraph, start: usize, width: f32, fonts: &Fonts, size: f32) -> usize {
+    let Some(face) = rustybuzz::ttf_parser::Face::parse(&fonts.regular.data, 0).ok() else {
+        return start;
+    };
+    let scale = size / f32::from(face.units_per_em());
+    let mut total = 0.0;
+    for (offset, c) in p.text[start..].char_indices() {
+        total += face
+            .glyph_index(c)
+            .and_then(|glyph| face.glyph_hor_advance(glyph))
+            .map_or(size * 0.5, |advance| f32::from(advance) * scale);
+        if total > width {
+            return start + offset;
+        }
+    }
+    p.text.len()
+}
+
+/// Selects the last break opportunity that fits, as a scan over every
+/// opportunity in order would. The scan starts near an estimate instead of at
+/// the first opportunity, which assumes that a prefix of a fitting line without
+/// a discretionary hyphen also fits.
 fn break_line(
     p: &Paragraph,
     shaping: &Shaping,
@@ -1260,7 +1344,7 @@ fn break_line(
     size: f32,
     hyphens: &[usize],
 ) -> Result<(usize, Line)> {
-    let mut best = None;
+    let mut candidates = Vec::new();
     for (relative, kind) in break_opportunities(&p.text[start..]) {
         let end = start + relative;
         if end - start > crate::scripts::LINE_BYTES {
@@ -1269,13 +1353,49 @@ fn break_line(
         if kind == BreakOpportunity::Allowed && p.text[start..end].chars().all(|c| c == '\u{ad}') {
             continue;
         }
-        let line = shape(p, shaping, start..end, fonts, size)?;
-        if line.width > width {
-            // A discretionary hyphen can be wider than the following complete
-            // word with its invisible soft hyphen, so widths are not monotonic.
-            if line.hyphenated {
-                continue;
+        candidates.push(end);
+        if kind == BreakOpportunity::Mandatory {
+            break;
+        }
+    }
+    let mut best = None;
+    if !candidates.is_empty() {
+        let estimate = estimated_fit(p, start, width, fonts, size);
+        let first = candidates
+            .partition_point(|&end| end <= estimate)
+            .clamp(1, candidates.len())
+            - 1;
+        // A discretionary hyphen can be wider than the following complete
+        // word with its invisible soft hyphen, so widths are not monotonic:
+        // an overflowing hyphenated candidate is skipped, any other ends the line.
+        let mut overflow = None;
+        let mut index = first;
+        loop {
+            let line = shape(p, shaping, start..candidates[index], fonts, size)?;
+            if line.width <= width {
+                best = Some((candidates[index], line));
+                break;
             }
+            if !line.hyphenated {
+                overflow = Some(candidates[index]);
+            }
+            if index == 0 {
+                break;
+            }
+            index -= 1;
+        }
+        if overflow.is_none() {
+            for &end in &candidates[first + 1..] {
+                let line = shape(p, shaping, start..end, fonts, size)?;
+                if line.width <= width {
+                    best = Some((end, line));
+                } else if !line.hyphenated {
+                    overflow = Some(end);
+                    break;
+                }
+            }
+        }
+        if let Some(end) = overflow {
             let after = best.as_ref().map_or(start, |(end, _)| *end);
             for &split in hyphens[hyphens.partition_point(|&n| n <= after)..]
                 .iter()
@@ -1293,11 +1413,6 @@ fn break_line(
                     best = Some((split, candidate));
                 }
             }
-            break;
-        }
-        best = Some((end, line));
-        if kind == BreakOpportunity::Mandatory {
-            break;
         }
     }
     if let Some(best) = best {
@@ -1460,21 +1575,18 @@ fn shape(
                     buffer.set_script(script);
                 }
                 buffer.guess_segment_properties();
-                let shaped = rustybuzz::shape(&face, &[], buffer);
+                let shaped = font.shape(&face, buffer);
                 for (info, pos) in shaped.glyph_infos().iter().zip(shaped.glyph_positions()) {
                     let cluster = span.start + info.cluster as usize;
                     if p.text.as_bytes().get(cluster) == Some(&b'\t') {
                         tabs.push((line.glyphs.len(), line.width, 0.0, style.tab_size));
                         continue;
                     }
-                    if let Some(bounds) = face
-                        .glyph_bounding_box(rustybuzz::ttf_parser::GlyphId(info.glyph_id as u16))
+                    if let Some((y_min, y_max)) = font.vertical_extents(&face, info.glyph_id as u16)
                     {
                         let offset = pos.y_offset as f32;
-                        line.ascent = line.ascent.max((f32::from(bounds.y_max) + offset) * factor);
-                        line.descent = line
-                            .descent
-                            .max(-(f32::from(bounds.y_min) + offset) * factor);
+                        line.ascent = line.ascent.max((f32::from(y_max) + offset) * factor);
+                        line.descent = line.descent.max(-(f32::from(y_min) + offset) * factor);
                     }
                     line.glyphs.push(Glyph {
                         id: info.glyph_id as u16,
@@ -1594,15 +1706,9 @@ pub fn rasterize_display_report(
     levels: u16,
     resource: impl FnMut(&str) -> Result<Vec<u8>>,
 ) -> Result<RenderedPage> {
-    rasterize_cached(
-        page,
-        fonts,
-        config,
-        text,
-        levels,
-        resource,
-        &mut Default::default(),
-    )
+    let mut masks = fonts.masks.lock().unwrap_or_else(|e| e.into_inner());
+    masks.retag(fonts.mask_tag(text));
+    rasterize_cached(page, fonts, config, text, levels, resource, &mut masks)
 }
 
 fn rasterize_cached(
@@ -1657,7 +1763,10 @@ fn rasterize_cached(
                 .copy_from_slice(&image.pixels[source..source + image.size.width as usize]);
         }
     }
-    image::quantize(&mut pixels, config.width, levels)?;
+    // A blank frame is already quantized; dithering it costs a full-frame pass.
+    if !page.images.is_empty() {
+        image::quantize(&mut pixels, config.width, levels)?;
+    }
     let mut context = ScaleContext::new();
     for line in &page.lines {
         for glyph in line.glyphs.iter().chain(&line.marker_glyphs) {
@@ -1709,8 +1818,9 @@ fn rasterize_cached(
             }
         }
     }
+    let level: [u8; 256] = std::array::from_fn(|v| crate::display::text_level(v as u8, levels));
     for pixel in &mut pixels {
-        *pixel = crate::display::text_level(*pixel, levels);
+        *pixel = level[*pixel as usize];
     }
     Ok(RenderedPage { pixels, warnings })
 }

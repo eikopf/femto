@@ -218,6 +218,7 @@ fn run() -> Result<(), String> {
         femto_picco_board::idle::Idle::new(0, reader.state.idle_sleep.minutes() * 60 * 1000);
     let mut heap_report = Instant::now();
     let mut console = console::Console::open();
+    let (mut turning_forward, mut preparing) = (true, true);
     loop {
         std::thread::sleep(Duration::from_millis(10));
         screen.poll_wifi();
@@ -239,6 +240,16 @@ fn run() -> Result<(), String> {
                 Command::Previous => Some(input::Event::Turn(Turn::Previous)),
                 Command::Select => Some(input::Event::Select),
                 Command::Back => Some(input::Event::Back),
+                Command::Tap { x, y } => Some(input::Event::Tap { x, y }),
+                Command::Frame => {
+                    console::dump_frame(&plane);
+                    None
+                }
+                Command::Reboot => unsafe { esp_idf_svc::sys::esp_restart() },
+                Command::Put { .. } | Command::List(_) | Command::Remove(_) => {
+                    console.files(&command);
+                    None
+                }
             }
         });
         let event = diagnostic_event.or_else(|| screen.event()).or_else(|| {
@@ -254,6 +265,7 @@ fn run() -> Result<(), String> {
                 screen.wifi_label()
             ));
             let previous_light = reader.state.frontlight;
+            let received = Instant::now();
             let effect = match event {
                 input::Event::Select => ui.select(&mut reader),
                 input::Event::Back => ui.back(&mut reader),
@@ -327,8 +339,12 @@ fn run() -> Result<(), String> {
                         ui.show_error(error);
                     }
                 }
+                let started = Instant::now();
+                let handled = started - received;
                 render(&mut reader, &ui, &mut plane)?;
+                let rendered = started.elapsed();
                 screen.present(&plane)?;
+                let presented = started.elapsed();
                 if !ui.is_open() {
                     // Monotonic access order until RTC/network time is available.
                     let access = reader
@@ -348,7 +364,36 @@ fn run() -> Result<(), String> {
                         ui.set_sleep_available(false);
                     }
                 }
-                log::info!("Page {}/{}", reader.page_index() + 1, reader.page_count());
+                log::info!(
+                    "Page {}/{}: input {} ms, render {} ms, display {} ms, save {} ms",
+                    reader.page_index() + 1,
+                    reader.page_count(),
+                    handled.as_millis(),
+                    rendered.as_millis(),
+                    (presented - rendered).as_millis(),
+                    (started.elapsed() - presented).as_millis()
+                );
+            }
+        }
+        if let Some(event) = event {
+            if let input::Event::Turn(turn) = event {
+                turning_forward = turn == Turn::Next;
+            }
+            preparing = true;
+        } else if preparing && !ui.is_open() {
+            // Prepare the likely next page between inputs, then the opposite one.
+            let levels = if cfg!(feature = "grayscale") { 4 } else { 2 };
+            let prepared = reader
+                .prepare_turn(turning_forward, levels)
+                .and_then(|ran| Ok(ran || reader.prepare_turn(!turning_forward, levels)?));
+            // Nothing changes until the next input once both pages are ready
+            // or preparation fails.
+            match prepared {
+                Ok(ran) => preparing = ran,
+                Err(error) => {
+                    log::warn!("Page preparation failed: {error}");
+                    preparing = false;
+                }
             }
         }
         if catalog

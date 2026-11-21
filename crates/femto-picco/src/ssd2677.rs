@@ -19,12 +19,24 @@ const INIT: &[(u8, &[u8])] = &[
     (0xe9, &[0x01]),
 ];
 
-fn pack(old: u8, new: u8) -> [u8; 2] {
-    let mut packed = 0_u16;
-    for bit in (0..8).rev() {
-        packed = (packed << 2) | u16::from((((old >> bit) & 1) << 1) | ((new >> bit) & 1));
+/// Spreads the bits of a byte to the even positions of a word.
+const SPREAD: [u16; 256] = {
+    let mut table = [0; 256];
+    let mut value = 0;
+    while value < 256 {
+        let mut bit = 0;
+        while bit < 8 {
+            table[value] |= ((value as u16 >> bit) & 1) << (2 * bit);
+            bit += 1;
+        }
+        value += 1;
     }
-    packed.to_be_bytes()
+    table
+};
+
+/// Interleaves two bitplanes into the controller's two-bit pixels.
+fn pack(old: u8, new: u8) -> [u8; 2] {
+    ((SPREAD[old as usize] << 1) | SPREAD[new as usize]).to_be_bytes()
 }
 
 impl<B: Bus> Display<B> {
@@ -33,6 +45,7 @@ impl<B: Bus> Display<B> {
         msb: &[u8],
         lsb: &[u8],
     ) -> Result<(), Error<B::Error>> {
+        self.idle()?;
         self.command(0x04, &[])?;
         self.bus.delay_ms(10);
         self.idle()?;
@@ -73,6 +86,7 @@ impl<B: Bus> Display<B> {
         plane: &[u8],
         mode: Refresh,
     ) -> Result<(), Error<B::Error>> {
+        self.idle()?;
         let packed = self
             .previous
             .iter()
@@ -93,9 +107,9 @@ impl<B: Bus> Display<B> {
         self.command(0x12, &[0])?;
         self.bus.delay_ms(10);
         self.idle()?;
+        // Power-off completes in the background; every sequence starts idle.
         self.command(0x02, &[0])?;
         self.bus.delay_ms(10);
-        self.idle()?;
         self.previous.copy_from_slice(plane);
         self.ready = true;
         Ok(())

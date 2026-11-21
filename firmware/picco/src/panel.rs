@@ -110,7 +110,7 @@ fn probe() -> Result<Panel, String> {
     if identify(id, revision).is_none() {
         read_id(0x70, &mut revision)?;
     }
-    log::info!("Panel user ID: {id:02x?}, revision: {revision:02x?}");
+    log::debug!("Panel user ID: {id:02x?}, revision: {revision:02x?}");
     identify(id, revision).ok_or_else(|| "Unknown Picco panel ID".into())
 }
 
@@ -162,6 +162,7 @@ impl Bus for PanelBus {
             }
             delay(1);
         }
+        log::debug!("Panel busy {} ms", start.elapsed().as_millis());
         Ok(())
     }
 
@@ -170,6 +171,7 @@ impl Bus for PanelBus {
         command: u8,
         mut data: impl Iterator<Item = u8>,
     ) -> Result<(), String> {
+        let start = Instant::now();
         self.cs.set_low().map_err(|e| e.to_string())?;
         let result = (|| {
             self.dc.set_low()?;
@@ -191,6 +193,7 @@ impl Bus for PanelBus {
             Ok::<_, sys::EspError>(())
         })();
         let release = self.cs.set_high();
+        log::debug!("Panel stream {} ms", start.elapsed().as_millis());
         result.and(release).map_err(|e| e.to_string())
     }
 }

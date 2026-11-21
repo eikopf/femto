@@ -2,11 +2,27 @@
 
 ## Picco USB console and memory
 
-The USB Serial/JTAG console accepts `femto status`, `femto next`, `femto prev`, `femto select`, and `femto back`, each terminated by a newline. Input commands use the same reader/menu event path as physical controls. They are available to a physically connected host without authentication. There is no network command listener, file access command, or credential command. Only one host process should own the console at a time.
+The USB Serial/JTAG console accepts newline-terminated commands from a physically connected host without authentication. There is no network command listener. Only one host process should own the console at a time.
 
-`python scripts/picco-console.py --port /dev/serial/by-id/<Picco> next` sends a page-turn command followed by a status query. The JSON response reports the zero-based page, page count, menu state, and memory counters in bytes. `--expect-page N` makes an unexpected page fail the command. The tool does not change modem control lines or reset the device. A status reply proves software processing; it does not prove that pixels appeared correctly on the panel. Menu navigation can change settings through the ordinary UI.
+| Command | Effect |
+| --- | --- |
+| `femto status` | Reports page, page count, menu state and memory counters |
+| `femto next`, `prev`, `select`, `back` | Injects the event on the same path as physical controls |
+| `femto tap X Y` | Injects a tap at reader-view coordinates |
+| `femto frame` | Dumps the last presented framebuffer as hexadecimal lines |
+| `femto put LEN CRC32 PATH` | Receives a file below `/sdcard/femto` |
+| `femto ls [PATH]`, `femto rm PATH` | Lists a directory (at most 256 entries) or removes a file below `/sdcard/femto` |
+| `femto reboot` | Restarts the application |
 
-The USB driver uses 256-byte RX and TX buffers. The parser retains at most 24 bytes and discards overlong input through the next line ending. It accepts only exact command strings. Each reader poll consumes at most 32 bytes and returns at most one command. Host output lines are bounded to 4 KiB and requests have a timeout. ESP-IDF 5.5.2 nonblocking VFS reads require the installed driver's RX ring; the default polling console does not provide it.
+File commands accept only relative paths without empty, `.` or `..` components, control characters or backslashes, so they cannot leave `/sdcard/femto`. Anyone with USB access can therefore read the directory listing and replace books, fonts and configuration there, which is the same access as removing the card. Uploads are limited to 256 MiB, arrive in 2,048-byte chunks that the device acknowledges individually because the driver drops bytes when its receive ring overflows, and are published by rename only after the CRC-32 matches. A reader poll blocks while a file command runs.
+
+`python scripts/picco-console.py next` sends a page-turn command followed by a status query; `put SOURCE DESTINATION`, `ls`, `rm`, `tap`, `reboot` and `frame OUTPUT.png` wrap the other commands. The port is found automatically when exactly one Picco is connected. `--expect-page N` makes an unexpected page fail the command. The tool does not change modem control lines or reset the device. A status reply or framebuffer capture proves software processing; it does not prove that pixels appeared correctly on the panel. Menu navigation can change settings through the ordinary UI.
+
+`scripts/picco-flash [IMAGE]` writes an application image to the app slot at `0xE0000` and restarts the device with a watchdog reset; it writes nothing outside that slot.
+
+The parser retains at most 192 bytes per line and discards overlong input through the next line ending. Each reader poll consumes at most 32 bytes and returns at most one command. Host requests have a timeout. ESP-IDF 5.5.2 nonblocking VFS reads require the installed driver's RX ring; the default polling console does not provide it.
+
+Each redraw logs input handling, rendering, panel update and state-save times in milliseconds.
 
 Startup and ten-second runtime reports include free bytes, largest free block, and minimum free bytes for internal RAM and PSRAM separately. The stack low-water mark reports minimum unused bytes for the main reader task. Its allocation is 64 KiB, and ESP-IDF's end-of-stack watchpoint is enabled. Other tasks have separate stacks; these reports do not measure them. The first physical boot with the previous 16 KiB allocation overflowed during layout and reported an apparent allocation failure despite available PSRAM.
 

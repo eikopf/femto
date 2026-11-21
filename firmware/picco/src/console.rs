@@ -1,5 +1,14 @@
 use esp_idf_svc::sys;
-use femto_picco_board::console::{Command, Parser};
+use femto_picco_board::console::{CHUNK_BYTES, Command, Parser, crc32};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
+
+/// File commands are confined to the device data directory.
+const ROOT: &str = "/sdcard/femto";
+const CHUNK_TIMEOUT_MS: u32 = 5000;
 
 pub struct Console {
     parser: Parser,
@@ -14,7 +23,8 @@ impl Console {
             } else {
                 let mut config = sys::usb_serial_jtag_driver_config_t {
                     tx_buffer_size: 256,
-                    rx_buffer_size: 256,
+                    // Holds one upload chunk between acknowledgements.
+                    rx_buffer_size: 2 * CHUNK_BYTES as u32,
                 };
                 sys::usb_serial_jtag_driver_install(&mut config) == sys::ESP_OK
             }
@@ -54,4 +64,105 @@ impl Console {
         }
         None
     }
+
+    /// Runs a file command to completion and reports the outcome on the console.
+    pub fn files(&mut self, command: &Command) {
+        let result = match command {
+            Command::Put { len, crc, path } => put(*len, *crc, &target(path)),
+            Command::List(path) => list(&target(path)),
+            Command::Remove(path) => fs::remove_file(target(path)).map_err(|e| e.to_string()),
+            _ => return,
+        };
+        match result {
+            Ok(()) => log::info!("USB file: done"),
+            Err(error) => log::warn!("USB file: error {error}"),
+        }
+    }
+}
+
+fn target(path: &str) -> PathBuf {
+    Path::new(ROOT).join(path)
+}
+
+fn list(directory: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(directory)
+        .map_err(|e| e.to_string())?
+        .take(256)
+    {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let metadata = entry.metadata().map_err(|e| e.to_string())?;
+        log::info!(
+            "USB ls: {} {} {}",
+            if metadata.is_dir() { 'd' } else { 'f' },
+            metadata.len(),
+            entry.file_name().to_string_lossy()
+        );
+    }
+    Ok(())
+}
+
+/// Stop-and-wait transfer: the driver drops bytes when its ring overflows,
+/// so the host sends one chunk per acknowledgement.
+fn put(len: u32, crc: u32, path: &Path) -> Result<(), String> {
+    let mut partial = path.as_os_str().to_owned();
+    partial.push(".part");
+    let partial = PathBuf::from(partial);
+    let received = (|| {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut file = fs::File::create(&partial).map_err(|e| e.to_string())?;
+        let mut chunk = [0u8; CHUNK_BYTES];
+        let (mut total, mut sum) = (0u32, 0u32);
+        log::info!("USB put: ack 0");
+        while total < len {
+            let wanted = ((len - total) as usize).min(CHUNK_BYTES);
+            let mut filled = 0;
+            let started = std::time::Instant::now();
+            while filled < wanted {
+                if started.elapsed().as_millis() > CHUNK_TIMEOUT_MS.into() {
+                    return Err(format!("timeout after {} bytes", total as usize + filled));
+                }
+                filled += unsafe {
+                    sys::usb_serial_jtag_read_bytes(
+                        chunk[filled..].as_mut_ptr().cast(),
+                        (wanted - filled) as u32,
+                        10,
+                    )
+                } as usize;
+            }
+            file.write_all(&chunk[..wanted])
+                .map_err(|e| e.to_string())?;
+            sum = crc32(sum, &chunk[..wanted]);
+            total += wanted as u32;
+            log::info!("USB put: ack {total}");
+        }
+        if sum != crc {
+            return Err(format!("checksum {sum:08x} does not match"));
+        }
+        file.sync_all().map_err(|e| e.to_string())
+    })();
+    let published = received.and_then(|()| {
+        // FAT rename does not replace an existing file.
+        let _ = fs::remove_file(path);
+        fs::rename(&partial, path).map_err(|e| e.to_string())
+    });
+    if published.is_err() {
+        let _ = fs::remove_file(&partial);
+    }
+    published
+}
+
+/// Writes the framebuffer as hexadecimal lines for host-side inspection.
+pub fn dump_frame(plane: &[u8]) {
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "USB frame: begin {}", plane.len());
+    for row in plane.chunks(64) {
+        let mut line = String::with_capacity(2 * row.len());
+        for byte in row {
+            line.push_str(&format!("{byte:02x}"));
+        }
+        let _ = writeln!(out, "USB frame: {line}");
+    }
+    let _ = writeln!(out, "USB frame: end");
 }

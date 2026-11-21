@@ -40,9 +40,23 @@ impl Orientation {
             Self::Counterclockwise => (y, HEIGHT - 1 - x),
         })
     }
-    fn native_index(self, x: usize, y: usize) -> usize {
-        let (px, py) = self.to_portrait(x, y).expect("bounded view coordinates");
-        (HEIGHT - 1 - px) * WIDTH + py
+    /// Calls `write(native_bit_index, pixel)` for every view pixel. Pixels are
+    /// read sequentially because the frame is far larger than the data cache;
+    /// the native index is affine in the view coordinates.
+    fn scan(self, pixels: &[u8], mut write: impl FnMut(usize, u8)) {
+        let native = |x: usize, y: usize| {
+            let (px, py) = self.to_portrait(x, y).expect("bounded view coordinates");
+            ((HEIGHT - 1 - px) * WIDTH + py) as isize
+        };
+        let (width, _) = self.dimensions();
+        let (column_step, row_step) = (native(1, 0) - native(0, 0), native(0, 1) - native(0, 0));
+        for (y, row) in pixels.chunks_exact(width).enumerate() {
+            let mut index = native(0, 0) + y as isize * row_step;
+            for &pixel in row {
+                write(index as usize, pixel);
+                index += column_step;
+            }
+        }
     }
 
     /// Packs already quantized pixels without resampling or an intermediate frame.
@@ -58,16 +72,10 @@ impl Orientation {
         if pixels.iter().any(|p| !matches!(p, 0 | 255)) {
             return Err(Error::FrameEncoding);
         }
-        let (width, height) = self.dimensions();
-        plane.fill(255);
-        for y in 0..height {
-            for x in 0..width {
-                if pixels[y * width + x] == 0 {
-                    let native = self.native_index(x, y);
-                    plane[native / 8] &= !(0x80 >> (native % 8));
-                }
-            }
-        }
+        plane.fill(0);
+        self.scan(pixels, |native, pixel| {
+            plane[native / 8] |= (pixel & 0x80) >> (native % 8);
+        });
         Ok(())
     }
     /// Packs four-level pixels into the panel's absolute high and low planes.
@@ -83,22 +91,13 @@ impl Orientation {
         if pixels.iter().any(|p| !matches!(p, 0 | 85 | 170 | 255)) {
             return Err(Error::FrameEncoding);
         }
-        let (width, height) = self.dimensions();
         msb.fill(0);
         lsb.fill(0);
-        for y in 0..height {
-            for x in 0..width {
-                let value = pixels[y * width + x] / 85;
-                let native = self.native_index(x, y);
-                let mask = 0x80 >> (native % 8);
-                if value & 2 != 0 {
-                    msb[native / 8] |= mask;
-                }
-                if value & 1 != 0 {
-                    lsb[native / 8] |= mask;
-                }
-            }
-        }
+        // 0, 85, 170 and 255 carry their two-bit level in bits 7 and 6.
+        self.scan(pixels, |native, pixel| {
+            msb[native / 8] |= (pixel & 0x80) >> (native % 8);
+            lsb[native / 8] |= ((pixel << 1) & 0x80) >> (native % 8);
+        });
         Ok(())
     }
 }

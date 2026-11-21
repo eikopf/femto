@@ -286,16 +286,14 @@ fn main() -> Result<()> {
             levels,
         } => {
             let mut doc = Document::open(book)?;
-            let fonts = Fonts {
-                regular: Font::load(font)?,
-                bold: bold_font.map(Font::load).transpose()?,
-                italic: italic_font.map(Font::load).transpose()?,
-                bold_italic: bold_italic_font.map(Font::load).transpose()?,
-                fallback: fallback_font
-                    .into_iter()
-                    .map(Font::load)
-                    .collect::<femto_reader::Result<Vec<_>>>()?,
-            };
+            let mut fonts = Fonts::new(Font::load(font)?);
+            fonts.bold = bold_font.map(Font::load).transpose()?;
+            fonts.italic = italic_font.map(Font::load).transpose()?;
+            fonts.bold_italic = bold_italic_font.map(Font::load).transpose()?;
+            fonts.fallback = fallback_font
+                .into_iter()
+                .map(Font::load)
+                .collect::<femto_reader::Result<Vec<_>>>()?;
             let config = LayoutConfig {
                 font_size,
                 width,

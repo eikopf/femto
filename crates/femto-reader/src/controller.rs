@@ -43,6 +43,19 @@ pub struct Reader {
     position: Locator,
     history: Vec<Locator>,
     links: Vec<DocumentLink>,
+    /// Rendered reading pages, so prepared and recently shown pages need no rasterization.
+    frames: Vec<(FrameKey, Vec<u8>)>,
+}
+
+/// Everything a rendered reading page depends on besides the fonts, which are
+/// fixed for a reader. A pagination belongs to one chapter of one document.
+#[derive(Clone, Copy, PartialEq)]
+struct FrameKey {
+    pages: u64,
+    index: usize,
+    raster: crate::display::TextRaster,
+    levels: u16,
+    highlights: u64,
 }
 
 pub struct LinkPreview {
@@ -367,6 +380,7 @@ impl ReaderStartup {
             position,
             history: Vec::new(),
             links,
+            frames: Vec::new(),
         })
     }
 }
@@ -437,6 +451,7 @@ impl Reader {
             position,
             history: Vec::new(),
             links,
+            frames: Vec::new(),
         })
     }
 
@@ -1195,7 +1210,90 @@ impl Reader {
         self.render_with_selection(Some(range), levels)
     }
 
+    fn frame_key(&self, levels: u16) -> FrameKey {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        if let Some(book) = self.state.books.get(&self.document.metadata.id) {
+            // Highlights are drawn only while their recorded source still verifies.
+            for clipping in book.clippings.iter().filter(|c| c.highlighted) {
+                for end in [clipping.range.start, clipping.range.end] {
+                    (end.chapter, end.block, end.byte).hash(&mut hasher);
+                }
+                (clipping.version, &clipping.book_id, &clipping.text).hash(&mut hasher);
+            }
+        }
+        FrameKey {
+            pages: self.pagination.id(),
+            index: self.pagination.selected(),
+            raster: self.state.text_raster,
+            levels,
+            highlights: hasher.finish(),
+        }
+    }
+
+    /// Lays out and renders the page that a turn within the chapter would
+    /// show, one bounded step per call. Returns whether a step ran; visible
+    /// state is unchanged.
+    pub fn prepare_turn(&mut self, forward: bool, levels: u16) -> Result<bool> {
+        let current = self.pagination.selected();
+        let index = if forward {
+            current + 1
+        } else {
+            current.wrapping_sub(1)
+        };
+        if index >= self.page_count() {
+            return Ok(false);
+        }
+        if self.pagination.prepare(index, &self.fonts)? {
+            return Ok(true);
+        }
+        let key = FrameKey {
+            index,
+            ..self.frame_key(levels)
+        };
+        if self.frames.iter().any(|(known, _)| *known == key) {
+            return Ok(false);
+        }
+        // Both pages are laid out, so selecting swaps them without layout.
+        self.pagination.select(index, &self.fonts)?;
+        let rendered = self.render(levels);
+        self.pagination.select(current, &self.fonts)?;
+        rendered.map(|_| true)
+    }
+
     fn render_with_selection(
+        &mut self,
+        pending: Option<&std::ops::Range<Locator>>,
+        levels: u16,
+    ) -> Result<Vec<u8>> {
+        const FRAMES: usize = 3;
+        let key = self.frame_key(levels);
+        if pending.is_none()
+            && let Some((_, pixels)) = self.frames.iter().find(|(known, _)| *known == key)
+        {
+            return Ok(pixels.clone());
+        }
+        let pixels = self.rasterize_with_selection(pending, levels)?;
+        if pending.is_none() {
+            // Frames of other paginations or settings can never match again.
+            self.frames.retain(|(known, _)| {
+                FrameKey {
+                    index: key.index,
+                    ..*known
+                } == key
+            });
+            if self.frames.len() == FRAMES {
+                let farthest = (0..FRAMES)
+                    .max_by_key(|&i| self.frames[i].0.index.abs_diff(self.page_index))
+                    .expect("nonempty frames");
+                self.frames.swap_remove(farthest);
+            }
+            self.frames.push((key, pixels.clone()));
+        }
+        Ok(pixels)
+    }
+
+    fn rasterize_with_selection(
         &mut self,
         pending: Option<&std::ops::Range<Locator>>,
         levels: u16,

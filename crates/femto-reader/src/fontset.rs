@@ -37,17 +37,16 @@ pub fn load(
     let fallback = (1..=8)
         .filter_map(|index| face(&format!("fallback{index}.ttf")))
         .collect();
+    let mut fonts = Fonts::new(match regular {
+        Some(font) => font,
+        None => default()?,
+    });
+    fonts.bold = bold;
+    fonts.italic = italic;
+    fonts.bold_italic = bold_italic;
+    fonts.fallback = fallback;
     Ok(Loaded {
-        fonts: Fonts {
-            regular: match regular {
-                Some(font) => font,
-                None => default()?,
-            },
-            bold,
-            italic,
-            bold_italic,
-            fallback,
-        },
+        fonts,
         warnings,
         bytes: limit - remaining,
     })

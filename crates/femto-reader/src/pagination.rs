@@ -26,9 +26,73 @@ pub struct PageCache {
     begin: Option<Locator>,
     selected: usize,
     page: Page,
+    /// Laid-out pages other than the selected one, kept so that turning to a
+    /// prepared or recently shown page needs no layout.
+    spares: Vec<(usize, Page)>,
+    id: u64,
+}
+
+/// Distinguishes caches so results derived from one are never used with another.
+fn next_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) as u64
 }
 
 impl PageCache {
+    const SPARES: usize = 2;
+
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+    pub(crate) fn selected(&self) -> usize {
+        self.selected
+    }
+
+    fn layout(&self, index: usize, fonts: &Fonts) -> Result<Page> {
+        let expected = *self
+            .pages
+            .get(index)
+            .ok_or(Error::Layout("page index out of range"))?;
+        let mut replacement = None;
+        paginate_step_until(
+            &self.chapter,
+            fonts,
+            self.config,
+            expected.start,
+            self.end,
+            self.begin,
+            |page| {
+                replacement = Some(page);
+                Ok(false)
+            },
+        )?;
+        let page = replacement.ok_or(Error::Layout("missing indexed page"))?;
+        if page.start != expected.start || page.end != expected.end {
+            return Err(Error::Layout("page index no longer matches layout"));
+        }
+        Ok(page)
+    }
+
+    fn keep_spare(&mut self, index: usize, page: Page) {
+        if self.spares.len() == Self::SPARES {
+            let farthest = (0..self.spares.len())
+                .max_by_key(|&i| self.spares[i].0.abs_diff(self.selected))
+                .expect("nonempty spares");
+            self.spares.swap_remove(farthest);
+        }
+        self.spares.push((index, page));
+    }
+
+    /// Lays out a page without selecting it. Returns whether layout ran.
+    pub fn prepare(&mut self, index: usize, fonts: &Fonts) -> Result<bool> {
+        if index == self.selected || self.spares.iter().any(|(spare, _)| *spare == index) {
+            return Ok(false);
+        }
+        let page = self.layout(index, fonts)?;
+        self.keep_spare(index, page);
+        Ok(true)
+    }
+
     pub fn new(
         chapter: Chapter,
         fonts: &Fonts,
@@ -68,6 +132,8 @@ impl PageCache {
             warnings,
             selected,
             page: retained.ok_or(Error::Layout("no chapter page"))?,
+            spares: Vec::new(),
+            id: next_id(),
         })
     }
 
@@ -92,29 +158,13 @@ impl PageCache {
         if index == self.selected {
             return Ok(());
         }
-        let expected = *self
-            .pages
-            .get(index)
-            .ok_or(Error::Layout("page index out of range"))?;
-        let mut replacement = None;
-        paginate_step_until(
-            &self.chapter,
-            fonts,
-            self.config,
-            expected.start,
-            self.end,
-            self.begin,
-            |page| {
-                replacement = Some(page);
-                Ok(false)
-            },
-        )?;
-        let page = replacement.ok_or(Error::Layout("missing indexed page"))?;
-        if page.start != expected.start || page.end != expected.end {
-            return Err(Error::Layout("page index no longer matches layout"));
-        }
-        self.page = page;
+        let page = match self.spares.iter().position(|(spare, _)| *spare == index) {
+            Some(spare) => self.spares.swap_remove(spare).1,
+            None => self.layout(index, fonts)?,
+        };
+        let previous = (self.selected, std::mem::replace(&mut self.page, page));
         self.selected = index;
+        self.keep_spare(previous.0, previous.1);
         Ok(())
     }
 }
@@ -251,6 +301,8 @@ impl PageIndexer {
             warnings,
             selected: self.selected,
             page: self.retained.ok_or(Error::Layout("no chapter page"))?,
+            spares: Vec::new(),
+            id: next_id(),
         })
     }
 }

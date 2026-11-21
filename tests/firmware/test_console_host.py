@@ -16,8 +16,8 @@ class ConsoleHostTests(unittest.TestCase):
         try:
             with subprocess.Popen(
                 [sys.executable, str(ROOT / "scripts/picco-console.py"),
-                 "--port", os.ttyname(slave), "next", "--expect-page", str(expected),
-                 "--timeout", "2"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                 "--port", os.ttyname(slave), "--expect-page", str(expected),
+                 "--timeout", "2", "next"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True,
             ) as process:
                 self.assertTrue(select.select([master], [], [], 2)[0])

@@ -198,3 +198,53 @@ fn cooperative_index_yields_one_page_and_matches_the_complete_index() {
         assert_page(cache.page(), page);
     }
 }
+
+#[test]
+fn prepared_pages_match_fresh_layout_and_rendering() {
+    let fonts = fonts();
+    let config = LayoutConfig::default();
+    let text = "Prepared pages must equal freshly selected pages. ".repeat(400);
+    let chapter = || {
+        Document::from_text("prepared.txt", &text)
+            .unwrap()
+            .chapter(0)
+            .unwrap()
+    };
+    let mut prepared = PageCache::new(chapter(), &fonts, config, Locator::default()).unwrap();
+    let mut fresh = PageCache::new(chapter(), &fonts, config, Locator::default()).unwrap();
+    assert!(prepared.bounds().len() > 3);
+    assert!(prepared.prepare(1, &fonts).unwrap());
+    assert!(!prepared.prepare(1, &fonts).unwrap());
+    assert!(!prepared.prepare(0, &fonts).unwrap());
+    for index in [1, 0, 2, 3, 1] {
+        prepared.select(index, &fonts).unwrap();
+        fresh.select(index, &fonts).unwrap();
+        assert_page(prepared.page(), fresh.page());
+    }
+    assert!(prepared.prepare(99_999, &fonts).is_err());
+
+    let reader = || {
+        Reader::new(
+            Document::from_text("prepared.txt", &text).unwrap(),
+            self::fonts(),
+            ReaderState::default(),
+        )
+        .unwrap()
+    };
+    let (mut prepared, mut fresh) = (reader(), reader());
+    assert!(!prepared.prepare_turn(false, 2).unwrap());
+    // Layout, then rendering, then nothing left to do.
+    assert!(prepared.prepare_turn(true, 2).unwrap());
+    assert!(prepared.prepare_turn(true, 2).unwrap());
+    assert!(!prepared.prepare_turn(true, 2).unwrap());
+    assert_eq!(prepared.page_index(), 0);
+    assert_eq!(prepared.render(2).unwrap(), fresh.render(2).unwrap());
+    for action in [Action::Next, Action::Next, Action::Previous] {
+        prepared.dispatch(action).unwrap();
+        fresh.dispatch(action).unwrap();
+        assert_eq!(prepared.page_index(), fresh.page_index());
+        assert_eq!(prepared.render(2).unwrap(), fresh.render(2).unwrap());
+        prepared.prepare_turn(true, 2).unwrap();
+        prepared.prepare_turn(false, 2).unwrap();
+    }
+}

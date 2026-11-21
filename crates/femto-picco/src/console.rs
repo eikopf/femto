@@ -1,19 +1,99 @@
 //! Bounded commands for a physically connected USB console.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use alloc::string::String;
+
+/// Largest accepted upload; the SD card is the only destination.
+pub const MAX_FILE_BYTES: u32 = 256 * 1024 * 1024;
+/// Upload payload bytes between acknowledgements.
+pub const CHUNK_BYTES: usize = 2048;
+const LINE_BYTES: usize = 192;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Status,
     Next,
     Previous,
     Select,
     Back,
+    Tap {
+        x: u16,
+        y: u16,
+    },
+    /// Dump the last presented framebuffer.
+    Frame,
+    /// Receive a file below the device data directory.
+    Put {
+        len: u32,
+        crc: u32,
+        path: String,
+    },
+    List(String),
+    Remove(String),
+    Reboot,
 }
 
-#[derive(Default)]
+/// Accepts relative paths that cannot leave the directory they are joined to.
+fn path(text: &str) -> Option<String> {
+    let valid = !text.is_empty()
+        && text.split('/').all(|part| {
+            !matches!(part, "" | "." | "..") && !part.chars().any(|c| c.is_control() || c == '\\')
+        });
+    valid.then(|| text.into())
+}
+
+fn parse(line: &str) -> Option<Command> {
+    let rest = line.strip_prefix("femto ")?;
+    let (name, arguments) = rest.split_once(' ').unwrap_or((rest, ""));
+    Some(match (name, arguments) {
+        ("status", "") => Command::Status,
+        ("next", "") => Command::Next,
+        ("prev", "") => Command::Previous,
+        ("select", "") => Command::Select,
+        ("back", "") => Command::Back,
+        ("frame", "") => Command::Frame,
+        ("reboot", "") => Command::Reboot,
+        ("tap", point) => {
+            let (x, y) = point.split_once(' ')?;
+            Command::Tap {
+                x: x.parse().ok()?,
+                y: y.parse().ok()?,
+            }
+        }
+        ("put", arguments) => {
+            let mut fields = arguments.splitn(3, ' ');
+            let len = fields
+                .next()?
+                .parse()
+                .ok()
+                .filter(|&n| n <= MAX_FILE_BYTES)?;
+            let crc = u32::from_str_radix(fields.next()?, 16).ok()?;
+            Command::Put {
+                len,
+                crc,
+                path: path(fields.next()?)?,
+            }
+        }
+        ("ls", "") => Command::List(String::new()),
+        ("ls", directory) => Command::List(path(directory)?),
+        ("rm", file) => Command::Remove(path(file)?),
+        _ => return None,
+    })
+}
+
 pub struct Parser {
-    bytes: [u8; 24],
+    bytes: [u8; LINE_BYTES],
     len: usize,
     overflow: bool,
+}
+
+impl Default for Parser {
+    fn default() -> Self {
+        Self {
+            bytes: [0; LINE_BYTES],
+            len: 0,
+            overflow: false,
+        }
+    }
 }
 
 impl Parser {
@@ -22,14 +102,9 @@ impl Parser {
             let command = if self.overflow {
                 None
             } else {
-                match &self.bytes[..self.len] {
-                    b"femto status" => Some(Command::Status),
-                    b"femto next" => Some(Command::Next),
-                    b"femto prev" => Some(Command::Previous),
-                    b"femto select" => Some(Command::Select),
-                    b"femto back" => Some(Command::Back),
-                    _ => None,
-                }
+                core::str::from_utf8(&self.bytes[..self.len])
+                    .ok()
+                    .and_then(parse)
             };
             self.len = 0;
             self.overflow = false;
@@ -45,10 +120,27 @@ impl Parser {
     }
 }
 
+/// IEEE CRC-32 over upload payloads; `state` starts at zero.
+pub fn crc32(state: u32, data: &[u8]) -> u32 {
+    let mut crc = !state;
+    for &byte in data {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xEDB8_8320 & (crc & 1).wrapping_neg());
+        }
+    }
+    !crc
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloc::vec::Vec;
+
+    fn commands(input: &[u8]) -> Vec<Command> {
+        let mut parser = Parser::default();
+        input.iter().filter_map(|b| parser.push(*b)).collect()
+    }
 
     #[test]
     fn fragmented_commands_and_crlf_execute_once() {
@@ -68,17 +160,56 @@ mod tests {
 
     #[test]
     fn overflow_and_untrusted_suffixes_are_discarded_until_newline() {
-        let mut parser = Parser::default();
-        for byte in [b'x'; 1000]
-            .iter()
-            .chain(b"femto next\nnext\nfemto back\0\n")
-        {
-            assert_eq!(parser.push(*byte), None);
+        let mut input = [b'x'; 1000].to_vec();
+        input.extend(b"femto next\nnext\nfemto back\0\nfemto next now\n");
+        input.extend(b"femto select\nfemto back\n");
+        assert_eq!(commands(&input), [Command::Select, Command::Back]);
+    }
+
+    #[test]
+    fn arguments_are_bounded_and_paths_stay_relative() {
+        assert_eq!(
+            commands("femto tap 12 479\nfemto put 5 0000ABCD b\u{fc}cher/a b.epub\n".as_bytes()),
+            [
+                Command::Tap { x: 12, y: 479 },
+                Command::Put {
+                    len: 5,
+                    crc: 0xabcd,
+                    path: "b\u{fc}cher/a b.epub".into()
+                }
+            ]
+        );
+        assert_eq!(
+            commands(b"femto ls\nfemto ls fonts\nfemto rm wifi.json\n"),
+            [
+                Command::List(String::new()),
+                Command::List("fonts".into()),
+                Command::Remove("wifi.json".into())
+            ]
+        );
+        for rejected in [
+            "femto put 5 0 /etc/x",
+            "femto put 5 0 a/../x",
+            "femto put 5 0 a//x",
+            "femto put 5 0 a\\x",
+            "femto put 268435457 0 x",
+            "femto put 5 xyz x",
+            "femto put 5 0",
+            "femto rm",
+            "femto rm ..",
+            "femto ls ./x",
+            "femto tap 70000 1",
+            "femto tap 1",
+        ] {
+            let mut line = rejected.as_bytes().to_vec();
+            line.push(b'\n');
+            assert_eq!(commands(&line), [], "{rejected}");
         }
-        let commands: Vec<_> = b"femto select\nfemto back\n"
-            .iter()
-            .filter_map(|b| parser.push(*b))
-            .collect();
-        assert_eq!(commands, [Command::Select, Command::Back]);
+    }
+
+    #[test]
+    fn crc_matches_reference_and_chains() {
+        assert_eq!(crc32(0, b"123456789"), 0xCBF4_3926);
+        assert_eq!(crc32(crc32(0, b"1234"), b"56789"), 0xCBF4_3926);
     }
 }

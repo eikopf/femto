@@ -19,7 +19,9 @@ pub struct Manager {
     rotation: Option<crate::tailnet_rotation::Job>,
     rotation_followup: Option<femto_microlink::device_enrollment::Followup>,
     followup: Option<femto_microlink::device_enrollment::Followup>,
-    path: PathBuf,
+    /// Reads the current configuration each time a session starts, so
+    /// edited settings apply to the next connection.
+    source: Box<dyn Fn() -> Result<Config, String>>,
     stopping: bool,
     rows: Vec<String>,
 }
@@ -30,13 +32,17 @@ impl Default for Manager {
 }
 impl Manager {
     pub fn new(path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        Self::with_source(move || load(&path))
+    }
+    pub fn with_source(source: impl Fn() -> Result<Config, String> + 'static) -> Self {
         Self {
             local_address: Default::default(),
             runtime: None,
             rotation: None,
             rotation_followup: None,
             followup: None,
-            path: path.into(),
+            source: Box::new(source),
             stopping: false,
             rows: vec!["Disconnected".into()],
         }
@@ -69,7 +75,7 @@ impl Manager {
         if self.runtime.is_some() || self.rotation.is_some() {
             return Err("Disconnect the current tailnet session first".into());
         }
-        let config = load(&self.path)?;
+        let config = (self.source)()?;
         crate::clock::require_ready().map_err(|_| "Tailnet needs Wi-Fi and synchronized time")?;
         let store = if provision {
             crate::identity::provision(DeviceIdentity::generate().map_err(|e| e.to_string())?)?
@@ -92,7 +98,7 @@ impl Manager {
             return Err("Disconnect the current tailnet session first".into());
         }
         self.rotation = Some(crate::tailnet_rotation::Job::start(
-            load(&self.path)?,
+            (self.source)()?,
             self.rotation_followup.clone(),
         )?);
         self.followup = None;

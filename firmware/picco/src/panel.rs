@@ -379,7 +379,7 @@ impl Screen {
             Refresh::Fast
         };
         let planes = Self::planes(plane)?;
-        let mut show = |display: &mut Display<PanelBus>, mode| match planes {
+        let show = |display: &mut Display<PanelBus>, mode| match planes {
             Some((msb, lsb)) => display.antialiased_base(msb, lsb, mode),
             None => display.refresh(plane, mode),
         };
@@ -548,7 +548,9 @@ pub fn open() -> Result<Screen, String> {
     };
     let wifi = Some(crate::wifi::Station::open(wifi_modem));
     Ok(Screen {
-        tailnet: Default::default(),
+        tailnet: crate::tailnet_menu::Manager::with_source(|| {
+            crate::services::Tailnet::load().config()
+        }),
         catalog: femto_catalog::worker::Worker::default(),
         wifi,
         #[cfg(feature = "bluetooth")]

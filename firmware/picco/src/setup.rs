@@ -1,11 +1,14 @@
 //! Network settings edited on the device through the reader's settings panel.
 use crate::panel::Screen;
+use crate::services::{Form, Kind};
 use femto_reader::ui::{DeviceEvent, DeviceRow, DeviceRowKind, ReaderUi};
 
 enum Page {
     Root,
     Wifi,
     Network(String),
+    /// One service's settings, loaded when the page opens.
+    Service(Box<dyn Form>),
 }
 
 /// What activating or filling a row does on the current page.
@@ -18,12 +21,18 @@ enum Row {
     Connect,
     Password,
     Forget,
+    OpenService(usize),
+    /// A field of the open service.
+    Field(usize),
+    Restart,
 }
 
 pub struct Setup {
     page: Page,
     rows: Vec<Row>,
     open: bool,
+    /// Service settings changed; services read them at startup.
+    restart_needed: bool,
 }
 
 impl Default for Setup {
@@ -32,6 +41,7 @@ impl Default for Setup {
             page: Page::Root,
             rows: Vec::new(),
             open: false,
+            restart_needed: false,
         }
     }
 }
@@ -74,7 +84,7 @@ impl Setup {
                     self.open = false;
                     ui.close_device();
                 }
-                Page::Wifi => self.page = Page::Root,
+                Page::Wifi | Page::Service(_) => self.page = Page::Root,
                 Page::Network(_) => self.page = Page::Wifi,
             },
             DeviceEvent::Activate(index) => match self.rows.get(index).unwrap_or(&Row::None) {
@@ -101,17 +111,37 @@ impl Setup {
                         self.page = Page::Wifi;
                     }
                 }
+                Row::OpenService(index) => {
+                    let [catalog, kosync, tailnet] = crate::services::forms();
+                    self.page = Page::Service(match index {
+                        0 => catalog,
+                        1 => kosync,
+                        _ => tailnet,
+                    });
+                }
+                Row::Field(field) => {
+                    if let Page::Service(form) = &mut self.page {
+                        form.toggle(*field);
+                        form.store()?;
+                        self.restart_needed = true;
+                    }
+                }
+                Row::Restart => unsafe { esp_idf_svc::sys::esp_restart() },
                 Row::None | Row::Password => {}
             },
-            DeviceEvent::Text(index, text) => {
-                if let (Some(Row::Password), Page::Network(ssid)) =
-                    (self.rows.get(index), &self.page)
-                {
+            DeviceEvent::Text(index, text) => match (self.rows.get(index), &mut self.page) {
+                (Some(Row::Password), Page::Network(ssid)) => {
                     let text = zeroize::Zeroizing::new(text);
                     wifi.join(ssid, Some(&text))?;
                     self.page = Page::Wifi;
                 }
-            }
+                (Some(Row::Field(field)), Page::Service(form)) => {
+                    form.set_text(*field, text);
+                    form.store()?;
+                    self.restart_needed = true;
+                }
+                _ => {}
+            },
         }
         Ok(())
     }
@@ -158,7 +188,51 @@ impl Setup {
                     DeviceRowKind::Submenu,
                     Row::OpenWifi,
                 );
+                for (index, form) in crate::services::forms().iter().enumerate() {
+                    let state = if form.check().is_ok() {
+                        "set"
+                    } else {
+                        "not set"
+                    };
+                    push(
+                        format!("{}: {state}", form.title()),
+                        DeviceRowKind::Submenu,
+                        Row::OpenService(index),
+                    );
+                }
+                if self.restart_needed {
+                    push(
+                        "Restart to apply changes".into(),
+                        DeviceRowKind::Action,
+                        Row::Restart,
+                    );
+                }
                 "Network and services".to_string()
+            }
+            Page::Service(form) => {
+                for (index, field) in form.fields().into_iter().enumerate() {
+                    let kind = match field.kind {
+                        Kind::Text => DeviceRowKind::Text {
+                            value: field.value,
+                            secret: false,
+                            limit: field.limit,
+                        },
+                        Kind::Secret => DeviceRowKind::Text {
+                            value: field.value,
+                            secret: true,
+                            limit: field.limit,
+                        },
+                        Kind::Toggle(on) => DeviceRowKind::Toggle(on),
+                    };
+                    push(field.label.into(), kind, Row::Field(index));
+                }
+                let state = match form.check() {
+                    Ok(()) if self.restart_needed => "Ready after restart".to_string(),
+                    Ok(()) => "Ready".to_string(),
+                    Err(error) => format!("Incomplete: {error}"),
+                };
+                push(state, DeviceRowKind::Info, Row::None);
+                form.title().to_string()
             }
             Page::Wifi => {
                 push(

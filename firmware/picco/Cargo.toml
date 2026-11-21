@@ -14,7 +14,9 @@ bluetooth = []
 [dependencies]
 esp-idf-svc = "=0.53.0"
 log = "=0.4.29"
-zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
+zeroize = { version = "=1.9.1", default-features = false, features = ["alloc", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 femto-reader = { path = "../../crates/femto-reader", features = ["esp-idf-sha256"] }
 femto-remote = { path = "../../crates/femto-remote" }
 femto-picco-board = { path = "../../crates/femto-picco" }

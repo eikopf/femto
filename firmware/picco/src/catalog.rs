@@ -105,10 +105,13 @@ impl CatalogMenu {
     pub fn set_transport_factory(&mut self, factory: TransportFactory) {
         self.transport = Some(factory);
     }
-    #[cfg(any(test, target_os = "espidf"))]
+    #[cfg(test)]
     pub fn load() -> Result<Option<Self>, String> {
         Self::load_from(Path::new("/sdcard/femto"))
     }
+    /// The file-based configuration, exercised by host tests; the device
+    /// reads its settings from internal storage.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn load_from(root: &Path) -> Result<Option<Self>, String> {
         let file = match File::open(root.join("catalog.url")) {
             Ok(file) => file,
@@ -126,8 +129,8 @@ impl CatalogMenu {
             .map_err(|_| "Invalid catalog URL")?
             .trim()
             .to_owned();
-        let mut menu = Self::new(source)?;
-        menu.directory = root.to_owned();
+        let mut origins = Vec::new();
+        let mut auth = None;
         match File::open(root.join("catalog-tailnet-origins")) {
             Ok(file) => {
                 if !file
@@ -145,15 +148,12 @@ impl CatalogMenu {
                     return Err("Catalog routes exceed 8192 bytes".into());
                 }
                 let text = std::str::from_utf8(&bytes).map_err(|_| "Invalid catalog routes")?;
-                menu.origins = text
+                origins = text
                     .lines()
                     .map(str::trim)
                     .filter(|line| !line.is_empty())
                     .map(str::to_owned)
                     .collect();
-                let refs: Vec<_> = menu.origins.iter().map(String::as_str).collect();
-                femto_catalog::routing::Routed::new((), (), &refs)
-                    .map_err(|_| "Invalid catalog tailnet origins")?;
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => (),
             Err(_) => return Err("Cannot open catalog routes".into()),
@@ -171,13 +171,30 @@ impl CatalogMenu {
                 file.take(8193)
                     .read_to_end(&mut bytes)
                     .map_err(|_| "Cannot read catalog credentials")?;
-                menu.auth =
-                    Some(BasicAuth::from_json(&menu.source, &bytes).map_err(|e| e.to_string())?);
+                auth = Some(BasicAuth::from_json(&source, &bytes).map_err(|e| e.to_string())?);
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err("Cannot open catalog credentials".into()),
         }
-        Ok(Some(menu))
+        Self::configured(source, origins, auth, root.to_owned()).map(Some)
+    }
+    /// A catalog from settings held by the caller: its address, the origins
+    /// reached through the tailnet, optional credentials, and the directory
+    /// that receives downloads.
+    pub fn configured(
+        source: String,
+        origins: Vec<String>,
+        auth: Option<BasicAuth>,
+        directory: PathBuf,
+    ) -> Result<Self, String> {
+        let mut menu = Self::new(source)?;
+        let refs: Vec<_> = origins.iter().map(String::as_str).collect();
+        femto_catalog::routing::Routed::new((), (), &refs)
+            .map_err(|_| "Invalid catalog tailnet origins")?;
+        menu.origins = origins;
+        menu.auth = auth;
+        menu.directory = directory;
+        Ok(menu)
     }
     pub fn new(source: String) -> Result<Self, String> {
         if source.len() > 4096 || source.chars().any(char::is_control) || source.contains('\\') {

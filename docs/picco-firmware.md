@@ -196,6 +196,12 @@ Wi-Fi is configured on the device under Network and services in the root menu. T
 
 Remembered networks and the on/off state are stored in the internal NVS partition under the `femto_cfg` namespace, not on the SD card. A `wifi.json` found on the card is imported once and then deleted. The partition is not encrypted, because flash encryption is disabled on the Picco: reading the flash over USB reveals the passwords, while removing the card does not. The driver is created when Wi-Fi is first switched on and takes about 40 KiB of internal RAM. The station keeps credentials out of the driver's own NVS storage, requires WPA2 or better for networks with a password, paces reconnection attempts, stops before sleep and starts SNTP once the link is up.
 
+### Service settings
+
+The same panel edits the catalog (address, username, password, plain-HTTP opt-in, tailnet routing), KOReader sync (server, account, plain-HTTP opt-in, tailnet routing) and the tailnet (coordinator, port, device name, auth key). Each service's settings are one JSON document in the `femto_cfg` namespace, in the shape its parser previously read from the card, and every edit is stored at once. A status row reports whether the existing parser accepts the draft. The catalog and KOReader sync read their settings at startup, so the panel offers a restart after a change; the tailnet reads its settings whenever a session starts. `kosync.json`, `tailnet.json`, `catalog.url`, `catalog-auth.json` and `catalog-tailnet-origins` on the card are imported once when nothing is stored for that service, and deleted. Secrets are shown only as set or not set and are entered from an empty field.
+
+Field entry, storage across a restart and the status row have been exercised on the tested device through USB-injected taps. No service has been connected with settings entered this way.
+
 Scanning and the network list have run on the tested device. Joining a network through the on-device keyboard, reconnecting after sleep and behavior at the edge of range have not been observed.
 
 ## Orientation transforms

@@ -25,6 +25,7 @@ mod panel;
 mod power;
 pub mod relay;
 pub mod relay_transport;
+mod services;
 mod setup;
 mod storage;
 pub mod tailnet;
@@ -71,6 +72,9 @@ const OPENING_MARKER: &str = "/sdcard/femto/.opening";
 
 fn run() -> Result<(), String> {
     let mut screen = panel::open()?;
+    if screen.storage.is_some() {
+        services::import_from_card();
+    }
     report_heap("peripherals");
     // Libron, embedded unmodified under the SIL Open Font License; see fonts/.
     let default_fonts = || -> femto_reader::Result<Fonts> {
@@ -189,7 +193,7 @@ fn run() -> Result<(), String> {
             }
         }
     }
-    let mut catalog = match catalog::CatalogMenu::load() {
+    let mut catalog = match services::Catalog::load().menu() {
         Ok(catalog) => catalog,
         Err(error) => {
             log::warn!("Catalog unavailable: {error}");
@@ -197,16 +201,11 @@ fn run() -> Result<(), String> {
         }
     };
     ui.set_catalog_available(catalog.is_some());
-    let mut kosync = match femto_kosync::config::Settings::load(std::path::Path::new(
-        "/sdcard/femto/kosync.json",
-    )) {
-        Ok(settings) => Some(femto_kosync::session::Session::new(settings)),
-        Err(femto_kosync::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => {
-            log::warn!("KOReader configuration unavailable: {error}");
-            None
-        }
-    };
+    // Sync is offered once an account is set; an incomplete draft is not an error.
+    let mut kosync = services::Kosync::load()
+        .settings()
+        .ok()
+        .map(femto_kosync::session::Session::new);
     ui.set_kosync_available(kosync.is_some());
     ui.set_tailnet_available(true);
     ui.set_rotation_available(true);

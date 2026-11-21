@@ -8,6 +8,18 @@ The four-level build shows each frame in two steps on the SE0400NQW47 panel: a f
 
 Before opening a book at startup the firmware writes its path to `/sdcard/femto/.opening` and removes the file once the first page is on the panel. A marker found at startup means the previous start never got that far, so that book is skipped once and the library opens with a notice. Interrupting a start by hand has the same effect. Opening the marked book again from the library is not guarded.
 
+### Memory profile
+
+Internal RAM offers about 287 KiB of heap and is the scarce resource; the 8 MiB of external RAM holds fonts, framebuffers, caches and book data. Measured on the tested device with Wi-Fi connected and a book open:
+
+| Stage | Internal free |
+| --- | --- |
+| Application start, after the 96 KiB main stack and system tasks | 178 KiB |
+| Peripherals, input task and Wi-Fi driver started | 91 KiB |
+| Book open and reading | 89 KiB |
+
+General allocations of every size, Wi-Fi and lwIP buffers, and mbedTLS allocations are directed to external RAM. Before that, book and reader state held about 60 KiB of internal RAM in small allocations and Wi-Fi left about 50 KiB free. Layout and page-turn times did not change measurably. The main stack is the largest remaining internal user; its measured peak use is about 47 KiB. A task stack in external RAM cannot run flash operations, which ESP-IDF asserts, so moving the reader's stack there would require routing NVS access through an internal-stack task. TLS and the tailnet client have not been run against this budget.
+
 The main task stack is 96 KiB. Opening an EPUB whose first page holds a JPEG overflowed the earlier 64 KiB stack without a panic message and restarted the device; the JPEG decoder state now lives on the heap, and the measured peak with that fixture and stack is about 48 KiB. Glyph rasterization alone uses about 45 KiB.
 
 The portable `ReaderUi` menu provides a library chooser, contents, chapters, bookmarks, bookmark toggling, links on the current page, return from a navigation jump, and typography settings. Portrait menus use eight rows: a back header, six entries, and a pagination footer. The shared 800x480 landscape layout uses six rows with four entries. Tap an entry to activate it, the header to go back, or either half of the footer to change menu pages. Page buttons move selection; power/select activates it. Both page buttons return from a submenu or close the root menu. Empty lists remain escapable. Navigation errors appear in the header and leave the menu open.

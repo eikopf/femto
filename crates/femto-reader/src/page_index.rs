@@ -175,9 +175,7 @@ impl IndexStore {
         let path = self.path(book);
         let partial = path.with_extension("pages.part");
         write_all(&partial, &data)?;
-        // FAT rename does not replace an existing file.
-        let _ = std::fs::remove_file(&path);
-        std::fs::rename(&partial, &path)
+        crate::state::replace_file(&partial, &path)
     }
 }
 

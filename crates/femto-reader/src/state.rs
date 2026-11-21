@@ -386,6 +386,19 @@ impl ReaderState {
 
 /// Replaces a file only after the new contents are durable. The destination and
 /// temporary file share a directory so rename cannot cross filesystem boundaries.
+/// Moves a completed temporary file over `path`. FAT on ESP-IDF cannot
+/// rename onto an existing file, so the old file is removed first there; a
+/// power loss in between leaves only the temporary file.
+pub(crate) fn replace_file(temp: &Path, path: &Path) -> std::io::Result<()> {
+    match fs::rename(temp, path) {
+        Err(_) if cfg!(target_os = "espidf") && path.exists() => {
+            fs::remove_file(path)?;
+            fs::rename(temp, path)
+        }
+        result => result,
+    }
+}
+
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path
         .parent()
@@ -419,8 +432,9 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
-        fs::rename(&temp, path)?;
-        #[cfg(unix)]
+        replace_file(&temp, path)?;
+        // ESP-IDF's FAT layer has no directory handles to synchronize.
+        #[cfg(all(unix, not(target_os = "espidf")))]
         File::open(parent)?.sync_all()?;
         Ok(())
     })();

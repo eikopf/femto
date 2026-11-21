@@ -138,8 +138,15 @@ impl LayoutConfig {
     }
 }
 
+/// The shaping face parsed once from the font data it borrows.
+#[derive(yoke::Yokeable)]
+struct Parsed<'a>(Face<'a>);
+
 pub struct Font {
-    data: Vec<u8>,
+    /// Font bytes with their parsed face; parsing per shaping call
+    /// dominated layout time. Boxed because the face is several kilobytes
+    /// and fonts are moved by value on small device stacks.
+    face: Box<yoke::Yoke<Parsed<'static>, Box<[u8]>>>,
     key: CacheKey,
     offset: u32,
     /// Content hash, for keys that must survive restarts.
@@ -183,15 +190,25 @@ impl Font {
         Self::from_bytes(data)
     }
     pub(crate) fn byte_len(&self) -> usize {
-        self.data.len()
+        self.data().len()
+    }
+    fn data(&self) -> &[u8] {
+        self.face.backing_cart()
+    }
+    fn face(&self) -> &Face<'_> {
+        &self.face.get().0
     }
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
-        let face = FontRef::from_index(&data, 0).ok_or(Error::Font)?;
-        Face::from_slice(&data, 0).ok_or(Error::Font)?;
-        let (key, offset) = (face.key, face.offset);
+        let reference = FontRef::from_index(&data, 0).ok_or(Error::Font)?;
+        let (key, offset) = (reference.key, reference.offset);
+        let digest = crate::page_index::fnv(crate::page_index::FNV_START, &data);
+        let face = Box::new(yoke::Yoke::try_attach_to_cart(
+            data.into_boxed_slice(),
+            |bytes| Face::from_slice(bytes, 0).map(Parsed).ok_or(Error::Font),
+        )?);
         Ok(Self {
-            digest: crate::page_index::fnv(crate::page_index::FNV_START, &data),
-            data,
+            digest,
+            face,
             key,
             offset,
             shaping: Default::default(),
@@ -229,7 +246,7 @@ impl Font {
     }
     fn swash(&self) -> FontRef<'_> {
         FontRef {
-            data: &self.data,
+            data: self.data(),
             key: self.key,
             offset: self.offset,
         }
@@ -1332,10 +1349,8 @@ fn break_opportunities(text: &str) -> impl Iterator<Item = (usize, BreakOpportun
 /// Byte offset at which unshaped advances of the regular face exceed `width`.
 /// Only a starting point for the line fit; shaping decides.
 fn estimated_fit(p: &Paragraph, start: usize, width: f32, fonts: &Fonts, size: f32) -> usize {
-    let Some(face) = rustybuzz::ttf_parser::Face::parse(&fonts.regular.data, 0).ok() else {
-        return start;
-    };
-    let scale = size / f32::from(face.units_per_em());
+    let face = fonts.regular.face();
+    let scale = size / face.units_per_em() as f32;
     let mut total = 0.0;
     for (offset, c) in p.text[start..].char_indices() {
         total += face
@@ -1347,6 +1362,29 @@ fn estimated_fit(p: &Paragraph, start: usize, width: f32, fonts: &Fonts, size: f
         }
     }
     p.text.len()
+}
+
+/// A lower bound on the shaped advance of `range`, or `None` when unshaped
+/// advances say nothing reliable: several spans, scaled text, tabs, or
+/// characters the selected face lacks. Kerning and ligatures only narrow
+/// text slightly, which the allowance covers.
+fn advance_floor(p: &Paragraph, range: Range<usize>, fonts: &Fonts, size: f32) -> Option<f32> {
+    let [span] = p.spans.as_slice() else {
+        return None;
+    };
+    if span.style.scale != 1.0 {
+        return None;
+    }
+    let face = fonts.select(span.style).1.face();
+    let mut units = 0u32;
+    for c in p.text[range].trim_end_matches([' ', '\r', '\n']).chars() {
+        if c == '\u{ad}' {
+            continue;
+        }
+        let glyph = face.glyph_index(c).filter(|_| c != '\t')?;
+        units += u32::from(face.glyph_hor_advance(glyph)?);
+    }
+    Some(0.97 * units as f32 * size / face.units_per_em() as f32)
 }
 
 /// Selects the last break opportunity that fits, as a scan over every
@@ -1404,6 +1442,18 @@ fn break_line(
         }
         if overflow.is_none() {
             for &end in &candidates[first + 1..] {
+                // Most lines end here: the next word plainly does not fit,
+                // which unshaped advances show without shaping the line again.
+                // A displayed hyphen is not part of the longer line's width.
+                if let Some((fitted, line)) = &best
+                    && !line.hyphenated
+                    && !p.text[..end].ends_with('\u{ad}')
+                    && advance_floor(p, *fitted..end, fonts, size)
+                        .is_some_and(|extra| line.width + extra > width)
+                {
+                    overflow = Some(end);
+                    break;
+                }
                 let line = shape(p, shaping, start..end, fonts, size)?;
                 if line.width <= width {
                     best = Some((end, line));
@@ -1415,10 +1465,16 @@ fn break_line(
         }
         if let Some(end) = overflow {
             let after = best.as_ref().map_or(start, |(end, _)| *end);
-            for &split in hyphens[hyphens.partition_point(|&n| n <= after)..]
-                .iter()
-                .take_while(|&&n| n < end)
-            {
+            // Width already taken, unless it includes a displayed hyphen.
+            let fitted = match &best {
+                Some((_, line)) if line.hyphenated => None,
+                Some((_, line)) => Some(line.width),
+                None => Some(0.0),
+            };
+            let splits = &hyphens[hyphens.partition_point(|&n| n <= after)..];
+            let splits = &splits[..splits.partition_point(|&n| n < end)];
+            // The longest hyphenated prefix that fits wins, so try long ones first.
+            for &split in splits.iter().rev() {
                 // The initial implementation adds hyphens only to LTR lines.
                 if shaping.bidi.levels[start..split]
                     .iter()
@@ -1426,9 +1482,16 @@ fn break_line(
                 {
                     continue;
                 }
+                if fitted
+                    .zip(advance_floor(p, after..split, fonts, size))
+                    .is_some_and(|(fitted, extra)| fitted + extra > width)
+                {
+                    continue;
+                }
                 let candidate = shape_hyphen(p, shaping, start..split, fonts, size)?;
                 if candidate.width <= width {
                     best = Some((split, candidate));
+                    break;
                 }
             }
         }
@@ -1476,7 +1539,7 @@ fn shape(
             .chars()
             .any(|c| c != '\u{ad}');
     let range = range.start..trimmed_end;
-    let base_face = Face::from_slice(&fonts.regular.data, 0).ok_or(Error::Font)?;
+    let base_face = fonts.regular.face();
     let base_factor = size / base_face.units_per_em() as f32;
     let mut line = Line {
         start: Locator::default(),
@@ -1559,7 +1622,7 @@ fn shape(
             }
             for (span, font_id, script) in segments {
                 let font = fonts.get(font_id);
-                let face = Face::from_slice(&font.data, 0).ok_or(Error::Font)?;
+                let face = font.face();
                 let px = size * style.scale;
                 let factor = px / face.units_per_em() as f32;
                 line.ascent = line.ascent.max(face.ascender() as f32 * factor);
@@ -1593,14 +1656,14 @@ fn shape(
                     buffer.set_script(script);
                 }
                 buffer.guess_segment_properties();
-                let shaped = font.shape(&face, buffer);
+                let shaped = font.shape(face, buffer);
                 for (info, pos) in shaped.glyph_infos().iter().zip(shaped.glyph_positions()) {
                     let cluster = span.start + info.cluster as usize;
                     if p.text.as_bytes().get(cluster) == Some(&b'\t') {
                         tabs.push((line.glyphs.len(), line.width, 0.0, style.tab_size));
                         continue;
                     }
-                    if let Some((y_min, y_max)) = font.vertical_extents(&face, info.glyph_id as u16)
+                    if let Some((y_min, y_max)) = font.vertical_extents(face, info.glyph_id as u16)
                     {
                         let offset = pos.y_offset as f32;
                         line.ascent = line.ascent.max((f32::from(y_max) + offset) * factor);
@@ -1624,7 +1687,7 @@ fn shape(
     if !tabs.is_empty() {
         let style = p.spans.first().map_or(TextStyle::default(), |s| s.style);
         let (_, font) = fonts.select(style);
-        let face = Face::from_slice(&font.data, 0).ok_or(Error::Font)?;
+        let face = font.face();
         let px = size * style.scale;
         let advance = |ch| {
             face.glyph_index(ch)

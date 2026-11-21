@@ -965,6 +965,7 @@ dependencies = [
  "unicode-normalization",
  "unicode-script",
  "unicode-segmentation",
+ "yoke",
  "zune-jpeg",
 ]
 

@@ -183,6 +183,7 @@ fn run() -> Result<(), String> {
     ui.set_tailnet_available(true);
     ui.set_rotation_available(true);
     ui.set_page_buttons_available(true);
+    ui.set_refresh_available(true);
     ui.set_device_status(&format!(
         "{} | {}",
         battery_label(screen.battery()),
@@ -209,6 +210,7 @@ fn run() -> Result<(), String> {
     let mut plane =
         vec![255; femto_picco_board::PLANE_BYTES * if cfg!(feature = "grayscale") { 2 } else { 1 }];
     render(&mut reader, &ui, &mut plane)?;
+    screen.set_full_refresh_interval(reader.state.full_refresh_interval);
     screen.present_oriented(&plane, orientation(reader.state.rotation))?;
     log::info!(
         "Reader ready: {} pages; GPIO21 previous, GPIO9 next",
@@ -295,6 +297,7 @@ fn run() -> Result<(), String> {
                 input::Event::Tap { x, y } => ui.tap(&mut reader, x.into(), y.into()),
             };
             screen.set_long_presses(ui.is_open());
+            screen.set_full_refresh_interval(reader.state.full_refresh_interval);
             let mut effect = match effect {
                 Ok(effect) => effect,
                 Err(error) => {

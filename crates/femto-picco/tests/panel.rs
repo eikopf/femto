@@ -471,3 +471,63 @@ fn sleep_invalidates_refresh_baseline_and_requires_reset_after_every_failure() {
         }
     }
 }
+
+#[test]
+fn antialiased_update_shows_a_differential_base_then_moves_only_gray_pixels() {
+    let trace = Rc::new(RefCell::new(Trace::default()));
+    let mut display = Display::new(Mock(trace.clone()), Panel::Se0400nqw47).unwrap();
+    display.initialize().unwrap();
+    // One pixel of each level per byte pair: black, dark, light, white, repeated.
+    let (msb, lsb) = (
+        vec![0b0011_0011; PLANE_BYTES],
+        vec![0b0101_0101; PLANE_BYTES],
+    );
+    let pair = |packed: &[u8], pixel: usize| (packed[pixel / 4] >> (6 - 2 * (pixel % 4))) & 3;
+    for (index, requested) in [Refresh::Fast, Refresh::Fast].into_iter().enumerate() {
+        trace.borrow_mut().commands.clear();
+        let executed = display.antialiased(&msb, &lsb, requested).unwrap();
+        // The first update after initialization is full.
+        assert_eq!(executed == Refresh::Full, index == 0);
+        let t = trace.borrow();
+        assert_eq!(
+            t.commands.iter().map(|(c, _)| *c).collect::<Vec<_>>(),
+            [0x10, 0x20, 0x04, 0x12, 0x02, 0x10, 0x20, 0x04, 0x12, 0x02]
+        );
+        for pixel in 0..384_000 {
+            let level = pixel % 4; // 0 black, 1 dark, 2 light, 3 white
+            // Base: only white stays white. The first base diffs against the
+            // white startup plane; the second treats incoming ink as white.
+            assert_eq!(pair(&t.commands[0].1, pixel), 0b10 | u8::from(level == 3));
+            // Overlay: high bit marks either gray, low bit marks dark gray.
+            assert_eq!(
+                pair(&t.commands[5].1, pixel),
+                [0b00, 0b11, 0b10, 0b00][level]
+            );
+        }
+        assert_ne!(t.commands[1].1, t.commands[6].1);
+        assert_eq!(t.commands[6].1.len(), 535);
+    }
+    // The retained plane is the base, so a monochrome update diffs against it.
+    trace.borrow_mut().commands.clear();
+    display
+        .refresh(&vec![255; PLANE_BYTES], Refresh::Fast)
+        .unwrap();
+    for pixel in 0..384_000 {
+        assert_eq!(
+            pair(&trace.borrow().commands[0].1, pixel),
+            (u8::from(pixel % 4 == 3) << 1) | 1
+        );
+    }
+    // Panels without an overlay waveform fall back to the absolute update.
+    let other = Rc::new(RefCell::new(Trace::default()));
+    let mut display = Display::new(Mock(other.clone()), Panel::Yrd0426).unwrap();
+    display.initialize().unwrap();
+    assert_eq!(
+        display.antialiased(&msb, &lsb, Refresh::Fast),
+        Ok(Refresh::Full)
+    );
+    assert_eq!(
+        display.antialiased(&msb, &[], Refresh::Fast),
+        Err(Error::FrameSize)
+    );
+}

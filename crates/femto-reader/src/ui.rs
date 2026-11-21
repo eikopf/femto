@@ -39,6 +39,7 @@ enum Panel {
     Remote,
     Light,
     Power,
+    Refresh,
     Library,
     Books,
     Recent,
@@ -60,6 +61,7 @@ enum Command {
     Sleep,
     Rotation(crate::state::Rotation),
     IdleSleep(crate::state::IdleSleep),
+    FullRefresh(u8),
     Resume,
     Rescan,
     CancelScan,
@@ -182,6 +184,7 @@ pub struct ReaderUi {
     sleep_available: bool,
     sleep_request: bool,
     page_buttons_available: bool,
+    refresh_available: bool,
     query: String,
     scan_root: Option<(PathBuf, usize)>,
     scan: Option<LibraryScan>,
@@ -511,6 +514,10 @@ impl ReaderUi {
         Ok(())
     }
 
+    /// Offers the e-paper full-refresh interval.
+    pub fn set_refresh_available(&mut self, available: bool) {
+        self.refresh_available = available;
+    }
     /// Offers the setting that exchanges the two page buttons.
     pub fn set_page_buttons_available(&mut self, available: bool) {
         self.page_buttons_available = available;
@@ -1439,6 +1446,10 @@ impl ReaderUi {
                 self.selected = 0;
                 Ok(Effect::Redraw)
             }
+            Command::FullRefresh(interval) => {
+                reader.state.full_refresh_interval = interval;
+                Ok(Effect::Redraw)
+            }
             Command::IdleSleep(timeout) => {
                 reader.state.idle_sleep = timeout;
                 Ok(Effect::Redraw)
@@ -1664,6 +1675,10 @@ impl ReaderUi {
             .chain(
                 self.rotation_available
                     .then(|| ("Screen orientation".into(), Command::Open(Panel::Rotation))),
+            )
+            .chain(
+                self.refresh_available
+                    .then(|| ("Full refresh".into(), Command::Open(Panel::Refresh))),
             )
             .chain(std::iter::once((
                 "Clippings".into(),
@@ -1905,6 +1920,22 @@ impl ReaderUi {
                     .map(|row| (row.clone(), Command::Noop)),
             )
             .collect(),
+            Panel::Refresh => crate::state::FULL_REFRESH_INTERVALS
+                .into_iter()
+                .map(|interval| {
+                    (
+                        format!(
+                            "{}Every {interval} pages",
+                            if reader.state.full_refresh_interval == interval {
+                                "* "
+                            } else {
+                                ""
+                            }
+                        ),
+                        Command::FullRefresh(interval),
+                    )
+                })
+                .collect(),
             Panel::Power => {
                 use crate::state::IdleSleep::*;
                 [Off, FiveMinutes, TenMinutes, ThirtyMinutes, SixtyMinutes]
@@ -2271,6 +2302,7 @@ impl ReaderUi {
             Panel::Remote => "Remote buttons",
             Panel::Light => "Frontlight",
             Panel::Power => "Automatic sleep",
+            Panel::Refresh => "Full refresh",
             Panel::Library if self.library.truncated => "Library (incomplete)",
             Panel::Library => "Library",
             Panel::Books => "All books",

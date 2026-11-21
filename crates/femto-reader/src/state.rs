@@ -130,6 +130,12 @@ impl BookTypography {
     }
 }
 
+/// Choices offered for [`ReaderState::full_refresh_interval`].
+pub const FULL_REFRESH_INTERVALS: [u8; 5] = [5, 10, 20, 50, 100];
+fn default_full_refresh_interval() -> u8 {
+    20
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IdleSleep {
@@ -189,6 +195,9 @@ pub struct ReaderState {
     /// Exchanges the two page buttons while they move a menu selection.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub swap_menu_buttons: bool,
+    /// Display updates between full e-paper refreshes that clear residue.
+    #[serde(default = "default_full_refresh_interval")]
+    pub full_refresh_interval: u8,
     pub books: BTreeMap<String, BookState>,
 }
 
@@ -205,6 +214,7 @@ impl Default for ReaderState {
             rotation: Rotation::default(),
             swap_page_buttons: false,
             swap_menu_buttons: false,
+            full_refresh_interval: default_full_refresh_interval(),
             books: BTreeMap::new(),
         }
     }

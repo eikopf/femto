@@ -205,6 +205,8 @@ pub struct Screen {
     display: Display<PanelBus>,
     input: crate::input::InputTask,
     fast_count: u8,
+    /// Updates per full refresh, including the full one.
+    full_interval: u8,
     wifi: Option<crate::wifi::Station>,
     #[cfg(feature = "bluetooth")]
     bluetooth: Option<crate::bluetooth::Service>,
@@ -247,7 +249,7 @@ impl Screen {
                 if let Err(error) = self.display.initialize() {
                     log::warn!("Panel wake after cancelled sleep: {error:?}");
                 }
-                self.fast_count = 5;
+                self.fast_count = u8::MAX;
             }
             if wifi_touched && let Some(wifi) = &mut self.wifi {
                 if let Err(error) = wifi.resume_after_sleep() {
@@ -290,6 +292,9 @@ impl Screen {
     pub fn event(&self) -> Option<crate::input::Event> {
         self.input.next()
     }
+    pub fn set_full_refresh_interval(&mut self, updates: u8) {
+        self.full_interval = updates.max(1);
+    }
     pub fn set_long_presses(&self, enabled: bool) {
         self.input.set_long_presses(enabled);
     }
@@ -329,53 +334,49 @@ impl Screen {
         orientation: femto_picco_board::orientation::Orientation,
     ) -> Result<(), String> {
         self.input.set_view(orientation, true)?;
-        self.fast_count = 5;
+        self.fast_count = u8::MAX;
         self.present(plane)?;
         self.input.set_view(orientation, false)
     }
 
     /// Presents with a full refresh, for images that stay on the panel.
     pub fn present_clean(&mut self, plane: &[u8]) -> Result<(), String> {
-        self.fast_count = 5;
+        self.fast_count = u8::MAX;
         self.present(plane)
     }
 
     pub fn present(&mut self, plane: &[u8]) -> Result<(), String> {
-        if cfg!(feature = "grayscale") {
-            if plane.len() != 2 * femto_picco_board::PLANE_BYTES {
-                return Err("Invalid grayscale framebuffer".into());
-            }
-            let (msb, lsb) = plane.split_at(femto_picco_board::PLANE_BYTES);
-            if let Err(error) = self.display.grayscale(msb, lsb) {
-                log::warn!("Grayscale failed, retrying after reset: {error:?}");
-                self.display.initialize().map_err(|e| format!("{e:?}"))?;
-                self.display
-                    .grayscale(msb, lsb)
-                    .map_err(|e| format!("{e:?}"))?;
-            }
-            self.fast_count = 5;
-            return Ok(());
-        }
-        // Provisional cleanup interval; requires physical ghosting comparisons.
-        let requested = if self.fast_count >= 5 {
+        let requested = if u16::from(self.fast_count) + 1 >= u16::from(self.full_interval) {
             Refresh::Full
         } else {
             Refresh::Fast
         };
-        let mode = match self.display.refresh(plane, requested) {
+        let planes = if cfg!(feature = "grayscale") {
+            if plane.len() != 2 * femto_picco_board::PLANE_BYTES {
+                return Err("Invalid grayscale framebuffer".into());
+            }
+            Some(plane.split_at(femto_picco_board::PLANE_BYTES))
+        } else {
+            None
+        };
+        let mut show = |display: &mut Display<PanelBus>, mode| match planes {
+            // A differential base followed by a gray pass, so page turns do
+            // not flash the whole panel.
+            Some((msb, lsb)) => display.antialiased(msb, lsb, mode),
+            None => display.refresh(plane, mode),
+        };
+        let mode = match show(&mut self.display, requested) {
             Ok(mode) => mode,
             Err(error) => {
                 log::warn!("Display failed, retrying with reset and full refresh: {error:?}");
                 self.display.initialize().map_err(|e| format!("{e:?}"))?;
-                self.display
-                    .refresh(plane, Refresh::Full)
-                    .map_err(|e| format!("{e:?}"))?
+                show(&mut self.display, Refresh::Full).map_err(|e| format!("{e:?}"))?
             }
         };
         self.fast_count = if mode == Refresh::Full {
             0
         } else {
-            self.fast_count + 1
+            self.fast_count.saturating_add(1)
         };
         Ok(())
     }
@@ -520,6 +521,7 @@ pub fn open() -> Result<Screen, String> {
         display,
         storage,
         input,
-        fast_count: 5,
+        fast_count: u8::MAX,
+        full_interval: 20,
     })
 }

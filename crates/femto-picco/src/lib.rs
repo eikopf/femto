@@ -78,6 +78,8 @@ pub struct Display<B> {
     panel: Panel,
     ready: bool,
     previous: Vec<u8>,
+    /// Reused base plane for anti-aliased updates.
+    scratch: Vec<u8>,
     needs_full: bool,
 }
 
@@ -95,6 +97,7 @@ impl<B: Bus> Display<B> {
             panel,
             ready: false,
             previous,
+            scratch: Vec::new(),
             needs_full: true,
         })
     }
@@ -232,6 +235,38 @@ impl<B: Bus> Display<B> {
         self.command(0x04, &lut[106..109])?;
         self.command(0x2c, &lut[109..110])?;
         self.command(0x3c, &[0x80])
+    }
+
+    /// Four-level update without a full-panel flash: a differential
+    /// black-and-white refresh followed by a pass that moves only gray pixels.
+    /// Planes use the absolute encoding of [`Self::grayscale`]. Returns the
+    /// executed base mode. Panels without an overlay waveform use the absolute
+    /// update and report a full refresh.
+    pub fn antialiased(
+        &mut self,
+        msb: &[u8],
+        lsb: &[u8],
+        requested: Refresh,
+    ) -> Result<Refresh, Error<B::Error>> {
+        if self.panel != Panel::Se0400nqw47 {
+            return self.grayscale(msb, lsb).map(|()| Refresh::Full);
+        }
+        if msb.len() != PLANE_BYTES || lsb.len() != PLANE_BYTES {
+            return Err(Error::FrameSize);
+        }
+        if !self.ready {
+            return Err(Error::NotReady);
+        }
+        let mode = if self.needs_full {
+            Refresh::Full
+        } else {
+            requested
+        };
+        self.ready = false;
+        self.needs_full = true;
+        self.antialiased_ssd2677(msb, lsb, mode)?;
+        self.needs_full = false;
+        Ok(mode)
     }
 
     /// Absolute four-level update: black=00, dark=01, light=10, white=11.

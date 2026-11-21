@@ -66,6 +66,50 @@ impl<B: Bus> Display<B> {
         Ok(())
     }
 
+    /// Shows the black-and-white base of a four-level frame, then moves its
+    /// gray pixels without disturbing the rest of the panel. `previous`
+    /// remains the base, so later differential refreshes stay valid.
+    pub(super) fn antialiased_ssd2677(
+        &mut self,
+        msb: &[u8],
+        lsb: &[u8],
+        mode: Refresh,
+    ) -> Result<(), Error<B::Error>> {
+        // Only white stays white in the base; both grays are drawn as ink.
+        let mut base = core::mem::take(&mut self.scratch);
+        base.clear();
+        base.extend(msb.iter().zip(lsb).map(|(&high, &low)| high & low));
+        if mode == Refresh::Fast {
+            // Ink that an earlier overlay lightened still needs the full
+            // white-to-black pulse, so treat every incoming ink pixel as white.
+            for (old, &new) in self.previous.iter_mut().zip(&base) {
+                *old |= !new;
+            }
+        }
+        let shown = self.refresh_ssd2677(&base, mode);
+        self.scratch = base;
+        shown?;
+        self.ready = false;
+        self.idle()?;
+        // High bit: either gray. Low bit: dark gray.
+        let masks = msb
+            .iter()
+            .zip(lsb)
+            .flat_map(|(&high, &low)| pack(high ^ low, !high & low));
+        self.bus.command_stream(0x10, masks).map_err(Error::Bus)?;
+        self.command(0x20, &waveform::SE0400_OVERLAY)?;
+        self.command(0x04, &[])?;
+        self.bus.delay_ms(10);
+        self.idle()?;
+        self.command(0x12, &[0])?;
+        self.bus.delay_ms(10);
+        self.idle()?;
+        self.command(0x02, &[0])?;
+        self.bus.delay_ms(10);
+        self.ready = true;
+        Ok(())
+    }
+
     pub(super) fn initialize_ssd2677(&mut self) -> Result<(), Error<B::Error>> {
         self.idle()?;
         for &(command, data) in INIT {

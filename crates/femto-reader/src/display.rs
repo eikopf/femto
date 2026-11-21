@@ -55,3 +55,30 @@ pub(crate) fn text_level(value: u8, levels: u16) -> u8 {
     let steps = levels - 1;
     (((value as u16 * steps + 127) / 255) * 255 / steps) as u8
 }
+
+/// Draws a black hourglass on a white square near the top-right corner,
+/// inset by the default page margin so it does not touch the panel edge.
+pub(crate) fn busy_mark(pixels: &mut [u8], width: usize) {
+    const INSET: usize = 24;
+    const SIZE: usize = 36;
+    const GLASS: usize = 20;
+    if width < INSET + SIZE || pixels.len() < (INSET + SIZE) * width {
+        return;
+    }
+    let left = width - INSET - SIZE;
+    for row in pixels.chunks_exact_mut(width).skip(INSET).take(SIZE) {
+        row[left..left + SIZE].fill(255);
+    }
+    let (x0, y0) = (left + (SIZE - GLASS) / 2, INSET + (SIZE - GLASS) / 2);
+    for y in 0..GLASS {
+        // Bars at both ends, a solid upper bulb and an outlined lower one.
+        let inset = y.min(GLASS - 1 - y).min(GLASS / 2 - 2);
+        let bar = !(2..GLASS - 2).contains(&y);
+        for x in inset..GLASS - inset {
+            let edge = x < inset + 2 || x >= GLASS - inset - 2;
+            if bar || edge || y < GLASS / 2 {
+                pixels[(y0 + y) * width + x0 + x] = 0;
+            }
+        }
+    }
+}

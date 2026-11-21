@@ -16,6 +16,7 @@ pub mod layout;
 mod library_cache;
 mod menu;
 pub mod navigation;
+pub mod page_index;
 pub mod pagination;
 pub mod remote;
 mod scripts;

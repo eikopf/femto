@@ -248,3 +248,85 @@ fn prepared_pages_match_fresh_layout_and_rendering() {
         prepared.prepare_turn(false, 2).unwrap();
     }
 }
+
+#[test]
+fn opening_shows_the_saved_page_before_the_chapter_is_indexed_and_reuses_a_recorded_index() {
+    use femto_reader::page_index::IndexStore;
+    let text = "Opening must not wait for pages nobody is looking at yet. ".repeat(900);
+    let document = || Document::from_text("lazy.txt", &text).unwrap();
+    let mut complete = Reader::new(document(), fonts(), ReaderState::default()).unwrap();
+    let pages = complete.page_count();
+    assert!(pages > 12);
+    let open = |state: ReaderState, store: Option<IndexStore>| {
+        // Switch books in a running reader, as the library does.
+        let other = Document::from_text("other.txt", "Another book.").unwrap();
+        let mut reader = Reader::new(other, fonts(), state).unwrap();
+        reader.set_index_store(store);
+        let mut opening = reader.begin_open(document()).unwrap();
+        let mut steps = 1;
+        while !reader.step_open(&mut opening).unwrap() {
+            steps += 1;
+        }
+        reader.finish_open(opening).unwrap();
+        (reader, steps)
+    };
+
+    // From the chapter start, two pages suffice: the target and its successor.
+    let (mut lazy, steps) = open(ReaderState::default(), None);
+    assert_eq!(steps, 2);
+    assert!(!lazy.is_indexed());
+    assert_eq!((lazy.page_index(), lazy.page_count()), (0, 2));
+    for index in 0..pages {
+        assert_eq!(lazy.page_index(), index);
+        assert_eq!(lazy.render(2).unwrap(), complete.render(2).unwrap());
+        if index + 1 < pages {
+            // Turning past the indexed pages lays the next one out on demand.
+            assert_eq!(
+                lazy.dispatch(Action::Next).unwrap(),
+                femto_reader::controller::Effect::Redraw
+            );
+            complete.dispatch(Action::Next).unwrap();
+        }
+    }
+    assert!(lazy.page_count() == pages);
+
+    // A saved position inside the chapter needs the pages before it once.
+    for _ in 0..5 {
+        complete.dispatch(Action::Previous).unwrap();
+    }
+    let saved = complete.page_index();
+    complete.record_position(1);
+    let saved_state = complete.state.clone();
+    let state = || saved_state.clone();
+    let (mut first, steps) = open(state(), None);
+    assert_eq!(steps, saved + 2);
+    assert_eq!(first.page_index(), saved);
+    assert_eq!(first.render(2).unwrap(), complete.render(2).unwrap());
+
+    // Background steps finish the index and record it; a later opening lays
+    // out only the saved page and can turn backwards at once.
+    let directory = tempfile::tempdir().unwrap();
+    let store = || Some(IndexStore::new(directory.path(), "build-1"));
+    first.set_index_store(store());
+    while first.index_step().unwrap() {}
+    assert!(first.is_indexed());
+    assert_eq!(first.page_count(), pages);
+    let (mut recorded, _) = open(state(), store());
+    assert!(recorded.is_indexed());
+    assert_eq!(
+        (recorded.page_index(), recorded.page_count()),
+        (saved, pages)
+    );
+    assert_eq!(recorded.render(2).unwrap(), complete.render(2).unwrap());
+    recorded.dispatch(Action::Previous).unwrap();
+    complete.dispatch(Action::Previous).unwrap();
+    assert_eq!(recorded.render(2).unwrap(), complete.render(2).unwrap());
+
+    // Another build or another layout ignores the record.
+    let other = Some(IndexStore::new(directory.path(), "build-2"));
+    assert!(!open(state(), other).0.is_indexed());
+    let mut resized = state();
+    resized.layout.font_size += 2.0;
+    resized.books.clear();
+    assert!(!open(resized, store()).0.is_indexed());
+}

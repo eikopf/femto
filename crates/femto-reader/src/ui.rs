@@ -181,31 +181,6 @@ pub struct ReaderUi {
     scan: Option<LibraryScan>,
 }
 
-/// Draws a black hourglass on a white square in the top-right corner.
-fn busy_mark(pixels: &mut [u8], width: usize) {
-    const SIZE: usize = 36;
-    const GLASS: usize = 20;
-    if width < SIZE || pixels.len() < SIZE * width {
-        return;
-    }
-    let left = width - SIZE;
-    for row in pixels.chunks_exact_mut(width).take(SIZE) {
-        row[left..].fill(255);
-    }
-    let (x0, y0) = (left + (SIZE - GLASS) / 2, (SIZE - GLASS) / 2);
-    for y in 0..GLASS {
-        // Bars at both ends, a solid upper bulb and an outlined lower one.
-        let inset = y.min(GLASS - 1 - y).min(GLASS / 2 - 2);
-        let bar = !(2..GLASS - 2).contains(&y);
-        for x in inset..GLASS - inset {
-            let edge = x < inset + 2 || x >= GLASS - inset - 2;
-            if bar || edge || y < GLASS / 2 {
-                pixels[(y0 + y) * width + x0 + x] = 0;
-            }
-        }
-    }
-}
-
 impl ReaderUi {
     pub fn set_kosync_available(&mut self, available: bool) {
         self.kosync_available = available;
@@ -2207,7 +2182,7 @@ impl ReaderUi {
     pub fn render(&self, reader: &mut Reader, levels: u16) -> Result<Vec<u8>> {
         let mut pixels = self.render_view(reader, levels)?;
         if self.is_busy() {
-            busy_mark(&mut pixels, reader.state.layout.width as usize);
+            crate::display::busy_mark(&mut pixels, reader.state.layout.width as usize);
         }
         Ok(pixels)
     }

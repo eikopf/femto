@@ -289,6 +289,9 @@ fn cooperative_startup_restores_position_and_matches_synchronous_pixels() {
     let mut actual = startup.finish().unwrap();
     assert_eq!(actual.position(), expected.position());
     assert_eq!(actual.page_index(), expected.page_index());
+    // Opening stops at the saved page; later steps index the rest.
+    assert!(actual.page_count() <= expected.page_count());
+    while actual.index_step().unwrap() {}
     assert_eq!(actual.page_count(), expected.page_count());
     assert_eq!(actual.render(4).unwrap(), expected.render(4).unwrap());
     assert_eq!(
@@ -702,6 +705,7 @@ fn cooperative_reflow_matches_synchronous_layout_without_changing_state_early() 
     reader.finish_reflow(job).unwrap();
     assert_eq!(reader.position(), position);
     assert_eq!(reader.state.layout, next);
+    while reader.index_step().unwrap() {}
     assert_eq!(reader.page_count(), expected.page_count());
     assert_eq!(reader.render(2).unwrap(), expected.render(2).unwrap());
     let mut stale = reader.begin_reflow(previous).unwrap();
@@ -829,11 +833,12 @@ fn cooperative_rotation_commits_geometry_and_orientation_together() {
         while !reader.step_reflow(&mut job).unwrap() {
             steps += 1;
         }
-        assert_eq!(steps, expected.page_count());
+        assert!(steps <= expected.page_count());
         reader.finish_reflow(job).unwrap();
         assert_eq!(reader.state.rotation, rotation);
         assert_eq!(reader.state.layout, expected.state.layout);
         assert_eq!(reader.position(), position);
+        while reader.index_step().unwrap() {}
         assert_eq!(reader.page_count(), expected.page_count());
         assert_eq!(reader.render(2).unwrap(), expected.render(2).unwrap());
     }
@@ -876,6 +881,7 @@ fn cooperative_chapter_jumps_preserve_history_and_match_synchronous_navigation()
         complete_navigation(&mut reader, action);
         expected.dispatch(action).unwrap();
         assert_eq!(reader.position(), expected.position());
+        while reader.index_step().unwrap() {}
         assert_eq!(reader.page_count(), expected.page_count());
         assert_eq!(reader.render(2).unwrap(), expected.render(2).unwrap());
     }

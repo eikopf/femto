@@ -225,6 +225,8 @@ fn tuned_pixels_survive_host_and_journal_reload_in_every_orientation() {
             let mut startup = ReaderStartup::from_document(book("Tuned"), fonts(), state).unwrap();
             while !startup.step().unwrap() {}
             let mut reopened = startup.finish().unwrap();
+            // Opening finishes at the saved page; the rest is indexed afterwards.
+            while reopened.index_step().unwrap() {}
             assert_eq!(reopened.state.text_raster, tuning);
             assert_eq!(reopened.state.rotation, rotation);
             assert_eq!(reopened.position(), anchor);

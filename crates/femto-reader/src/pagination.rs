@@ -30,6 +30,29 @@ pub struct PageCache {
     /// prepared or recently shown page needs no layout.
     spares: Vec<(usize, Page)>,
     id: u64,
+    /// Pagination of the chapter's remaining pages, absent once the index is complete.
+    rest: Option<Box<Rest>>,
+    /// The index came from or has been written to a persistent store.
+    pub(crate) stored: bool,
+}
+
+/// Where indexing continues after the pages known so far.
+struct Rest {
+    next: Locator,
+    context: PaginationContext,
+    missing: usize,
+}
+
+fn missing_glyphs(page: &Page) -> usize {
+    page.lines
+        .iter()
+        .flat_map(|line| &line.glyphs)
+        .filter(|glyph| glyph.id == 0)
+        .count()
+}
+
+fn missing_warning(missing: usize) -> Option<String> {
+    (missing != 0).then(|| format!("{missing} glyphs unavailable in selected fonts"))
 }
 
 /// Distinguishes caches so results derived from one are never used with another.
@@ -46,6 +69,64 @@ impl PageCache {
     }
     pub(crate) fn selected(&self) -> usize {
         self.selected
+    }
+    pub(crate) fn config(&self) -> LayoutConfig {
+        self.config
+    }
+
+    /// Whether every page of the chapter is indexed. Known page indexes never
+    /// change; an incomplete index only grows.
+    pub fn is_complete(&self) -> bool {
+        self.rest.is_none()
+    }
+
+    /// Indexes one more page. Returns whether a page was added.
+    pub fn extend(&mut self, fonts: &Fonts) -> Result<bool> {
+        let Some(mut rest) = self.rest.take() else {
+            return Ok(false);
+        };
+        if self.pages.len() == 16_384 {
+            return Err(Error::Limit("chapter page index"));
+        }
+        let mut produced = None;
+        let step = paginate_step_with_context(
+            &self.chapter,
+            fonts,
+            self.config,
+            rest.next,
+            self.end,
+            self.begin,
+            &mut rest.context,
+            |page| {
+                produced = Some(page);
+                Ok(false)
+            },
+        )?;
+        let page = produced.ok_or(Error::Layout("missing indexed page"))?;
+        rest.missing += missing_glyphs(&page);
+        let index = self.pages.len();
+        self.pages.push(PageBounds {
+            start: page.start,
+            end: page.end,
+        });
+        // The new page is usually the next one to be shown.
+        if self.spares.len() < Self::SPARES {
+            self.spares.push((index, page));
+        }
+        match step.next {
+            Some(next) => {
+                rest.next = next;
+                self.rest = Some(rest);
+            }
+            None => self.warnings.extend(missing_warning(rest.missing)),
+        }
+        Ok(true)
+    }
+
+    /// Indexes until the page containing `locator` is known.
+    pub fn index_until(&mut self, locator: Locator, fonts: &Fonts) -> Result<()> {
+        while self.pages.last().is_some_and(|page| page.start <= locator) && self.extend(fonts)? {}
+        Ok(())
     }
 
     fn layout(&self, index: usize, fonts: &Fonts) -> Result<Page> {
@@ -134,6 +215,8 @@ impl PageCache {
             page: retained.ok_or(Error::Layout("no chapter page"))?,
             spares: Vec::new(),
             id: next_id(),
+            rest: None,
+            stored: false,
         })
     }
 
@@ -183,6 +266,10 @@ pub struct PageIndexer {
     retained: Option<Page>,
     missing: usize,
     context: PaginationContext,
+    /// Finish as soon as the target page is known instead of at the chapter end.
+    partial: bool,
+    /// Page bounds came from a persistent store and are checked on use.
+    seeded: bool,
 }
 
 impl PageIndexer {
@@ -233,15 +320,88 @@ impl PageIndexer {
             retained: None,
             missing: 0,
             context: PaginationContext::default(),
+            partial: false,
+            seeded: false,
         })
+    }
+    /// Lets the job finish once the page containing the target is laid out;
+    /// the resulting cache indexes the remaining pages on demand.
+    pub fn partial(mut self) -> Self {
+        self.partial = true;
+        self
+    }
+    /// Starts from page bounds recorded for the same chapter, fonts and
+    /// layout, so only the target page needs layout. Bounds that do not
+    /// reproduce are discarded and the chapter is indexed afresh.
+    pub(crate) fn seeded(mut self, pages: Vec<PageBounds>) -> Self {
+        let ordered = pages.windows(2).all(|pair| pair[0].start < pair[1].start);
+        if !pages.is_empty() && pages.len() <= 16_384 && ordered && self.pages.is_empty() {
+            self.selected = pages
+                .partition_point(|page| page.start <= self.target)
+                .saturating_sub(1);
+            self.pages = pages;
+            self.next = None;
+            self.seeded = true;
+        }
+        self
     }
     pub fn page_count(&self) -> usize {
         self.pages.len()
     }
+    pub(crate) fn bounds(&self) -> &[PageBounds] {
+        &self.pages
+    }
     pub fn is_finished(&self) -> bool {
         self.next.is_none()
     }
+    /// Whether [`Self::finish`] can produce a cache showing the target page.
+    fn is_ready(&self) -> bool {
+        self.retained.is_some()
+            && (self.is_finished()
+                || self.partial
+                    && self
+                        .pages
+                        .last()
+                        .is_some_and(|page| page.start > self.target))
+    }
+    /// Lays out the target page of a seeded index.
+    fn retain_seeded(&mut self, fonts: &Fonts) -> Result<()> {
+        let expected = self.pages[self.selected];
+        let mut produced = None;
+        paginate_step_until(
+            &self.chapter,
+            fonts,
+            self.config,
+            expected.start,
+            self.end,
+            self.begin,
+            |page| {
+                produced = Some(page);
+                Ok(false)
+            },
+        )?;
+        match produced {
+            Some(page) if page.start == expected.start && page.end == expected.end => {
+                self.retained = Some(page);
+            }
+            _ => {
+                // The recorded index belongs to another layout; start over.
+                self.pages.clear();
+                self.selected = 0;
+                self.seeded = false;
+                self.next = Some(self.begin.unwrap_or(Locator {
+                    chapter: self.chapter.index,
+                    ..Default::default()
+                }));
+            }
+        }
+        Ok(())
+    }
     pub fn step(&mut self, fonts: &Fonts) -> Result<bool> {
+        if self.seeded && self.retained.is_none() {
+            self.retain_seeded(fonts)?;
+            return Ok(self.is_ready());
+        }
         let Some(start) = self.next else {
             return Ok(true);
         };
@@ -263,12 +423,7 @@ impl PageIndexer {
             },
         )?;
         let page = produced.ok_or(Error::Layout("missing indexed page"))?;
-        self.missing += page
-            .lines
-            .iter()
-            .flat_map(|l| &l.glyphs)
-            .filter(|g| g.id == 0)
-            .count();
+        self.missing += missing_glyphs(&page);
         let bounds = PageBounds {
             start: page.start,
             end: page.end,
@@ -279,18 +434,22 @@ impl PageIndexer {
         }
         self.pages.push(bounds);
         self.next = result.next;
-        Ok(self.is_finished())
+        Ok(self.is_ready())
     }
     pub fn finish(self) -> Result<PageCache> {
-        if !self.is_finished() {
+        if !self.is_ready() {
             return Err(Error::Layout("chapter indexing incomplete"));
         }
         let mut warnings = self.chapter.warnings.clone();
-        if self.missing != 0 {
-            warnings.push(format!(
-                "{} glyphs unavailable in selected fonts",
-                self.missing
-            ));
+        let rest = self.next.map(|next| {
+            Box::new(Rest {
+                next,
+                context: self.context,
+                missing: self.missing,
+            })
+        });
+        if rest.is_none() {
+            warnings.extend(missing_warning(self.missing));
         }
         Ok(PageCache {
             chapter: self.chapter,
@@ -303,6 +462,8 @@ impl PageIndexer {
             page: self.retained.ok_or(Error::Layout("no chapter page"))?,
             spares: Vec::new(),
             id: next_id(),
+            rest,
+            stored: self.seeded,
         })
     }
 }

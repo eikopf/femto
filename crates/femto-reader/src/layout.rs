@@ -142,6 +142,8 @@ pub struct Font {
     data: Vec<u8>,
     key: CacheKey,
     offset: u32,
+    /// Content hash, for keys that must survive restarts.
+    digest: u64,
     /// Results that depend only on the font data and are otherwise recomputed
     /// for every candidate line.
     shaping: std::sync::Mutex<ShapingCache>,
@@ -188,6 +190,7 @@ impl Font {
         Face::from_slice(&data, 0).ok_or(Error::Font)?;
         let (key, offset) = (face.key, face.offset);
         Ok(Self {
+            digest: crate::page_index::fnv(crate::page_index::FNV_START, &data),
             data,
             key,
             offset,
@@ -253,6 +256,21 @@ impl Fonts {
             fallback: Vec::new(),
             masks: std::sync::Mutex::new(crate::glyph_cache::GlyphCache::new(512 * 1024, 1024)),
         }
+    }
+    /// Content hash of every font slot in selection order.
+    pub(crate) fn digest(&self) -> u64 {
+        let slots = [
+            Some(&self.regular),
+            self.bold.as_ref(),
+            self.italic.as_ref(),
+            self.bold_italic.as_ref(),
+        ];
+        slots
+            .into_iter()
+            .chain(self.fallback.iter().map(Some))
+            .fold(crate::page_index::FNV_START, |hash, font| {
+                crate::page_index::fnv(hash, &font.map_or(0, |font| font.digest).to_le_bytes())
+            })
     }
     /// Identifies the font slots and raster settings that determine a mask.
     fn mask_tag(&self, text: crate::display::TextRaster) -> u64 {

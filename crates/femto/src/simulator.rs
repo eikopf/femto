@@ -232,6 +232,11 @@ fn main() -> Result<()> {
     }
     let mut reader = startup.finish()?;
     reader.record_position(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs());
+    // Chapter page indexes are kept beside the state file.
+    reader.set_index_store(Some(femto_reader::page_index::IndexStore::new(
+        args.state.with_extension("index"),
+        env!("CARGO_PKG_VERSION"),
+    )));
     drop(loading);
     let mut ui = ReaderUi::default();
     if let Some(directory) = args.dictionary_directory {
@@ -431,6 +436,10 @@ fn main() -> Result<()> {
         if ui.poll_open(&mut reader) == Effect::Redraw {
             dirty = true;
             save(&mut reader, &args.state)?;
+        }
+        // Index the rest of the chapter and the next one between inputs.
+        if !ui.is_busy() {
+            reader.index_step()?;
         }
         // The busy mark appears and disappears with pending work.
         if ui.is_busy() != busy {

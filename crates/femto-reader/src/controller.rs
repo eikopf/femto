@@ -6,6 +6,7 @@ use crate::{
     layout::{
         Fonts, LayoutConfig, Locator, Page, paginate, rasterize_display, rasterize_display_report,
     },
+    page_index::IndexStore,
     pagination::{PageCache, PageIndexer},
     state::{BookTypography, ReaderState},
 };
@@ -48,6 +49,28 @@ pub struct Reader {
     /// Rendered menu cells by text, size and levels, most recently used last.
     /// Menus redraw mostly unchanged rows on every selection change.
     cells: std::sync::Mutex<Vec<(CellKey, Vec<u8>)>>,
+    index_store: Option<IndexStore>,
+    /// Index of the following chapter, built while idle: the pagination it
+    /// follows and the job.
+    ahead: Option<(u64, PageIndexer)>,
+}
+
+/// Indexes a chapter for display: recorded page bounds are reused, and
+/// otherwise the job finishes as soon as the target page is known.
+fn chapter_indexer(
+    store: Option<&IndexStore>,
+    fonts: &Fonts,
+    book: &str,
+    chapter: std::sync::Arc<Chapter>,
+    config: LayoutConfig,
+    target: Locator,
+) -> Result<PageIndexer> {
+    let recorded = store.and_then(|store| store.load(book, fonts, config, chapter.index));
+    let indexer = PageIndexer::from_shared(chapter, config, target)?.partial();
+    Ok(match recorded {
+        Some(pages) => indexer.seeded(pages),
+        None => indexer,
+    })
 }
 
 type CellKey = (String, u32, u32, u16);
@@ -237,6 +260,7 @@ pub struct ReaderStartup {
     phase: OpeningPhase,
     fonts: Fonts,
     state: ReaderState,
+    index_store: Option<IndexStore>,
 }
 
 impl ReaderStartup {
@@ -256,6 +280,7 @@ impl ReaderStartup {
             },
             fonts,
             state,
+            index_store: None,
         })
     }
 
@@ -273,6 +298,7 @@ impl ReaderStartup {
             phase: OpeningPhase::cached(path.as_ref(), root.as_ref(), limit)?,
             fonts,
             state,
+            index_store: None,
         })
     }
 
@@ -288,9 +314,12 @@ impl ReaderStartup {
 
     pub fn from_document(document: Document, fonts: Fonts, state: ReaderState) -> Result<Self> {
         Ok(Self {
-            phase: OpeningPhase::Indexing(Box::new(prepare_opening(document, &state)?)),
+            phase: OpeningPhase::Indexing(Box::new(prepare_opening(
+                document, &state, &fonts, None,
+            )?)),
             fonts,
             state,
+            index_store: None,
         })
     }
 
@@ -306,34 +335,26 @@ impl ReaderStartup {
         Ok(())
     }
 
+    /// Records and reuses chapter page indexes; applies to books opened afterwards.
+    pub fn set_index_store(&mut self, store: Option<IndexStore>) {
+        self.index_store = store;
+    }
+
     pub fn cancel(self) -> (Fonts, ReaderState) {
         (self.fonts, self.state)
     }
 
+    /// A blank page with the busy mark, shown while the first book loads
+    /// and no earlier view exists to keep on screen.
     pub fn loading_frame(&self, levels: u16) -> Result<Vec<u8>> {
-        let config = LayoutConfig {
-            width: self.state.layout.width,
-            height: self.state.layout.height,
-            ..LayoutConfig::default()
-        };
-        let text = format!(
-            "Opening book\n\n{} pages indexed\n\nPress a button or tap to cancel.",
-            self.indexed_pages()
-        );
-        let mut document = Document::from_text("Opening book", &text)?;
-        let chapter = document.chapter(0)?;
-        let pages = paginate(&chapter, &self.fonts, config)?;
-        rasterize_display(
-            pages
-                .pages
-                .first()
-                .ok_or(Error::Layout("missing loading page"))?,
-            &self.fonts,
-            config,
-            self.state.text_raster,
-            levels,
-            |_| Err(Error::Document("loading page has no resources".into())),
-        )
+        if !matches!(levels, 2 | 4 | 256) {
+            return Err(Error::Layout("display levels must be 2, 4, or 256"));
+        }
+        let layout = self.state.layout;
+        layout.validate()?;
+        let mut pixels = vec![255; layout.width as usize * layout.height as usize];
+        crate::display::busy_mark(&mut pixels, layout.width as usize);
+        Ok(pixels)
     }
 
     pub fn indexed_pages(&self) -> usize {
@@ -356,7 +377,12 @@ impl ReaderStartup {
             return job.indexer.step(&self.fonts);
         }
         if let Some(document) = self.phase.read_document(budget)? {
-            self.phase = OpeningPhase::Indexing(Box::new(prepare_opening(document, &self.state)?));
+            self.phase = OpeningPhase::Indexing(Box::new(prepare_opening(
+                document,
+                &self.state,
+                &self.fonts,
+                self.index_store.as_ref(),
+            )?));
         }
         Ok(false)
     }
@@ -387,11 +413,18 @@ impl ReaderStartup {
             links,
             frames: Vec::new(),
             cells: Default::default(),
+            index_store: self.index_store,
+            ahead: None,
         })
     }
 }
 
-fn prepare_opening(mut document: Document, state: &ReaderState) -> Result<IndexedOpening> {
+fn prepare_opening(
+    mut document: Document,
+    state: &ReaderState,
+    fonts: &Fonts,
+    store: Option<&IndexStore>,
+) -> Result<IndexedOpening> {
     if document.metadata.chapters.is_empty() {
         return Err(Error::Document("book has no chapters".into()));
     }
@@ -408,12 +441,20 @@ fn prepare_opening(mut document: Document, state: &ReaderState) -> Result<Indexe
     let config = typography.layout(state.layout);
     let chapter = document.chapter(position.chapter)?;
     let links = chapter.links.clone();
+    let indexer = chapter_indexer(
+        store,
+        fonts,
+        &document.metadata.id,
+        std::sync::Arc::new(chapter),
+        config,
+        position,
+    )?;
     Ok(IndexedOpening {
         typography,
         document,
         position,
         links,
-        indexer: PageIndexer::new(chapter, config, position)?,
+        indexer,
     })
 }
 
@@ -459,6 +500,8 @@ impl Reader {
             links,
             frames: Vec::new(),
             cells: Default::default(),
+            index_store: None,
+            ahead: None,
         })
     }
 
@@ -466,9 +509,80 @@ impl Reader {
         self.pagination.page()
     }
 
+    /// Records and reuses chapter page indexes from now on.
+    pub fn set_index_store(&mut self, store: Option<IndexStore>) {
+        self.index_store = store;
+    }
+
+    /// Whether every page of the visible chapter is indexed; until then
+    /// [`Self::page_count`] grows.
+    pub fn is_indexed(&self) -> bool {
+        self.pagination.is_complete()
+    }
+
+    /// One bounded step of background indexing: the rest of the visible
+    /// chapter, then a record of it, then the following chapter so that
+    /// crossing into it needs no indexing. Returns whether a step ran.
+    pub fn index_step(&mut self) -> Result<bool> {
+        if self.pagination.extend(&self.fonts)? {
+            return Ok(true);
+        }
+        let Some(store) = self.index_store.clone() else {
+            return Ok(false);
+        };
+        let book = self.document.metadata.id.clone();
+        let chapter = self.pagination.chapter();
+        if !self.pagination.stored {
+            // A failed write is not retried on every idle poll.
+            self.pagination.stored = true;
+            store.store(
+                &book,
+                &self.fonts,
+                self.pagination.config(),
+                chapter.index,
+                self.pagination.bounds(),
+            )?;
+            return Ok(true);
+        }
+        let config = self.pagination.config();
+        let id = self.pagination.id();
+        if self.ahead.as_ref().is_some_and(|(owner, _)| *owner != id) {
+            self.ahead = None;
+        }
+        let next = chapter.index + 1;
+        let Some((_, job)) = &mut self.ahead else {
+            if next >= self.document.metadata.chapters.len()
+                || store.load(&book, &self.fonts, config, next).is_some()
+            {
+                return Ok(false);
+            }
+            let start = Locator {
+                chapter: next,
+                ..Default::default()
+            };
+            let job = PageIndexer::new(self.document.chapter(next)?, config, start)?;
+            self.ahead = Some((id, job));
+            return Ok(true);
+        };
+        if job.is_finished() {
+            return Ok(false);
+        }
+        if job.step(&self.fonts)? {
+            store.store(&book, &self.fonts, config, next, job.bounds())?;
+        }
+        Ok(true)
+    }
+
     pub fn begin_reflow(&self, next: LayoutConfig) -> Result<Reflowing> {
         Ok(Reflowing {
-            indexer: PageIndexer::from_shared(self.pagination.chapter(), next, self.position)?,
+            indexer: chapter_indexer(
+                self.index_store.as_ref(),
+                &self.fonts,
+                &self.document.metadata.id,
+                self.pagination.chapter(),
+                next,
+                self.position,
+            )?,
             origin: self.document.metadata.id.clone(),
             position: self.position,
             previous: self.state.layout,
@@ -537,6 +651,7 @@ impl Reader {
             },
             Action::Next
                 if self.page_index + 1 == self.page_count()
+                    && self.pagination.is_complete()
                     && chapter + 1 < self.document.metadata.chapters.len() =>
             {
                 (
@@ -584,7 +699,14 @@ impl Reader {
         let links = chapter.links.clone();
         Ok(Navigating {
             clipping: None,
-            indexer: PageIndexer::from_shared(chapter, self.state.layout, target)?,
+            indexer: chapter_indexer(
+                self.index_store.as_ref(),
+                &self.fonts,
+                &self.document.metadata.id,
+                chapter,
+                self.state.layout,
+                target,
+            )?,
             target,
             origin: self.document.metadata.id.clone(),
             position: self.position,
@@ -766,7 +888,12 @@ impl Reader {
     /// Parses the destination before starting cooperative page indexing.
     pub fn begin_open(&self, document: Document) -> Result<BookOpening> {
         Ok(BookOpening {
-            phase: OpeningPhase::Indexing(Box::new(prepare_opening(document, &self.state)?)),
+            phase: OpeningPhase::Indexing(Box::new(prepare_opening(
+                document,
+                &self.state,
+                &self.fonts,
+                self.index_store.as_ref(),
+            )?)),
             origin: self.document.metadata.id.clone(),
             origin_position: self.position,
             config: self.state.layout,
@@ -1626,6 +1753,7 @@ impl Reader {
             None
         };
         if replacement.is_none() {
+            self.pagination.index_until(target, &self.fonts)?;
             let index = self.pagination.page_for(target);
             self.pagination.select(index, &self.fonts)?;
         }
@@ -1670,7 +1798,11 @@ impl Reader {
                 let target = self.link_target(index)?;
                 self.move_to(target, true)
             }
-            Action::Next if self.page_index + 1 < self.page_count() => {
+            // The page after the last indexed one is laid out on demand.
+            Action::Next
+                if self.page_index + 1 < self.page_count()
+                    || self.pagination.extend(&self.fonts)? =>
+            {
                 self.pagination.select(self.page_index + 1, &self.fonts)?;
                 self.page_index += 1;
                 self.position = self.page().start;

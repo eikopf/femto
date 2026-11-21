@@ -133,7 +133,14 @@ fn run() -> Result<(), String> {
         }
     }
     report_heap("before layout");
-    let (mut reader, resumed) = startup_reader(&mut screen, fonts, state, candidates)?;
+    // Chapter page indexes are recorded per firmware build, because layout
+    // code may differ between builds.
+    let index_store = screen.storage.is_some().then(|| {
+        let build = unsafe { (*esp_idf_svc::sys::esp_app_get_description()).app_elf_sha256 };
+        let salt: String = build.iter().map(|byte| format!("{byte:02x}")).collect();
+        femto_reader::page_index::IndexStore::new("/sdcard/femto/.index", &salt)
+    });
+    let (mut reader, resumed) = startup_reader(&mut screen, fonts, state, candidates, index_store)?;
     report_heap("reader ready");
     if screen.storage.is_some()
         && !library
@@ -422,9 +429,11 @@ fn run() -> Result<(), String> {
         } else if preparing && !ui.is_open() && !ui.is_busy() {
             // Prepare the likely next page between inputs, then the opposite one.
             let levels = if cfg!(feature = "grayscale") { 4 } else { 2 };
+            // Then index the rest of the chapter and the one after it.
             let prepared = reader
                 .prepare_turn(turning_forward, levels)
-                .and_then(|ran| Ok(ran || reader.prepare_turn(!turning_forward, levels)?));
+                .and_then(|ran| Ok(ran || reader.prepare_turn(!turning_forward, levels)?))
+                .and_then(|ran| Ok(ran || reader.index_step()?));
             // Nothing changes until the next input once both pages are ready
             // or preparation fails.
             match prepared {
@@ -624,6 +633,7 @@ fn startup_reader(
     fonts: Fonts,
     state: ReaderState,
     candidates: Vec<(std::path::PathBuf, bool)>,
+    index_store: Option<femto_reader::page_index::IndexStore>,
 ) -> Result<(Reader, bool), String> {
     let specimen = || {
         Document::from_text(
@@ -635,6 +645,7 @@ fn startup_reader(
     let mut startup =
         ReaderStartup::from_document(specimen().map_err(|e| e.to_string())?, fonts, state)
             .map_err(|e| e.to_string())?;
+    startup.set_index_store(index_store.clone());
     let levels = if cfg!(feature = "grayscale") { 4 } else { 2 };
     let mut plane =
         vec![255; femto_picco_board::PLANE_BYTES * if cfg!(feature = "grayscale") { 2 } else { 1 }];
@@ -647,8 +658,6 @@ fn startup_reader(
         pack_pixels(&pixels, rotation, &mut plane)?;
         drop(pixels);
         screen.present_oriented(&plane, orientation(rotation))?;
-        let mut refreshed = Instant::now();
-        let mut displayed_pages = 0;
         loop {
             std::thread::sleep(Duration::from_millis(10));
             screen.poll_wifi();
@@ -679,15 +688,6 @@ fn startup_reader(
                     continue 'books;
                 }
             }
-            if startup.indexed_pages() != displayed_pages
-                && refreshed.elapsed() >= Duration::from_secs(2)
-            {
-                let pixels = startup.loading_frame(levels).map_err(|e| e.to_string())?;
-                pack_pixels(&pixels, rotation, &mut plane)?;
-                screen.present(&plane)?;
-                displayed_pages = startup.indexed_pages();
-                refreshed = Instant::now();
-            }
         }
     }
     let (fonts, state) = startup.cancel();
@@ -701,7 +701,10 @@ fn startup_reader(
         if fallback.step().map_err(|e| e.to_string())? {
             return fallback
                 .finish()
-                .map(|reader| (reader, false))
+                .map(|mut reader| {
+                    reader.set_index_store(index_store);
+                    (reader, false)
+                })
                 .map_err(|e| e.to_string());
         }
     }

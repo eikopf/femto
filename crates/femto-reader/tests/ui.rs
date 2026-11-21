@@ -1392,7 +1392,7 @@ fn library_opening_can_be_cancelled_before_it_replaces_the_current_book() {
     let pixels = reader.render(2).unwrap();
     let mut ui = ReaderUi::default();
     ui.set_library(femto_reader::state::Library::scan(directory.path()).unwrap());
-    for (cancel_by_back, polls) in [(true, 1), (false, 1), (true, 4), (false, 4)] {
+    for (cancel_by_back, polls) in [(true, 1), (false, 1), (true, 2), (false, 2)] {
         ui.open_library();
         ui.select(&mut reader).unwrap();
         ui.select(&mut reader).unwrap();

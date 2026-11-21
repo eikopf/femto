@@ -54,9 +54,12 @@ For a terminal preview, use `read` with the same book and font arguments. It wri
 
 ```sh
 ./scripts/build-picco
-FEMTO_PICCO_GRAYSCALE=1 ./scripts/build-picco
+FEMTO_PICCO_GRAYSCALE=0 ./scripts/build-picco
+./scripts/picco-flash
 ```
 
-The build exports an application image and manifest; it does not flash a device. [Picco firmware](picco-firmware.md) describes variants, device configuration, toolchain pins, and recovery requirements. Physical boot and operation remain unverified.
+The default build renders four gray levels and writes `output/picco-grayscale`; `FEMTO_PICCO_GRAYSCALE=0` selects the one-bit build in `output/picco`. `picco-flash` writes the default image, or the image given as its argument, to the application slot of a connected Picco.
+
+The build exports an application image and manifest. [Picco firmware](picco-firmware.md) describes variants, device configuration, toolchain pins, and recovery requirements. Physical boot and operation remain unverified.
 
 [Qualification](qualification.md) distinguishes implementation from verified behavior. [Status history](status.md) and evidence files identify the source tested at each checkpoint. [Network diagnostics](diagnostics.md) describes counters and device logging.

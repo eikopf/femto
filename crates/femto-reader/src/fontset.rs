@@ -8,13 +8,17 @@ use std::path::Path;
 pub struct Loaded {
     pub fonts: Fonts,
     pub warnings: Vec<String>,
-    /// Retained file bytes, excluding the caller's default face and parser caches.
+    /// Retained file bytes, excluding the caller's default family and parser caches.
     pub bytes: u64,
 }
 
+/// Loads `regular.ttf` with its optional `bold.ttf`, `italic.ttf` and
+/// `bold-italic.ttf` as one family, plus `fallback1.ttf` to `fallback8.ttf`.
+/// Without a usable regular face the default family is used unchanged, so
+/// styles of two different typefaces are never mixed.
 pub fn load(
     directory: &Path,
-    default: impl FnOnce() -> Result<Font>,
+    default: impl FnOnce() -> Result<Fonts>,
     limit: u64,
 ) -> Result<Loaded> {
     let mut remaining = limit;
@@ -30,21 +34,19 @@ pub fn load(
             None
         }
     };
-    let regular = face("regular.ttf");
-    let bold = face("bold.ttf");
-    let italic = face("italic.ttf");
-    let bold_italic = face("bold-italic.ttf");
-    let fallback = (1..=8)
+    let mut fonts = match face("regular.ttf") {
+        Some(regular) => {
+            let mut fonts = Fonts::new(regular);
+            fonts.bold = face("bold.ttf");
+            fonts.italic = face("italic.ttf");
+            fonts.bold_italic = face("bold-italic.ttf");
+            fonts
+        }
+        None => default()?,
+    };
+    fonts.fallback = (1..=8)
         .filter_map(|index| face(&format!("fallback{index}.ttf")))
         .collect();
-    let mut fonts = Fonts::new(match regular {
-        Some(font) => font,
-        None => default()?,
-    });
-    fonts.bold = bold;
-    fonts.italic = italic;
-    fonts.bold_italic = bold_italic;
-    fonts.fallback = fallback;
     Ok(Loaded {
         fonts,
         warnings,

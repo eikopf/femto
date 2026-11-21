@@ -1,43 +1,60 @@
 use femto_reader::{
     document::Document,
     fontset,
-    layout::{Font, LayoutConfig, paginate, rasterize},
+    layout::{Font, Fonts, LayoutConfig, paginate, rasterize},
 };
 use std::fs;
 const SERIF: &[u8] = include_bytes!("../../../tests/fixtures/DejaVuSerif.ttf");
 const SANS: &[u8] = include_bytes!("../../../tests/fixtures/DejaVuSans.ttf");
-fn default_font() -> femto_reader::Result<Font> {
-    Font::from_bytes(SERIF.to_vec())
+fn default_font() -> femto_reader::Result<Fonts> {
+    let mut fonts = Fonts::new(Font::from_bytes(SERIF.to_vec())?);
+    fonts.bold = Some(Font::from_bytes(SANS.to_vec())?);
+    Ok(fonts)
 }
 
 #[test]
-fn missing_directory_uses_embedded_face_and_invalid_faces_are_isolated() {
+fn default_family_is_used_whole_unless_the_directory_has_a_regular_face() {
     let root = tempfile::tempdir().unwrap();
     let absent = fontset::load(&root.path().join("missing"), default_font, 0).unwrap();
     assert_eq!(absent.bytes, 0);
     assert!(absent.warnings.is_empty());
+    assert!(absent.fonts.bold.is_some());
+    // An unusable regular face keeps the default family; other styles in the
+    // directory belong to a different typeface and are not read.
     fs::write(root.path().join("regular.ttf"), b"invalid").unwrap();
-    fs::create_dir(root.path().join("bold.ttf")).unwrap();
     fs::write(root.path().join("italic.ttf"), SERIF).unwrap();
-    let loaded = fontset::load(root.path(), default_font, SERIF.len() as u64).unwrap();
+    fs::write(root.path().join("fallback1.ttf"), SANS).unwrap();
+    let loaded = fontset::load(root.path(), default_font, SANS.len() as u64).unwrap();
+    assert_eq!(loaded.warnings.len(), 1);
+    assert!(loaded.fonts.bold.is_some());
+    assert!(loaded.fonts.italic.is_none());
+    assert_eq!(loaded.fonts.fallback.len(), 1);
+    assert_eq!(loaded.bytes, SANS.len() as u64);
+    // A usable regular face replaces the whole family; invalid styles are isolated.
+    fs::write(root.path().join("regular.ttf"), SERIF).unwrap();
+    fs::create_dir(root.path().join("bold.ttf")).unwrap();
+    let loaded = fontset::load(root.path(), default_font, 2 * SERIF.len() as u64).unwrap();
     assert_eq!(loaded.warnings.len(), 2);
     assert!(loaded.fonts.bold.is_none());
     assert!(loaded.fonts.italic.is_some());
-    assert_eq!(loaded.bytes, SERIF.len() as u64);
+    assert_eq!(loaded.bytes, 2 * SERIF.len() as u64);
 }
 
 #[test]
 fn aggregate_limit_is_enforced_and_failed_face_does_not_consume_budget() {
     let root = tempfile::tempdir().unwrap();
-    fs::write(root.path().join("regular.ttf"), SANS).unwrap();
-    fs::write(root.path().join("bold.ttf"), SERIF).unwrap();
+    fs::write(root.path().join("regular.ttf"), SERIF).unwrap();
+    fs::write(root.path().join("bold.ttf"), SANS).unwrap();
     fs::write(root.path().join("italic.ttf"), SERIF).unwrap();
-    let loaded = fontset::load(root.path(), default_font, SERIF.len() as u64).unwrap();
+    fs::write(root.path().join("fallback1.ttf"), SERIF).unwrap();
+    let loaded = fontset::load(root.path(), default_font, 2 * SERIF.len() as u64).unwrap();
     assert!(SANS.len() > SERIF.len());
-    assert_eq!(loaded.bytes, SERIF.len() as u64);
+    // The oversized bold face is skipped and leaves its budget to the italic.
+    assert_eq!(loaded.bytes, 2 * SERIF.len() as u64);
     assert_eq!(loaded.warnings.len(), 2);
-    assert!(loaded.fonts.bold.is_some());
-    assert!(loaded.fonts.italic.is_none());
+    assert!(loaded.fonts.bold.is_none());
+    assert!(loaded.fonts.italic.is_some());
+    assert!(loaded.fonts.fallback.is_empty());
 }
 
 #[test]

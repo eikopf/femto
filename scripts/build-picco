@@ -5,7 +5,7 @@ if [[ "${FEMTO_IDF_SHELL:-}" != 1 ]]; then
   exec nix-shell nix/firmware.nix --run './scripts/build-picco'
 fi
 femto_root="$(pwd -P)"
-case "${FEMTO_PICCO_GRAYSCALE:-0}" in
+case "${FEMTO_PICCO_GRAYSCALE:-1}" in
   0) femto_features=(); femto_output="$femto_root/output/picco"; femto_levels=2 ;;
   1) femto_features=(--features grayscale); femto_output="$femto_root/output/picco-grayscale"; femto_levels=4 ;;
   *) echo 'FEMTO_PICCO_GRAYSCALE must be 0 or 1' >&2; exit 2 ;;

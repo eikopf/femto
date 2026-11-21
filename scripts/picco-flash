@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 if ! command -v esptool >/dev/null; then
   exec nix-shell -p esptool --run "$(printf '%q ' "$0" "$@")"
 fi
-image="${1:-output/picco/femto-picco.bin}"
+image="${1:-output/picco-grayscale/femto-picco.bin}"
 port="${FEMTO_PICCO_PORT:-$(ls /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_*-if00 | head -n 1)}"
 common=(--chip esp32s3 --port "$port")
 esptool "${common[@]}" --baud 921600 --before default-reset --after no-reset \

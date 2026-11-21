@@ -70,11 +70,13 @@ From the repository root on x86_64 Linux with Nix:
 ./scripts/build-picco
 ```
 
-The optional four-level build uses absolute grayscale refreshes on every page:
+The four-level build is the default. The one-bit build remains available:
 
 ```sh
-FEMTO_PICCO_GRAYSCALE=1 ./scripts/build-picco
+FEMTO_PICCO_GRAYSCALE=0 ./scripts/build-picco
 ```
+
+The firmware embeds the unmodified Libron family (regular, bold, italic, bold italic; see `firmware/picco/fonts`). A `regular.ttf` on the card replaces the whole family with the card's faces.
 
 Its artifacts are written to `output/picco-grayscale` so the monochrome image remains available. The image manifest records `display_levels` as 2 or 4. Grayscale is an experimental comparison path, not a physically calibrated default. Both variants use the same saved typography controls and source positions.
 

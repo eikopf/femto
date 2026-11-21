@@ -67,12 +67,19 @@ fn report_heap(stage: &str) {
 fn run() -> Result<(), String> {
     let mut screen = panel::open()?;
     report_heap("peripherals");
-    let default_font =
-        || Font::from_bytes(include_bytes!("../../../tests/fixtures/DejaVuSerif.ttf").to_vec());
+    // Libron, embedded unmodified under the SIL Open Font License; see fonts/.
+    let default_fonts = || -> femto_reader::Result<Fonts> {
+        let face = |bytes: &[u8]| Font::from_bytes(bytes.to_vec());
+        let mut fonts = Fonts::new(face(include_bytes!("../fonts/Libron-Regular.ttf"))?);
+        fonts.bold = Some(face(include_bytes!("../fonts/Libron-Bold.ttf"))?);
+        fonts.italic = Some(face(include_bytes!("../fonts/Libron-Italic.ttf"))?);
+        fonts.bold_italic = Some(face(include_bytes!("../fonts/Libron-BoldItalic.ttf"))?);
+        Ok(fonts)
+    };
     let fonts = if screen.storage.is_some() {
         let loaded = femto_reader::fontset::load(
             std::path::Path::new("/sdcard/femto/fonts"),
-            default_font,
+            default_fonts,
             4 * 1024 * 1024,
         )
         .map_err(|e| e.to_string())?;
@@ -82,7 +89,7 @@ fn run() -> Result<(), String> {
         log::info!("Loaded {} bytes of SD font data", loaded.bytes);
         loaded.fonts
     } else {
-        Fonts::new(default_font().map_err(|e| e.to_string())?)
+        default_fonts().map_err(|e| e.to_string())?
     };
     let mut candidates = Vec::new();
     let mut journal = None;

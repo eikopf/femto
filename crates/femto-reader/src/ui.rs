@@ -28,13 +28,11 @@ enum Panel {
     ClippingDelete,
     SelectWord,
     WordPreview,
-    DictionaryOpening,
     DictionaryResult,
     DictionaryChooser,
     WordList,
     Links,
     LinkPreview,
-    PreviewOpening,
     Settings,
     Remote,
     Light,
@@ -47,9 +45,6 @@ enum Panel {
     Folder(usize),
     Search,
     Results,
-    Scanning,
-    Opening,
-    Reflowing,
     Errors,
     Diagnostic(usize),
 }
@@ -64,10 +59,6 @@ enum Command {
     FullRefresh(u8),
     Resume,
     Rescan,
-    CancelScan,
-    CancelOpen,
-    CancelPreview,
-    CancelReflow,
     Noop,
     ClipPage,
     DeleteClipping(usize),
@@ -190,6 +181,31 @@ pub struct ReaderUi {
     scan: Option<LibraryScan>,
 }
 
+/// Draws a black hourglass on a white square in the top-right corner.
+fn busy_mark(pixels: &mut [u8], width: usize) {
+    const SIZE: usize = 36;
+    const GLASS: usize = 20;
+    if width < SIZE || pixels.len() < SIZE * width {
+        return;
+    }
+    let left = width - SIZE;
+    for row in pixels.chunks_exact_mut(width).take(SIZE) {
+        row[left..].fill(255);
+    }
+    let (x0, y0) = (left + (SIZE - GLASS) / 2, (SIZE - GLASS) / 2);
+    for y in 0..GLASS {
+        // Bars at both ends, a solid upper bulb and an outlined lower one.
+        let inset = y.min(GLASS - 1 - y).min(GLASS / 2 - 2);
+        let bar = !(2..GLASS - 2).contains(&y);
+        for x in inset..GLASS - inset {
+            let edge = x < inset + 2 || x >= GLASS - inset - 2;
+            if bar || edge || y < GLASS / 2 {
+                pixels[(y0 + y) * width + x0 + x] = 0;
+            }
+        }
+    }
+}
+
 impl ReaderUi {
     pub fn set_kosync_available(&mut self, available: bool) {
         self.kosync_available = available;
@@ -266,10 +282,7 @@ impl ReaderUi {
         self.dictionary_cache = None;
         self.dictionary_job = None;
         self.dictionary_rows.clear();
-        if matches!(
-            self.panel,
-            Some(Panel::DictionaryOpening | Panel::DictionaryResult)
-        ) {
+        if matches!(self.panel, Some(Panel::DictionaryResult)) {
             self.panel = Some(Panel::WordPreview);
             self.selected = 0;
         }
@@ -284,10 +297,6 @@ impl ReaderUi {
     }
 
     pub fn poll_dictionary(&mut self, reader: &mut Reader) -> Effect {
-        if !matches!(self.panel, Some(Panel::DictionaryOpening)) {
-            self.dictionary_job = None;
-            return Effect::Unchanged;
-        }
         let Some(mut dictionary) = self.dictionary_job.take() else {
             return Effect::Unchanged;
         };
@@ -540,8 +549,8 @@ impl ReaderUi {
     }
     /// A swipe turns a reading page and moves a menu by one page of entries.
     pub fn swipe(&mut self, reader: &mut Reader, next: bool) -> Result<Effect> {
-        // Input waits for a pending move to another chapter; Back abandons it.
-        if self.is_navigating() {
+        // Input waits for pending work; Back abandons it.
+        if self.is_busy() {
             return Ok(Effect::Unchanged);
         }
         if matches!(
@@ -643,10 +652,8 @@ impl ReaderUi {
             .ok_or_else(|| crate::Error::Document("No library folder configured".into()))?;
         let scan = LibraryScan::cached(root, *limit)?;
         self.scan = Some(scan);
-        self.panel = Some(Panel::Scanning);
-        self.selected = 0;
         self.error = None;
-        Ok(Effect::Redraw)
+        Ok(Effect::Unchanged)
     }
     pub fn is_reflowing(&self) -> bool {
         self.reflow.is_some()
@@ -699,10 +706,8 @@ impl ReaderUi {
     fn start_reflow(&mut self, reflow: Reflowing) -> Effect {
         self.reflow_return = self.panel;
         self.reflow = Some(reflow);
-        self.panel = Some(Panel::Reflowing);
-        self.selected = 0;
         self.error = None;
-        Effect::Redraw
+        Effect::Unchanged
     }
     fn cancel_reflow(&mut self) -> Effect {
         self.reflow = None;
@@ -711,11 +716,6 @@ impl ReaderUi {
         Effect::Redraw
     }
     pub fn poll_reflow(&mut self, reader: &mut Reader) -> Effect {
-        if !matches!(self.panel, Some(Panel::Reflowing)) {
-            self.reflow = None;
-            self.reflow_return = None;
-            return Effect::Unchanged;
-        }
         let Some(mut job) = self.reflow.take() else {
             return Effect::Unchanged;
         };
@@ -742,10 +742,6 @@ impl ReaderUi {
         self.opening.is_some()
     }
     pub fn poll_open(&mut self, reader: &mut Reader) -> Effect {
-        if !matches!(self.panel, Some(Panel::Opening)) {
-            self.opening = None;
-            return Effect::Unchanged;
-        }
         let Some(mut opening) = self.opening.take() else {
             return Effect::Unchanged;
         };
@@ -873,13 +869,38 @@ impl ReaderUi {
     pub fn is_open(&self) -> bool {
         self.panel.is_some()
     }
+    /// Whether background work is pending. The view stays as it was when
+    /// the work began; frontends show [`Self::render`]'s busy mark for it.
+    pub fn is_busy(&self) -> bool {
+        self.is_navigating()
+            || self.is_reflowing()
+            || self.is_opening()
+            || self.is_preview_opening()
+            || self.is_scanning()
+            || self.is_dictionary_opening()
+    }
     pub fn back(&mut self, reader: &mut Reader) -> Result<Effect> {
-        if self.is_navigating() {
-            self.cancel_navigation(reader);
+        // Back abandons pending work and leaves the view it started from.
+        if self.is_busy() {
+            if self.is_navigating() {
+                self.cancel_navigation(reader);
+            }
+            if self.is_reflowing() {
+                self.cancel_reflow();
+            }
+            if self.is_preview_opening() {
+                self.cancel_preview();
+            }
+            self.opening = None;
+            self.scan = None;
+            // Prepared indexes stay available for the next lookup.
+            if let Some(dictionary) = self.dictionary_job.take().filter(|d| d.is_ready()) {
+                self.dictionary_cache = Some(dictionary);
+            }
             return Ok(Effect::Redraw);
         }
         match self.panel {
-            Some(Panel::DictionaryOpening | Panel::DictionaryResult) => {
+            Some(Panel::DictionaryResult) => {
                 if let Some(dictionary) = self.dictionary_job.take().filter(|d| d.is_ready()) {
                     self.dictionary_cache = Some(dictionary);
                 }
@@ -910,7 +931,6 @@ impl ReaderUi {
                 self.selected = 0;
                 Ok(Effect::Redraw)
             }
-            Some(Panel::PreviewOpening) => Ok(self.cancel_preview()),
             Some(Panel::LinkPreview) => {
                 self.preview = None;
                 self.panel = self.preview_return.take();
@@ -923,17 +943,6 @@ impl ReaderUi {
             }
             Some(Panel::Kosync) => {
                 self.kosync_event = Some(KosyncEvent::Back);
-                Ok(Effect::Redraw)
-            }
-            Some(Panel::Reflowing) => Ok(self.cancel_reflow()),
-            Some(Panel::Opening) => {
-                self.opening = None;
-                self.open_library();
-                Ok(Effect::Redraw)
-            }
-            Some(Panel::Scanning) => {
-                self.scan = None;
-                self.open_library();
                 Ok(Effect::Redraw)
             }
             Some(Panel::Diagnostic(_)) => {
@@ -984,8 +993,8 @@ impl ReaderUi {
         self.error = None;
     }
     pub fn turn(&mut self, reader: &mut Reader, next: bool) -> Result<Effect> {
-        // Input waits for a pending move to another chapter; Back abandons it.
-        if self.is_navigating() {
+        // Input waits for pending work; Back abandons it.
+        if self.is_busy() {
             return Ok(Effect::Unchanged);
         }
         if matches!(self.panel, Some(Panel::SelectWord)) {
@@ -1038,10 +1047,6 @@ impl ReaderUi {
     }
 
     pub fn poll_preview(&mut self, reader: &mut Reader) -> Effect {
-        if !matches!(self.panel, Some(Panel::PreviewOpening)) {
-            self.preview_opening = None;
-            return Effect::Unchanged;
-        }
         let Some(mut job) = self.preview_opening.take() else {
             return Effect::Unchanged;
         };
@@ -1090,8 +1095,7 @@ impl ReaderUi {
         self.error = None;
         self.preview = None;
         self.preview_return = return_to;
-        self.panel = Some(Panel::PreviewOpening);
-        Ok(Effect::Redraw)
+        Ok(Effect::Unchanged)
     }
 
     fn capture_word_range(
@@ -1119,8 +1123,8 @@ impl ReaderUi {
     }
 
     pub fn tap(&mut self, reader: &mut Reader, x: u32, y: u32) -> Result<Effect> {
-        // Input waits for a pending move to another chapter; Back abandons it.
-        if self.is_navigating() {
+        // Input waits for pending work; Back abandons it.
+        if self.is_busy() {
             return Ok(Effect::Unchanged);
         }
         let layout = reader.state.layout;
@@ -1221,8 +1225,8 @@ impl ReaderUi {
         self.activate(reader, *command)
     }
     pub fn select(&mut self, reader: &mut Reader) -> Result<Effect> {
-        // Input waits for a pending move to another chapter; Back abandons it.
-        if self.is_navigating() {
+        // Input waits for pending work; Back abandons it.
+        if self.is_busy() {
             return Ok(Effect::Unchanged);
         }
         if matches!(self.panel, Some(Panel::SelectWord)) {
@@ -1334,9 +1338,7 @@ impl ReaderUi {
                     None => crate::dictionary::Dictionary::open(path)?,
                 });
                 self.dictionary_rows.clear();
-                self.panel = Some(Panel::DictionaryOpening);
-                self.selected = 0;
-                Ok(Effect::Redraw)
+                Ok(Effect::Unchanged)
             })(),
             Command::CloseDictionary => self.back(reader),
             Command::CancelWord => self.back(reader),
@@ -1418,7 +1420,6 @@ impl ReaderUi {
                     Effect::Redraw
                 })
             }
-            Command::CancelScan => self.back(reader),
             Command::Rescan => self.rescan_library(),
             Command::Character(character) => Ok(self.type_char(character)),
             Command::Delete => Ok(self.delete_char()),
@@ -1481,20 +1482,11 @@ impl ReaderUi {
                     };
                     opening.map(|opening| {
                         self.opening = Some(opening);
-                        self.panel = Some(Panel::Opening);
-                        self.selected = 0;
-                        Effect::Redraw
+                        Effect::Unchanged
                     })
                 }
                 None => Err(crate::Error::Document("library entry unavailable".into())),
             },
-            Command::CancelReflow => Ok(self.cancel_reflow()),
-            Command::CancelPreview => Ok(self.cancel_preview()),
-            Command::CancelOpen => {
-                self.opening = None;
-                self.open_library();
-                Ok(Effect::Redraw)
-            }
             Command::Resume => {
                 self.panel = None;
                 Ok(Effect::Redraw)
@@ -1807,7 +1799,6 @@ impl ReaderUi {
                 .iter()
                 .map(|(label, start, end)| (label.clone(), Command::PickWord(*start, *end)))
                 .collect(),
-            Panel::DictionaryOpening => vec![("Cancel lookup".into(), Command::CloseDictionary)],
             Panel::DictionaryResult => {
                 std::iter::once(("Back to selection".into(), Command::CloseDictionary))
                     .chain(
@@ -1975,10 +1966,6 @@ impl ReaderUi {
                     Command::Open(Panel::Errors),
                 ),
             ],
-            Panel::Reflowing => vec![("Cancel reflow".into(), Command::CancelReflow)],
-            Panel::PreviewOpening => vec![("Cancel preview".into(), Command::CancelPreview)],
-            Panel::Opening => vec![("Cancel opening".into(), Command::CancelOpen)],
-            Panel::Scanning => vec![("Cancel scan".into(), Command::CancelScan)],
             Panel::Errors => self
                 .library
                 .errors
@@ -2215,7 +2202,16 @@ impl ReaderUi {
         }
         Ok(pixels)
     }
+    /// Renders the current view, with an hourglass in the top-right corner
+    /// while background work is pending.
     pub fn render(&self, reader: &mut Reader, levels: u16) -> Result<Vec<u8>> {
+        let mut pixels = self.render_view(reader, levels)?;
+        if self.is_busy() {
+            busy_mark(&mut pixels, reader.state.layout.width as usize);
+        }
+        Ok(pixels)
+    }
+    fn render_view(&self, reader: &mut Reader, levels: u16) -> Result<Vec<u8>> {
         let Some(panel) = self.panel else {
             return reader.render(levels);
         };
@@ -2271,10 +2267,6 @@ impl ReaderUi {
             |percent| format!("Reader ~{percent}%"),
         );
         let title = match panel {
-            Panel::Reflowing => "Reflowing pages",
-            Panel::Opening => "Opening book",
-            Panel::PreviewOpening => "Opening note preview",
-            Panel::Scanning => "Scanning library",
             Panel::Errors => "Scan errors",
             Panel::Diagnostic(_) => "Error details",
             Panel::Search | Panel::CatalogSearch => "Search",
@@ -2292,7 +2284,6 @@ impl ReaderUi {
             Panel::ClippingDelete => "Delete excerpt?",
             Panel::SelectWord => "Select word",
             Panel::WordPreview => "Selected text",
-            Panel::DictionaryOpening => "Preparing dictionary",
             Panel::DictionaryResult => "Dictionary",
             Panel::DictionaryChooser => "Choose dictionary",
             Panel::WordList => "Choose source word",

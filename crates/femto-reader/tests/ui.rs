@@ -1403,12 +1403,14 @@ fn library_opening_can_be_cancelled_before_it_replaces_the_current_book() {
         assert!(ui.is_opening());
         assert_eq!(reader.document.metadata.id, original);
         assert_eq!(ui.render(&mut reader, 2).unwrap().len(), 480 * 800);
-        if cancel_by_back {
-            ui.back(&mut reader).unwrap();
-        } else {
+        if !cancel_by_back {
+            // Other input waits for the pending book.
             ui.select(&mut reader).unwrap();
+            assert!(ui.is_opening());
         }
+        ui.back(&mut reader).unwrap();
         assert!(!ui.is_opening());
+        assert!(ui.is_open()); // The book list never left the screen.
         assert_eq!(ui.poll_open(&mut reader), Effect::Unchanged);
         assert_eq!(reader.position(), position);
         assert_eq!(reader.render(2).unwrap(), pixels);
@@ -1422,7 +1424,7 @@ fn library_opening_can_be_cancelled_before_it_replaces_the_current_book() {
 }
 
 #[test]
-fn resizing_can_be_cancelled_and_an_external_panel_change_discards_pending_layout() {
+fn resizing_keeps_the_page_until_done_and_back_abandons_it() {
     let mut reader = reader();
     let mut ui = ReaderUi::default();
     let before = reader.state.layout;
@@ -1433,22 +1435,19 @@ fn resizing_can_be_cancelled_and_an_external_panel_change_discards_pending_layou
         assert!(ui.is_reflowing());
         assert_eq!(ui.poll_reflow(&mut reader), Effect::Unchanged);
         assert_eq!(reader.state.layout, before);
-        if back {
-            ui.back(&mut reader).unwrap();
-        } else {
+        if !back {
+            // Other input waits for the pending layout.
             ui.select(&mut reader).unwrap();
+            assert!(ui.is_reflowing() && !ui.is_open());
         }
+        // The page stays visible with the busy mark until Back abandons the change.
+        assert_ne!(ui.render(&mut reader, 2).unwrap(), raster);
+        ui.back(&mut reader).unwrap();
         assert!(!ui.is_reflowing());
         assert!(!ui.is_open());
         assert_eq!(reader.position(), position);
-        assert_eq!(reader.render(2).unwrap(), raster);
+        assert_eq!(ui.render(&mut reader, 2).unwrap(), raster);
     }
-    ui.resize(&reader, 2.0).unwrap();
-    ui.open();
-    assert_eq!(ui.poll_reflow(&mut reader), Effect::Unchanged);
-    assert!(!ui.is_reflowing());
-    assert_eq!(reader.state.layout, before);
-    ui.back(&mut reader).unwrap();
     ui.resize(&reader, 2.0).unwrap();
     finish_reflow(&mut ui, &mut reader);
     assert!(!ui.is_open());
@@ -1554,9 +1553,10 @@ fn tapping_note_references_previews_and_closes_to_reading_while_ordinary_links_j
     for index in [0, 1] {
         let (x, y) = coordinates(&reader, index);
         ui.tap(&mut reader, x, y).unwrap();
-        assert!(ui.is_open());
+        assert!(ui.is_preview_opening() && !ui.is_open());
         assert_eq!(reader.position(), origin);
         finish_preview(&mut ui, &mut reader);
+        assert!(ui.is_open());
         ui.render(&mut reader, 4).unwrap();
         ui.back(&mut reader).unwrap();
         assert!(!ui.is_open());
@@ -1593,7 +1593,7 @@ fn tapping_note_references_previews_and_closes_to_reading_while_ordinary_links_j
 }
 
 #[test]
-fn pending_preview_can_be_cancelled_and_external_panels_discard_it() {
+fn pending_preview_waits_for_input_and_back_abandons_it() {
     let mut reader = Reader::new(
         Document::open(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1620,19 +1620,15 @@ fn pending_preview_can_be_cancelled_and_external_panels_discard_it() {
         assert!(ui.is_preview_opening());
         assert_eq!(ui.poll_preview(&mut reader), Effect::Unchanged);
         ui.render(&mut reader, 2).unwrap();
-        match action {
-            0 => {
-                ui.back(&mut reader).unwrap();
-            }
-            1 => {
-                ui.select(&mut reader).unwrap();
-            }
-            _ => {
-                ui.open_library();
-                assert_eq!(ui.poll_preview(&mut reader), Effect::Unchanged);
-            }
+        if action > 0 {
+            // Other input waits for the pending preview.
+            ui.select(&mut reader).unwrap();
+            ui.turn(&mut reader, action == 1).unwrap();
+            assert!(ui.is_preview_opening());
         }
+        ui.back(&mut reader).unwrap();
         assert!(!ui.is_preview_opening());
+        assert_eq!(ui.poll_preview(&mut reader), Effect::Unchanged);
         assert_eq!(reader.position(), origin);
         assert_eq!(reader.render(2).unwrap(), original_pixels);
     }
@@ -1651,10 +1647,7 @@ fn rotation_reflow_can_cancel_without_changing_the_active_view() {
         Effect::Unchanged
     );
     for back in [true, false] {
-        assert_eq!(
-            ui.rotate(&reader, Rotation::Clockwise).unwrap(),
-            Effect::Redraw
-        );
+        ui.rotate(&reader, Rotation::Clockwise).unwrap();
         assert!(ui.is_reflowing());
         assert_eq!(ui.poll_reflow(&mut reader), Effect::Unchanged);
         assert_eq!(reader.state.rotation, Rotation::Portrait);
@@ -1664,20 +1657,15 @@ fn rotation_reflow_can_cancel_without_changing_the_active_view() {
             Effect::Unchanged
         );
         assert_eq!(ui.resize(&reader, 2.0).unwrap(), Effect::Unchanged);
-        if back {
-            ui.back(&mut reader).unwrap();
-        } else {
+        if !back {
             ui.select(&mut reader).unwrap();
+            assert!(ui.is_reflowing());
         }
+        ui.back(&mut reader).unwrap();
         assert!(!ui.is_reflowing());
         assert_eq!(reader.render(2).unwrap(), pixels);
         assert_eq!(reader.position(), position);
     }
-    ui.rotate(&reader, Rotation::Clockwise).unwrap();
-    ui.open();
-    assert_eq!(ui.poll_reflow(&mut reader), Effect::Unchanged);
-    assert!(!ui.is_reflowing());
-    assert_eq!(reader.state.rotation, Rotation::Portrait);
     ui.rotate(&reader, Rotation::Clockwise).unwrap();
     finish_reflow(&mut ui, &mut reader);
     assert_eq!(reader.state.rotation, Rotation::Clockwise);
@@ -2018,10 +2006,19 @@ fn dictionary_preparation_cancels_and_rejects_expired_selection() {
     let before = serde_json::to_value(&reader.state).unwrap();
     let preview = ui.render(&mut reader, 4).unwrap();
     start_dictionary(&mut ui, &mut reader);
+    assert_ne!(ui.render(&mut reader, 4).unwrap(), preview);
     ui.back(&mut reader).unwrap();
     assert!(!ui.is_dictionary_opening());
     assert_eq!(ui.poll_dictionary(&mut reader), Effect::Unchanged);
+    // The selection stays on the lookup row of the unchanged panel.
+    for _ in 0..3 {
+        ui.turn(&mut reader, false).unwrap();
+    }
     assert_eq!(ui.render(&mut reader, 4).unwrap(), preview);
+    for _ in 0..3 {
+        ui.turn(&mut reader, true).unwrap();
+    }
+    ui.select(&mut reader).unwrap();
     assert_eq!(serde_json::to_value(&reader.state).unwrap(), before);
     start_dictionary(&mut ui, &mut reader);
     reader.state.layout.font_size += 2.0;
@@ -2039,7 +2036,9 @@ fn dictionary_configuration_change_cancels_pending_job() {
     assert!(!ui.is_dictionary_opening());
     assert_eq!(ui.poll_dictionary(&mut reader), Effect::Unchanged);
     ui.render(&mut reader, 4).unwrap();
-    ui.turn(&mut reader, true).unwrap();
+    // The selection is still on the lookup row; move up to Save.
+    ui.turn(&mut reader, false).unwrap();
+    ui.turn(&mut reader, false).unwrap();
     ui.select(&mut reader).unwrap();
     assert_eq!(
         reader.state.books[&reader.document.metadata.id].clippings[0].text,
@@ -2085,7 +2084,7 @@ fn dictionary_reuses_prepared_indexes_and_releases_them_explicitly() {
     ui.back(&mut reader).unwrap();
     start_dictionary(&mut ui, &mut reader);
     ui.back(&mut reader).unwrap(); // Cancel a lookup that already owns prepared indexes.
-    start_dictionary(&mut ui, &mut reader);
+    ui.select(&mut reader).unwrap(); // The selection is still on the lookup row.
     assert_eq!(finish(&mut ui, &mut reader), 1);
     ui.back(&mut reader).unwrap();
     std::fs::write(path.with_extension("dict"), b"").unwrap();

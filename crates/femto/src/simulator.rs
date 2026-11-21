@@ -297,6 +297,7 @@ fn main() -> Result<()> {
     let mut dirty = true;
     let mut mouse_down = false;
     let mut error = None::<String>;
+    let mut busy = false;
     while window.is_open() {
         if dirty {
             let frame = ui.render(&mut reader, args.levels)?;
@@ -430,6 +431,11 @@ fn main() -> Result<()> {
         if ui.poll_open(&mut reader) == Effect::Redraw {
             dirty = true;
             save(&mut reader, &args.state)?;
+        }
+        // The busy mark appears and disappears with pending work.
+        if ui.is_busy() != busy {
+            busy = !busy;
+            dirty = true;
         }
     }
     save(&mut reader, &args.state)

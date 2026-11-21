@@ -230,6 +230,7 @@ fn run() -> Result<(), String> {
     let mut console = console::Console::open();
     let (mut turning_forward, mut preparing) = (true, true);
     let mut stay_awake = false;
+    let mut busy_since: Option<(Instant, bool)> = None;
     loop {
         std::thread::sleep(Duration::from_millis(10));
         screen.poll_wifi();
@@ -418,7 +419,7 @@ fn run() -> Result<(), String> {
                 _ => {}
             }
             preparing = true;
-        } else if preparing && !ui.is_open() {
+        } else if preparing && !ui.is_open() && !ui.is_busy() {
             // Prepare the likely next page between inputs, then the opposite one.
             let levels = if cfg!(feature = "grayscale") { 4 } else { 2 };
             let prepared = reader
@@ -526,6 +527,19 @@ fn run() -> Result<(), String> {
                 render(&mut reader, &ui, &mut plane)?;
                 screen.present(&plane)?;
             }
+        }
+        // Pending work leaves the view in place. Mark it once the wait is
+        // long enough to notice; the finished view replaces the mark.
+        if !ui.is_busy() {
+            busy_since = None;
+        } else if let Some((since, shown)) = &mut busy_since {
+            if !*shown && since.elapsed() >= Duration::from_millis(700) {
+                *shown = true;
+                render(&mut reader, &ui, &mut plane)?;
+                screen.present_quick(&plane)?;
+            }
+        } else {
+            busy_since = Some((Instant::now(), false));
         }
         let manual_sleep = ui.take_sleep_request();
         let idle_now = idle_epoch.elapsed().as_millis().min(u64::MAX as u128) as u64;

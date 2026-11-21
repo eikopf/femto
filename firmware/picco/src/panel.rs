@@ -339,6 +339,24 @@ impl Screen {
         self.input.set_view(orientation, false)
     }
 
+    /// A fast black-and-white update without the gray pass, for marks that
+    /// a complete frame replaces shortly.
+    pub fn present_quick(&mut self, plane: &[u8]) -> Result<(), String> {
+        if !cfg!(feature = "grayscale") {
+            return self.present(plane);
+        }
+        let (msb, lsb) = plane
+            .split_at_checked(femto_picco_board::PLANE_BYTES)
+            .filter(|(_, lsb)| lsb.len() == femto_picco_board::PLANE_BYTES)
+            .ok_or("Invalid grayscale framebuffer")?;
+        let base: Vec<u8> = msb.iter().zip(lsb).map(|(high, low)| high & low).collect();
+        self.display
+            .refresh(&base, Refresh::Fast)
+            .map_err(|e| format!("{e:?}"))?;
+        self.fast_count = self.fast_count.saturating_add(1);
+        Ok(())
+    }
+
     /// Presents with a full refresh, for images that stay on the panel.
     pub fn present_clean(&mut self, plane: &[u8]) -> Result<(), String> {
         self.fast_count = u8::MAX;

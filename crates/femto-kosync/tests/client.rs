@@ -236,3 +236,64 @@ fn validation_and_cancellation_precede_connection() {
     );
     assert!(transport.urls.is_empty());
 }
+
+/// Replies in order, one per connection.
+struct Sequence(Vec<Vec<u8>>);
+impl Transport for Sequence {
+    fn connect(&mut self, _: &Url, _: Instant, _: Arc<AtomicBool>) -> io::Result<Box<dyn Stream>> {
+        Ok(Box::new(Connection {
+            input: Cursor::new(self.0.remove(0)),
+            output: Default::default(),
+        }))
+    }
+}
+
+#[test]
+fn servers_that_only_acknowledge_are_accepted_like_koreader_does() {
+    // Grimmory answers authorization with the user name.
+    let mut transport = fixture(200, r#"{"username":"alice"}"#);
+    client()
+        .authorize(&mut transport, deadline(), cancel())
+        .unwrap();
+    // It answers 404 where the official server sends an empty object.
+    let mut transport = fixture(404, r#"{"message":"No progress found","status":404}"#);
+    assert_eq!(
+        client()
+            .pull(&mut transport, &id(), deadline(), cancel())
+            .unwrap(),
+        None
+    );
+    // It acknowledges an update without the stored record, which is then
+    // read back for its timestamp.
+    let acknowledged = fixture(200, r#"{"status":"progress updated"}"#).reply;
+    let stored = serde_json::json!({
+        "document": id().as_str(),
+        "progress": position().progress,
+        "percentage": 0.25,
+        "device": "Femto",
+        "device_id": "fixture-device",
+        "timestamp": 1_795_295_654u64,
+    })
+    .to_string();
+    let mut transport = Sequence(vec![acknowledged.clone(), fixture(200, &stored).reply]);
+    let receipt = client()
+        .push(&mut transport, &position(), deadline(), cancel())
+        .unwrap();
+    assert_eq!(receipt.timestamp, 1_795_295_654);
+    assert!(transport.0.is_empty());
+    // An acknowledgement that cannot be confirmed is not a success.
+    let mut transport = Sequence(vec![
+        acknowledged,
+        fixture(404, r#"{"message":"No progress found"}"#).reply,
+    ]);
+    assert!(matches!(
+        client().push(&mut transport, &position(), deadline(), cancel()),
+        Err(Error::Response)
+    ));
+    // Other statuses remain errors.
+    let mut transport = fixture(500, "{}");
+    assert!(matches!(
+        client().authorize(&mut transport, deadline(), cancel()),
+        Err(Error::Status(500))
+    ));
+}

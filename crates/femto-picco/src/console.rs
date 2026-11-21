@@ -23,6 +23,8 @@ pub enum Command {
         x: u16,
         y: u16,
     },
+    /// Enter text into the open on-screen keyboard field.
+    Type(String),
     /// Dump the last presented framebuffer.
     Frame,
     /// Receive a file below the device data directory.
@@ -66,6 +68,9 @@ fn parse(line: &str) -> Option<Command> {
                 x: x.parse().ok()?,
                 y: y.parse().ok()?,
             }
+        }
+        ("type", text) if !text.is_empty() && !text.chars().any(char::is_control) => {
+            Command::Type(text.into())
         }
         ("put", arguments) => {
             let mut fields = arguments.splitn(3, ' ');
@@ -192,6 +197,10 @@ mod tests {
             ]
         );
         assert_eq!(
+            commands(b"femto type http://host:80/a b\n"),
+            [Command::Type("http://host:80/a b".into())]
+        );
+        assert_eq!(
             commands(b"femto ls\nfemto ls fonts\nfemto rm wifi.json\n"),
             [
                 Command::List(String::new()),
@@ -212,6 +221,7 @@ mod tests {
             "femto ls ./x",
             "femto tap 70000 1",
             "femto tap 1",
+            "femto type",
             "femto swipe",
             "femto swipe up",
         ] {

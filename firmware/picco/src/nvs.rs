@@ -26,6 +26,10 @@ fn open(write: bool) -> Result<EspDefaultNvs, String> {
 
 /// Reads a setting. A missing namespace or key is `None`.
 pub fn get(key: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
+    crate::threads::on_internal_stack(|| read(key))
+}
+
+fn read(key: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
     // A read-only open fails while the namespace does not exist yet.
     let Ok(nvs) = open(false) else {
         return Ok(None);
@@ -51,5 +55,7 @@ pub fn set(key: &str, value: &[u8]) -> Result<(), String> {
     if value.len() > MAX_VALUE_BYTES {
         return Err(format!("Setting {key} exceeds {MAX_VALUE_BYTES} bytes"));
     }
-    open(true)?.set_blob(key, value).map_err(|e| e.to_string())
+    crate::threads::on_internal_stack(|| {
+        open(true)?.set_blob(key, value).map_err(|e| e.to_string())
+    })
 }

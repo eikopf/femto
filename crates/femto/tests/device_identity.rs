@@ -20,6 +20,12 @@ struct State {
     writes: usize,
 }
 thread_local! { static STATE: RefCell<State> = RefCell::new(State::default()); }
+pub mod threads {
+    /// The host has no stack placement to arrange.
+    pub fn on_internal_stack<R>(operation: impl FnOnce() -> R) -> R {
+        operation()
+    }
+}
 pub mod handle {
     pub trait RawHandle {
         fn handle(&self) -> usize;

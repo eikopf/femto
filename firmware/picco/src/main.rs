@@ -33,6 +33,7 @@ mod tailnet_http;
 mod tailnet_menu;
 mod tailnet_rotation;
 mod tailnet_tls;
+mod threads;
 mod wifi;
 
 fn main() {
@@ -72,6 +73,9 @@ const OPENING_MARKER: &str = "/sdcard/femto/.opening";
 
 fn run() -> Result<(), String> {
     let mut screen = panel::open()?;
+    // The input task above keeps its internal stack; workers started from
+    // here on get theirs in external RAM.
+    threads::use_external_stacks()?;
     if screen.storage.is_some() {
         services::import_from_card();
     }
@@ -271,7 +275,11 @@ fn run() -> Result<(), String> {
         };
         let diagnostic_event = command.and_then(|command| {
             use femto_picco_board::console::Command;
-            log::info!("USB command: {command:?}");
+            // Typed text may be a credential.
+            match &command {
+                Command::Type(_) => log::info!("USB command: Type"),
+                command => log::info!("USB command: {command:?}"),
+            }
             match command {
                 Command::Status => {
                     report_heap("usb status");
@@ -295,6 +303,13 @@ fn run() -> Result<(), String> {
                 }
                 Command::Swipe(turn) => Some(input::Event::Swipe(turn)),
                 Command::Tap { x, y } => Some(input::Event::Tap { x, y }),
+                Command::Type(text) => {
+                    for character in text.chars() {
+                        ui.type_char(character);
+                    }
+                    dirty = true;
+                    None
+                }
                 Command::Frame => {
                     console::dump_frame(&plane);
                     None
@@ -315,6 +330,12 @@ fn run() -> Result<(), String> {
                     .remote_turn(&reader.state, !ui.is_open())
                     .map(input::Event::Turn)
             });
+        // Text typed over USB changes the view without an input event.
+        if event.is_none() && dirty {
+            dirty = false;
+            render(&mut reader, &ui, &mut plane)?;
+            screen.present(&plane)?;
+        }
         if let Some(event) = event {
             idle.activity(idle_epoch.elapsed().as_millis().min(u64::MAX as u128) as u64);
             ui.set_device_status(&format!(
@@ -625,7 +646,10 @@ fn run() -> Result<(), String> {
                 || screen.catalog.is_busy()
                 || kosync.as_ref().is_some_and(|sync| sync.is_busy()),
         );
-        if manual_sleep || (automatic_sleep && !stay_awake) {
+        // Deep sleep drops the USB connection, so an attached host keeps the
+        // device awake; it is then powered and usually being driven over USB.
+        let hosted = unsafe { esp_idf_svc::sys::usb_serial_jtag_is_connected() };
+        if manual_sleep || (automatic_sleep && !stay_awake && !hosted) {
             idle.suppress_until_activity();
             let prepared = (|| -> Result<(), String> {
                 power::wait_for_release()?;

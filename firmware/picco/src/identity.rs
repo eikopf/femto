@@ -34,12 +34,14 @@ impl NvsBackend {
 
 /// Opens existing keys only. No automatic creation, migration, or repair.
 pub fn open() -> Result<Store, String> {
-    IdentityStore::open(NvsBackend::acquire(false)?).map_err(|e| e.to_string())
+    let backend = crate::threads::on_internal_stack(|| NvsBackend::acquire(false))?;
+    IdentityStore::open(backend).map_err(|e| e.to_string())
 }
 
 /// Call only from an explicit new-device provisioning operation.
 pub fn provision(identity: DeviceIdentity) -> Result<Store, String> {
-    IdentityStore::create(NvsBackend::acquire(true)?, identity).map_err(|e| e.to_string())
+    let backend = crate::threads::on_internal_stack(|| NvsBackend::acquire(true))?;
+    IdentityStore::create(backend, identity).map_err(|e| e.to_string())
 }
 
 impl Backend for NvsBackend {
@@ -48,99 +50,109 @@ impl Backend for NvsBackend {
         &mut self,
         output: &mut [u8; ROTATION_LEN + 1],
     ) -> Result<Option<usize>, String> {
-        let Some(length) = self.nvs.blob_len("rotation").map_err(|e| e.to_string())? else {
-            return Ok(None);
-        };
-        if length > ROTATION_LEN {
-            return Err("Tailnet rotation record exceeds size limit".into());
-        }
-        let bytes = self
-            .nvs
-            .get_blob("rotation", output)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Tailnet rotation disappeared during read".to_string())?;
-        if bytes.len() != length {
-            return Err("Tailnet rotation length changed during read".into());
-        }
-        Ok(Some(length))
+        crate::threads::on_internal_stack(|| {
+            let Some(length) = self.nvs.blob_len("rotation").map_err(|e| e.to_string())? else {
+                return Ok(None);
+            };
+            if length > ROTATION_LEN {
+                return Err("Tailnet rotation record exceeds size limit".into());
+            }
+            let bytes = self
+                .nvs
+                .get_blob("rotation", output)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "Tailnet rotation disappeared during read".to_string())?;
+            if bytes.len() != length {
+                return Err("Tailnet rotation length changed during read".into());
+            }
+            Ok(Some(length))
+        })
     }
     fn create_rotation(&mut self, record: &[u8; ROTATION_LEN]) -> Result<(), String> {
-        if self
-            .nvs
-            .blob_len("rotation")
-            .map_err(|e| e.to_string())?
-            .is_some()
-        {
-            return Err("Tailnet rotation already exists".into());
-        }
-        check(unsafe {
-            sys::nvs_set_blob(
-                self.nvs.handle(),
-                c"rotation".as_ptr(),
-                record.as_ptr().cast(),
-                record.len(),
-            )
-        })?;
-        check(unsafe { sys::nvs_commit(self.nvs.handle()) })?;
-        let mut verified = Zeroizing::new([0; ROTATION_LEN + 1]);
-        if self.read_rotation(&mut verified)? != Some(ROTATION_LEN)
-            || &verified[..ROTATION_LEN] != record
-        {
-            return Err("Tailnet rotation readback failed".into());
-        }
-        Ok(())
+        crate::threads::on_internal_stack(|| {
+            if self
+                .nvs
+                .blob_len("rotation")
+                .map_err(|e| e.to_string())?
+                .is_some()
+            {
+                return Err("Tailnet rotation already exists".into());
+            }
+            check(unsafe {
+                sys::nvs_set_blob(
+                    self.nvs.handle(),
+                    c"rotation".as_ptr(),
+                    record.as_ptr().cast(),
+                    record.len(),
+                )
+            })?;
+            check(unsafe { sys::nvs_commit(self.nvs.handle()) })?;
+            let mut verified = Zeroizing::new([0; ROTATION_LEN + 1]);
+            if self.read_rotation(&mut verified)? != Some(ROTATION_LEN)
+                || &verified[..ROTATION_LEN] != record
+            {
+                return Err("Tailnet rotation readback failed".into());
+            }
+            Ok(())
+        })
     }
     fn clear_rotation(&mut self) -> Result<(), String> {
-        check(unsafe { sys::nvs_erase_key(self.nvs.handle(), c"rotation".as_ptr()) })?;
-        check(unsafe { sys::nvs_commit(self.nvs.handle()) })?;
-        if self
-            .nvs
-            .blob_len("rotation")
-            .map_err(|e| e.to_string())?
-            .is_some()
-        {
-            return Err("Tailnet rotation removal readback failed".into());
-        }
-        Ok(())
+        crate::threads::on_internal_stack(|| {
+            check(unsafe { sys::nvs_erase_key(self.nvs.handle(), c"rotation".as_ptr()) })?;
+            check(unsafe { sys::nvs_commit(self.nvs.handle()) })?;
+            if self
+                .nvs
+                .blob_len("rotation")
+                .map_err(|e| e.to_string())?
+                .is_some()
+            {
+                return Err("Tailnet rotation removal readback failed".into());
+            }
+            Ok(())
+        })
     }
     fn read(&mut self, output: &mut [u8; RECORD_LEN + 1]) -> Result<Option<usize>, String> {
-        let Some(length) = self.nvs.blob_len(KEY).map_err(|e| e.to_string())? else {
-            return Ok(None);
-        };
-        if length > RECORD_LEN {
-            return Err("Tailnet identity record exceeds size limit".into());
-        }
-        let bytes = self
-            .nvs
-            .get_blob(KEY, output)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Tailnet identity disappeared during read".to_string())?;
-        if bytes.len() != length {
-            return Err("Tailnet identity length changed during read".into());
-        }
-        Ok(Some(length))
+        crate::threads::on_internal_stack(|| {
+            let Some(length) = self.nvs.blob_len(KEY).map_err(|e| e.to_string())? else {
+                return Ok(None);
+            };
+            if length > RECORD_LEN {
+                return Err("Tailnet identity record exceeds size limit".into());
+            }
+            let bytes = self
+                .nvs
+                .get_blob(KEY, output)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "Tailnet identity disappeared during read".to_string())?;
+            if bytes.len() != length {
+                return Err("Tailnet identity length changed during read".into());
+            }
+            Ok(Some(length))
+        })
     }
     fn write(&mut self, record: &[u8; RECORD_LEN], create: bool) -> Result<(), String> {
-        let exists = self.nvs.blob_len(KEY).map_err(|e| e.to_string())?.is_some();
-        if create == exists {
-            return Err("Tailnet identity create/replace precondition failed".into());
-        }
-        // EspNvs::set_blob erases first. Update directly to retain NVS's blob
-        // replacement protocol, then commit before reporting durable success.
-        check(unsafe {
-            sys::nvs_set_blob(
-                self.nvs.handle(),
-                c"identity".as_ptr(),
-                record.as_ptr().cast(),
-                record.len(),
-            )
-        })?;
-        check(unsafe { sys::nvs_commit(self.nvs.handle()) })?;
-        let mut verified = Zeroizing::new([0; RECORD_LEN + 1]);
-        if self.read(&mut verified)? != Some(RECORD_LEN) || &verified[..RECORD_LEN] != record {
-            return Err("Tailnet identity readback failed".into());
-        }
-        Ok(())
+        crate::threads::on_internal_stack(|| {
+            let exists = self.nvs.blob_len(KEY).map_err(|e| e.to_string())?.is_some();
+            if create == exists {
+                return Err("Tailnet identity create/replace precondition failed".into());
+            }
+            // EspNvs::set_blob erases first. Update directly to retain NVS's blob
+            // replacement protocol, then commit before reporting durable success.
+            check(unsafe {
+                sys::nvs_set_blob(
+                    self.nvs.handle(),
+                    c"identity".as_ptr(),
+                    record.as_ptr().cast(),
+                    record.len(),
+                )
+            })?;
+            check(unsafe { sys::nvs_commit(self.nvs.handle()) })?;
+            let mut verified = Zeroizing::new([0; RECORD_LEN + 1]);
+            if self.read(&mut verified)? != Some(RECORD_LEN) || &verified[..RECORD_LEN] != record {
+                return Err("Tailnet identity readback failed".into());
+            }
+            Ok(())
+        })
     }
 }
 fn check(code: i32) -> Result<(), String> {

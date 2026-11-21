@@ -171,12 +171,12 @@ impl Client {
             })
             .map_err(|_| Error::Invalid("credentials"))?,
         );
-        let bytes = self.request(
+        let (_, bytes) = self.request(
             transport,
             "POST",
             "users/create",
             &body,
-            201,
+            &[201],
             deadline,
             cancelled,
         )?;
@@ -196,24 +196,19 @@ impl Client {
         deadline: Instant,
         cancelled: Arc<AtomicBool>,
     ) -> Result<(), Error> {
-        let bytes = self.request(
+        // Like KOReader's own client, accept the status alone: the official
+        // server answers `{"authorized":"OK"}` and others, such as Grimmory,
+        // answer with the user name.
+        self.request(
             transport,
             "GET",
             "users/auth",
             &[],
-            200,
+            &[200],
             deadline,
             cancelled,
-        )?;
-        #[derive(Deserialize)]
-        struct Authorized {
-            authorized: String,
-        }
-        let reply: Authorized = serde_json::from_slice(&bytes).map_err(|_| Error::Response)?;
-        if reply.authorized != "OK" {
-            return Err(Error::Response);
-        }
-        Ok(())
+        )
+        .map(|_| ())
     }
     pub fn pull(
         &self,
@@ -222,15 +217,20 @@ impl Client {
         deadline: Instant,
         cancelled: Arc<AtomicBool>,
     ) -> Result<Option<RemoteProgress>, Error> {
-        let bytes = self.request(
+        // The official server answers an unknown document with an empty
+        // object; other implementations answer 404.
+        let (status, bytes) = self.request(
             transport,
             "GET",
             &format!("syncs/progress/{}", document.as_str()),
             &[],
-            200,
+            &[200, 404],
             deadline,
             cancelled,
         )?;
+        if status == 404 {
+            return Ok(None);
+        }
         let value: serde_json::Value =
             serde_json::from_slice(&bytes).map_err(|_| Error::Response)?;
         if value.as_object().is_some_and(|object| object.is_empty()) {
@@ -252,16 +252,29 @@ impl Client {
     ) -> Result<Receipt, Error> {
         progress.validate()?;
         let body = serde_json::to_vec(progress).map_err(|_| Error::Invalid("progress"))?;
-        let bytes = self.request(
+        let (_, bytes) = self.request(
             transport,
             "PUT",
             "syncs/progress",
             &body,
-            200,
+            &[200],
             deadline,
-            cancelled,
+            cancelled.clone(),
         )?;
-        let receipt: Receipt = serde_json::from_slice(&bytes).map_err(|_| Error::Response)?;
+        // The official server returns the stored document and timestamp.
+        // Servers that only acknowledge are asked for the stored record.
+        let receipt = match serde_json::from_slice::<Receipt>(&bytes) {
+            Ok(receipt) => receipt,
+            Err(_) => {
+                let stored = self
+                    .pull(transport, &progress.document, deadline, cancelled)?
+                    .ok_or(Error::Response)?;
+                Receipt {
+                    document: stored.position.document,
+                    timestamp: stored.timestamp,
+                }
+            }
+        };
         if receipt.document != progress.document || receipt.timestamp == 0 {
             return Err(Error::Response);
         }
@@ -275,10 +288,10 @@ impl Client {
         method: &str,
         path: &str,
         body: &[u8],
-        status: u16,
+        accepted: &[u16],
         deadline: Instant,
         cancelled: Arc<AtomicBool>,
-    ) -> Result<Vec<u8>, Error> {
+    ) -> Result<(u16, Vec<u8>), Error> {
         check(deadline, &cancelled)?;
         let url = self
             .base
@@ -310,10 +323,10 @@ impl Client {
         if actual == 401 {
             return Err(Error::Unauthorized);
         }
-        if actual != status {
+        if !accepted.contains(&actual) {
             return Err(Error::Status(actual));
         }
-        Ok(bytes)
+        Ok((actual, bytes))
     }
 }
 fn check(deadline: Instant, cancelled: &AtomicBool) -> Result<(), Error> {

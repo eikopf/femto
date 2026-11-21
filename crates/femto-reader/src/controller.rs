@@ -1696,7 +1696,8 @@ impl Reader {
         levels: u16,
         style: CellStyle,
     ) -> Result<Vec<u8>> {
-        const CELLS: usize = 48;
+        // A menu page shows up to eight full-width rows; keep about three pages.
+        const CELL_BYTES: usize = 1024 * 1024;
         let mut cells = self.cells.lock().unwrap_or_else(|e| e.into_inner());
         let known = cells.iter().position(|((known, w, h, l, s), _)| {
             known == text && (*w, *h, *l, *s) == (width, height, levels, style)
@@ -1704,13 +1705,12 @@ impl Reader {
         let entry = match known {
             Some(index) => cells.remove(index),
             None => {
-                if cells.len() == CELLS {
-                    cells.remove(0);
+                let pixels = self.rasterize_cell(text, width, height, levels, style)?;
+                let mut held: usize = cells.iter().map(|(_, cell)| cell.len()).sum();
+                while !cells.is_empty() && held + pixels.len() > CELL_BYTES {
+                    held -= cells.remove(0).1.len();
                 }
-                (
-                    (text.to_owned(), width, height, levels, style),
-                    self.rasterize_cell(text, width, height, levels, style)?,
-                )
+                ((text.to_owned(), width, height, levels, style), pixels)
             }
         };
         let pixels = entry.1.clone();

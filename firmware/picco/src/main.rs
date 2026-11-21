@@ -237,6 +237,7 @@ fn run() -> Result<(), String> {
     let mut console = console::Console::open();
     let (mut turning_forward, mut preparing) = (true, true);
     let mut stay_awake = false;
+    let mut last_input = Instant::now();
     let mut busy_since: Option<(Instant, bool)> = None;
     loop {
         std::thread::sleep(Duration::from_millis(10));
@@ -536,6 +537,16 @@ fn run() -> Result<(), String> {
                 render(&mut reader, &ui, &mut plane)?;
                 screen.present(&plane)?;
             }
+        }
+        // The gray pass waits until input pauses, so rapid turns and menu
+        // moves show the readable black-and-white frame without delay.
+        if event.is_some() {
+            last_input = Instant::now();
+        } else if screen.is_unsettled()
+            && !ui.is_busy()
+            && last_input.elapsed() >= Duration::from_millis(350)
+        {
+            screen.settle(&plane)?;
         }
         // Pending work leaves the view in place. Mark it once the wait is
         // long enough to notice; the finished view replaces the mark.

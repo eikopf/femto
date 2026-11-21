@@ -485,7 +485,9 @@ fn antialiased_update_shows_a_differential_base_then_moves_only_gray_pixels() {
     let pair = |packed: &[u8], pixel: usize| (packed[pixel / 4] >> (6 - 2 * (pixel % 4))) & 3;
     for (index, requested) in [Refresh::Fast, Refresh::Fast].into_iter().enumerate() {
         trace.borrow_mut().commands.clear();
-        let executed = display.antialiased(&msb, &lsb, requested).unwrap();
+        let executed = display.antialiased_base(&msb, &lsb, requested).unwrap();
+        assert_eq!(trace.borrow().commands.len(), 5);
+        display.overlay(&msb, &lsb).unwrap();
         // The first update after initialization is full.
         assert_eq!(executed == Refresh::Full, index == 0);
         let t = trace.borrow();
@@ -523,11 +525,14 @@ fn antialiased_update_shows_a_differential_base_then_moves_only_gray_pixels() {
     let mut display = Display::new(Mock(other.clone()), Panel::Yrd0426).unwrap();
     display.initialize().unwrap();
     assert_eq!(
-        display.antialiased(&msb, &lsb, Refresh::Fast),
+        display.antialiased_base(&msb, &lsb, Refresh::Fast),
         Ok(Refresh::Full)
     );
+    let complete = other.borrow().commands.len();
+    display.overlay(&msb, &lsb).unwrap();
+    assert_eq!(other.borrow().commands.len(), complete);
     assert_eq!(
-        display.antialiased(&msb, &[], Refresh::Fast),
+        display.antialiased_base(&msb, &[], Refresh::Fast),
         Err(Error::FrameSize)
     );
 }

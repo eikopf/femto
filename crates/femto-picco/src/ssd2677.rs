@@ -66,16 +66,15 @@ impl<B: Bus> Display<B> {
         Ok(())
     }
 
-    /// Shows the black-and-white base of a four-level frame, then moves its
-    /// gray pixels without disturbing the rest of the panel. `previous`
-    /// remains the base, so later differential refreshes stay valid.
-    pub(super) fn antialiased_ssd2677(
+    /// Shows the black-and-white base of a four-level frame: only white stays
+    /// white and both grays are drawn as ink. `previous` becomes the base, so
+    /// later differential refreshes stay valid with or without the overlay.
+    pub(super) fn antialiased_base_ssd2677(
         &mut self,
         msb: &[u8],
         lsb: &[u8],
         mode: Refresh,
     ) -> Result<(), Error<B::Error>> {
-        // Only white stays white in the base; both grays are drawn as ink.
         let mut base = core::mem::take(&mut self.scratch);
         base.clear();
         base.extend(msb.iter().zip(lsb).map(|(&high, &low)| high & low));
@@ -88,8 +87,16 @@ impl<B: Bus> Display<B> {
         }
         let shown = self.refresh_ssd2677(&base, mode);
         self.scratch = base;
-        shown?;
-        self.ready = false;
+        shown
+    }
+
+    /// Moves the gray pixels of the frame whose base is on the panel,
+    /// without disturbing the rest.
+    pub(super) fn overlay_ssd2677(
+        &mut self,
+        msb: &[u8],
+        lsb: &[u8],
+    ) -> Result<(), Error<B::Error>> {
         self.idle()?;
         // High bit: either gray. Low bit: dark gray.
         let masks = msb

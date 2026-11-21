@@ -1191,13 +1191,18 @@ impl ReaderUi {
         let Some((_, command)) = entries.get(index) else {
             return Ok(Effect::Unchanged);
         };
+        let moved = self.selected != index;
         self.selected = index;
         if let Some((_, max)) = self.slider(reader, index) {
             let value = (u64::from(x) * (u64::from(max) + 1) / u64::from(layout.width)) as u8;
             let command = self.slider_command(reader, index, value);
             return self.activate(reader, command);
         }
-        self.activate(reader, *command)
+        // Show the tapped row even when its action only starts pending work.
+        Ok(match self.activate(reader, *command)? {
+            Effect::Unchanged if moved => Effect::Redraw,
+            effect => effect,
+        })
     }
     pub fn select(&mut self, reader: &mut Reader) -> Result<Effect> {
         // Input waits for pending work; Back abandons it.

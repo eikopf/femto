@@ -1842,6 +1842,8 @@ fn book_typography_reset_is_cancellable_atomic_and_persisted() {
         Some(defaults)
     );
     ui.tap(&mut reader, 400, 750).unwrap();
+    // Resetting defaults only moves the highlight to the tapped row.
+    assert_eq!(ui.tap(&mut reader, 240, 250).unwrap(), Effect::Redraw);
     assert_eq!(ui.tap(&mut reader, 240, 250).unwrap(), Effect::Unchanged);
     assert!(!ui.is_reflowing());
 }

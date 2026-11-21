@@ -207,6 +207,8 @@ pub struct Screen {
     fast_count: u8,
     /// Updates per full refresh, including the full one.
     full_interval: u8,
+    /// The frame on the panel is a four-level frame without its gray pass.
+    unsettled: bool,
     wifi: Option<crate::wifi::Station>,
     #[cfg(feature = "bluetooth")]
     bluetooth: Option<crate::bluetooth::Service>,
@@ -339,48 +341,43 @@ impl Screen {
         self.input.set_view(orientation, false)
     }
 
-    /// A fast black-and-white update without the gray pass, for marks that
+    /// Like [`Self::present`] but without a later gray pass, for marks that
     /// a complete frame replaces shortly.
     pub fn present_quick(&mut self, plane: &[u8]) -> Result<(), String> {
-        if !cfg!(feature = "grayscale") {
-            return self.present(plane);
-        }
-        let (msb, lsb) = plane
-            .split_at_checked(femto_picco_board::PLANE_BYTES)
-            .filter(|(_, lsb)| lsb.len() == femto_picco_board::PLANE_BYTES)
-            .ok_or("Invalid grayscale framebuffer")?;
-        let base: Vec<u8> = msb.iter().zip(lsb).map(|(high, low)| high & low).collect();
-        self.display
-            .refresh(&base, Refresh::Fast)
-            .map_err(|e| format!("{e:?}"))?;
-        self.fast_count = self.fast_count.saturating_add(1);
+        self.present(plane)?;
+        self.unsettled = false;
         Ok(())
     }
 
-    /// Presents with a full refresh, for images that stay on the panel.
+    /// Presents completely with a full refresh, for images that stay on the panel.
     pub fn present_clean(&mut self, plane: &[u8]) -> Result<(), String> {
         self.fast_count = u8::MAX;
-        self.present(plane)
+        self.present(plane)?;
+        self.settle(plane)
     }
 
+    fn planes(plane: &[u8]) -> Result<Option<(&[u8], &[u8])>, String> {
+        if !cfg!(feature = "grayscale") {
+            return Ok(None);
+        }
+        if plane.len() != 2 * femto_picco_board::PLANE_BYTES {
+            return Err("Invalid grayscale framebuffer".into());
+        }
+        Ok(Some(plane.split_at(femto_picco_board::PLANE_BYTES)))
+    }
+
+    /// Shows a frame with a fast update. A four-level frame appears with
+    /// both grays as ink until [`Self::settle`] runs, so that rapid input
+    /// does not wait for the gray pass.
     pub fn present(&mut self, plane: &[u8]) -> Result<(), String> {
         let requested = if u16::from(self.fast_count) + 1 >= u16::from(self.full_interval) {
             Refresh::Full
         } else {
             Refresh::Fast
         };
-        let planes = if cfg!(feature = "grayscale") {
-            if plane.len() != 2 * femto_picco_board::PLANE_BYTES {
-                return Err("Invalid grayscale framebuffer".into());
-            }
-            Some(plane.split_at(femto_picco_board::PLANE_BYTES))
-        } else {
-            None
-        };
+        let planes = Self::planes(plane)?;
         let mut show = |display: &mut Display<PanelBus>, mode| match planes {
-            // A differential base followed by a gray pass, so page turns do
-            // not flash the whole panel.
-            Some((msb, lsb)) => display.antialiased(msb, lsb, mode),
+            Some((msb, lsb)) => display.antialiased_base(msb, lsb, mode),
             None => display.refresh(plane, mode),
         };
         let mode = match show(&mut self.display, requested) {
@@ -396,6 +393,29 @@ impl Screen {
         } else {
             self.fast_count.saturating_add(1)
         };
+        self.unsettled = planes.is_some();
+        Ok(())
+    }
+
+    /// Whether the presented frame still lacks its gray pass.
+    pub fn is_unsettled(&self) -> bool {
+        self.unsettled
+    }
+
+    /// Applies the gray pass to the frame last presented; `plane` must be
+    /// that frame. A failure leaves the readable base on the panel.
+    pub fn settle(&mut self, plane: &[u8]) -> Result<(), String> {
+        if !std::mem::take(&mut self.unsettled) {
+            return Ok(());
+        }
+        let Some((msb, lsb)) = Self::planes(plane)? else {
+            return Ok(());
+        };
+        if let Err(error) = self.display.overlay(msb, lsb) {
+            log::warn!("Gray pass failed; resetting the panel: {error:?}");
+            self.display.initialize().map_err(|e| format!("{e:?}"))?;
+            self.fast_count = u8::MAX;
+        }
         Ok(())
     }
 }
@@ -541,5 +561,6 @@ pub fn open() -> Result<Screen, String> {
         input,
         fast_count: u8::MAX,
         full_interval: 20,
+        unsettled: false,
     })
 }

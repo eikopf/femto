@@ -237,12 +237,14 @@ impl<B: Bus> Display<B> {
         self.command(0x3c, &[0x80])
     }
 
-    /// Four-level update without a full-panel flash: a differential
-    /// black-and-white refresh followed by a pass that moves only gray pixels.
+    /// First step of a four-level update without a full-panel flash: a
+    /// differential black-and-white refresh in which both grays are ink.
+    /// [`Self::overlay`] with the same planes then moves the gray pixels; it
+    /// may follow at once, later, or never if another frame replaces this one.
     /// Planes use the absolute encoding of [`Self::grayscale`]. Returns the
-    /// executed base mode. Panels without an overlay waveform use the absolute
-    /// update and report a full refresh.
-    pub fn antialiased(
+    /// executed mode. Panels without an overlay waveform show the complete
+    /// frame here with the absolute update and report a full refresh.
+    pub fn antialiased_base(
         &mut self,
         msb: &[u8],
         lsb: &[u8],
@@ -264,9 +266,25 @@ impl<B: Bus> Display<B> {
         };
         self.ready = false;
         self.needs_full = true;
-        self.antialiased_ssd2677(msb, lsb, mode)?;
+        self.antialiased_base_ssd2677(msb, lsb, mode)?;
         self.needs_full = false;
         Ok(mode)
+    }
+
+    /// Second step of a four-level update; see [`Self::antialiased_base`].
+    /// A failure requires reinitialization.
+    pub fn overlay(&mut self, msb: &[u8], lsb: &[u8]) -> Result<(), Error<B::Error>> {
+        if self.panel != Panel::Se0400nqw47 {
+            return Ok(());
+        }
+        if msb.len() != PLANE_BYTES || lsb.len() != PLANE_BYTES {
+            return Err(Error::FrameSize);
+        }
+        if !self.ready {
+            return Err(Error::NotReady);
+        }
+        self.ready = false;
+        self.overlay_ssd2677(msb, lsb)
     }
 
     /// Absolute four-level update: black=00, dark=01, light=10, white=11.

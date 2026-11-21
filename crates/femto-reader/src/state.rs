@@ -186,6 +186,9 @@ pub struct ReaderState {
     /// Exchanges the directions of a device's two page buttons.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub swap_page_buttons: bool,
+    /// Exchanges the two page buttons while they move a menu selection.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub swap_menu_buttons: bool,
     pub books: BTreeMap<String, BookState>,
 }
 
@@ -201,6 +204,7 @@ impl Default for ReaderState {
             idle_sleep: IdleSleep::default(),
             rotation: Rotation::default(),
             swap_page_buttons: false,
+            swap_menu_buttons: false,
             books: BTreeMap::new(),
         }
     }

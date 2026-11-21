@@ -280,9 +280,15 @@ fn run() -> Result<(), String> {
                 input::Event::Select => ui.select(&mut reader),
                 input::Event::Back => ui.back(&mut reader),
                 input::Event::Button(turn) => {
-                    // The upper button turns forward unless the buttons are swapped.
-                    let forward = (turn == Turn::Previous) != reader.state.swap_page_buttons;
-                    ui.turn(&mut reader, forward)
+                    // By default the upper button turns pages forward and moves a
+                    // menu selection up; each arrangement can be swapped.
+                    let upper = turn == Turn::Previous;
+                    let next = if ui.turns_pages() {
+                        upper != reader.state.swap_page_buttons
+                    } else {
+                        upper == reader.state.swap_menu_buttons
+                    };
+                    ui.turn(&mut reader, next)
                 }
                 input::Event::Swipe(turn) => ui.swipe(&mut reader, turn == Turn::Next),
                 input::Event::Turn(turn) => ui.turn(&mut reader, turn == Turn::Next),

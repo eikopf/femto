@@ -104,6 +104,7 @@ enum Command {
     Book(usize),
     Light { brightness: u8, warmth: u8 },
     SwapPageButtons,
+    SwapMenuButtons,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -535,6 +536,13 @@ impl ReaderUi {
             return Ok(Effect::Unchanged);
         }
         self.select(reader)
+    }
+    /// Whether a turn moves through pages rather than a menu selection.
+    pub fn turns_pages(&self) -> bool {
+        matches!(
+            self.panel,
+            None | Some(Panel::SelectWord | Panel::LinkPreview)
+        )
     }
     /// A swipe turns a reading page and moves a menu by one page of entries.
     pub fn swipe(&mut self, reader: &mut Reader, next: bool) -> Result<Effect> {
@@ -1433,6 +1441,10 @@ impl ReaderUi {
                 self.sleep_request = true;
                 Ok(Effect::Unchanged)
             }
+            Command::SwapMenuButtons => {
+                reader.state.swap_menu_buttons = !reader.state.swap_menu_buttons;
+                Ok(Effect::Redraw)
+            }
             Command::SwapPageButtons => {
                 reader.state.swap_page_buttons = !reader.state.swap_page_buttons;
                 Ok(Effect::Redraw)
@@ -1660,19 +1672,30 @@ impl ReaderUi {
                 "Remote buttons".into(),
                 Command::Open(Panel::Remote),
             )))
-            .chain(self.page_buttons_available.then(|| {
-                (
-                    format!(
-                        "Swap page buttons ({})",
-                        if reader.state.swap_page_buttons {
-                            "on"
-                        } else {
-                            "off"
-                        }
-                    ),
-                    Command::SwapPageButtons,
-                )
-            }))
+            .chain(
+                self.page_buttons_available
+                    .then(|| {
+                        let on = |swapped| if swapped { "on" } else { "off" };
+                        [
+                            (
+                                format!(
+                                    "Swap page-turn buttons ({})",
+                                    on(reader.state.swap_page_buttons)
+                                ),
+                                Command::SwapPageButtons,
+                            ),
+                            (
+                                format!(
+                                    "Swap menu buttons ({})",
+                                    on(reader.state.swap_menu_buttons)
+                                ),
+                                Command::SwapMenuButtons,
+                            ),
+                        ]
+                    })
+                    .into_iter()
+                    .flatten(),
+            )
             .collect(),
             Panel::Remote => {
                 use crate::remote::RemoteAction;

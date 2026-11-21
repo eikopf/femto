@@ -20,10 +20,12 @@ pub mod identity;
 mod input;
 mod light_command;
 pub mod network;
+mod nvs;
 mod panel;
 mod power;
 pub mod relay;
 pub mod relay_transport;
+mod setup;
 mod storage;
 pub mod tailnet;
 mod tailnet_http;
@@ -210,6 +212,7 @@ fn run() -> Result<(), String> {
     ui.set_rotation_available(true);
     ui.set_page_buttons_available(true);
     ui.set_refresh_available(true);
+    ui.set_device_available(true);
     ui.set_device_status(&format!(
         "{} | {}",
         battery_label(screen.battery()),
@@ -254,6 +257,7 @@ fn run() -> Result<(), String> {
     let mut console = console::Console::open();
     let (mut turning_forward, mut preparing) = (true, true);
     let mut stay_awake = false;
+    let mut setup = setup::Setup::default();
     let mut last_input = Instant::now();
     let mut busy_since: Option<(Instant, bool)> = None;
     loop {
@@ -342,6 +346,12 @@ fn run() -> Result<(), String> {
             if let Some(rotation) = ui.take_rotation_request() {
                 if let Err(error) = ui.rotate(&reader, rotation) {
                     ui.show_error(error.to_string());
+                }
+                effect = Effect::Redraw;
+            }
+            if let Some(event) = ui.take_device_event() {
+                if let Err(error) = setup.event(event, &mut screen, &mut ui) {
+                    ui.show_error(error);
                 }
                 effect = Effect::Redraw;
             }
@@ -493,6 +503,10 @@ fn run() -> Result<(), String> {
             }
         }
         if ui.poll_scan() == Effect::Redraw {
+            render(&mut reader, &ui, &mut plane)?;
+            screen.present(&plane)?;
+        }
+        if setup.poll(&mut screen, &mut ui) {
             render(&mut reader, &ui, &mut plane)?;
             screen.present(&plane)?;
         }

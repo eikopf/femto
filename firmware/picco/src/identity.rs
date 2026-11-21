@@ -1,9 +1,5 @@
 //! Explicit tailnet identity provisioning in the existing NVS partition.
-use esp_idf_svc::{
-    handle::RawHandle,
-    nvs::{EspDefaultNvs, EspDefaultNvsPartition},
-    sys,
-};
+use esp_idf_svc::{handle::RawHandle, nvs::EspDefaultNvs, sys};
 use femto_microlink::{
     identity_store::{Backend, IdentityStore, RECORD_LEN},
     protocol::identity::DeviceIdentity,
@@ -21,7 +17,7 @@ pub struct NvsBackend {
 impl NvsBackend {
     fn acquire(provision: bool) -> Result<Self, String> {
         // Refuse corrupt/full/newer NVS instead of erasing vendor storage.
-        let partition = EspDefaultNvsPartition::take_with(false).map_err(|e| e.to_string())?;
+        let partition = crate::nvs::partition()?;
         if !provision {
             // Read-only open requires an existing namespace and cannot create it.
             let existing = EspDefaultNvs::new(partition.clone(), NAMESPACE, false)

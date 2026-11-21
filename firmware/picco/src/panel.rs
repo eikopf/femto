@@ -281,6 +281,9 @@ impl Screen {
         self.tailnet
             .set_local_address(self.wifi.as_ref().and_then(|wifi| wifi.address()));
     }
+    pub fn wifi(&mut self) -> Option<&mut crate::wifi::Station> {
+        self.wifi.as_mut()
+    }
     pub fn wifi_label(&self) -> &'static str {
         self.wifi.as_ref().map_or("Wi-Fi off", |wifi| wifi.label())
     }
@@ -543,13 +546,7 @@ pub fn open() -> Result<Screen, String> {
             None
         }
     };
-    let wifi = match crate::wifi::Station::open(wifi_modem) {
-        Ok(wifi) => wifi,
-        Err(error) => {
-            log::warn!("Wi-Fi unavailable: {error}");
-            None
-        }
-    };
+    let wifi = Some(crate::wifi::Station::open(wifi_modem));
     Ok(Screen {
         tailnet: Default::default(),
         catalog: femto_catalog::worker::Worker::default(),

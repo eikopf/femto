@@ -62,3 +62,44 @@ fn repeated_failures_cap_delay_at_one_minute() {
     }
     assert_eq!(retry.poll(now, false), Action::Connect);
 }
+
+#[test]
+fn saved_networks_round_trip_validate_and_prefer_the_strongest_visible() {
+    use femto_picco_board::wifi::{Error, MAX_NETWORKS, Saved};
+    let mut saved = Saved::default();
+    assert!(!saved.enabled() && saved.is_empty());
+    assert_eq!(saved.remember("", "password1"), Err(Error::Ssid));
+    assert_eq!(saved.remember("Home", "short"), Err(Error::Password));
+    assert_eq!(
+        saved.remember("Home", "pass\u{e9}word"),
+        Err(Error::Password)
+    );
+    saved.remember("Home", "password1").unwrap();
+    saved.remember("Caf\u{e9}", "").unwrap();
+    saved.remember("Home", "password2").unwrap();
+    saved.set_enabled(true);
+    let restored = Saved::parse(&saved.to_bytes()).unwrap();
+    assert!(restored.enabled());
+    assert_eq!(restored.password("Home"), Some("password2"));
+    assert_eq!(restored.password("Caf\u{e9}"), Some(""));
+    assert_eq!(restored.password("Other"), None);
+    assert_eq!(
+        restored.choose([("Other", -20), ("Home", -70), ("Caf\u{e9}", -50)]),
+        Some("Caf\u{e9}")
+    );
+    assert_eq!(restored.choose([("Other", -20)]), None);
+    assert!(saved.forget("Home") && !saved.forget("Home"));
+    for index in 0..MAX_NETWORKS + 2 {
+        saved.remember(&format!("net{index}"), "").unwrap();
+    }
+    // The least recently joined networks are dropped.
+    assert_eq!(saved.password("Caf\u{e9}"), None);
+    assert_eq!(saved.password("net0"), None);
+    assert!(saved.password("net2").is_some());
+    assert!(matches!(Saved::parse(b"{}"), Err(Error::Format)));
+    assert!(matches!(
+        Saved::parse(br#"{"version":2,"enabled":false,"networks":[]}"#),
+        Err(Error::Version)
+    ));
+    assert!(matches!(Saved::parse(&[b' '; 4096]), Err(Error::Size)));
+}

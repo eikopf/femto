@@ -48,6 +48,11 @@ pub mod nvs {
             })
         }
     }
+    /// Stands in for the firmware's shared partition handle. Each call
+    /// takes the partition anew so that the exclusivity checks still apply.
+    pub fn partition() -> Result<EspDefaultNvsPartition, String> {
+        EspDefaultNvsPartition::take_with(false).map_err(str::to_string)
+    }
     pub struct EspDefaultNvs {
         _partition: EspDefaultNvsPartition,
     }

@@ -46,6 +46,121 @@ impl Credentials {
         &self.0.password
     }
 }
+/// Networks remembered on the device, most recently joined first.
+pub const MAX_NETWORKS: usize = 8;
+const MAX_SAVED_BYTES: usize = 2048;
+
+#[derive(serde::Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SavedNetwork {
+    ssid: String,
+    /// Empty for an open network.
+    password: Zeroizing<String>,
+}
+#[derive(serde::Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SavedWire {
+    version: u8,
+    enabled: bool,
+    networks: alloc::vec::Vec<SavedNetwork>,
+}
+pub struct Saved(SavedWire);
+
+fn validate(ssid: &str, password: &str) -> Result<(), Error> {
+    if ssid.is_empty() || ssid.len() > 32 || ssid.chars().any(char::is_control) {
+        return Err(Error::Ssid);
+    }
+    if !password.is_empty()
+        && (!(8..=63).contains(&password.len())
+            || !password.bytes().all(|b| (0x20..=0x7e).contains(&b)))
+    {
+        return Err(Error::Password);
+    }
+    Ok(())
+}
+
+impl Default for Saved {
+    fn default() -> Self {
+        Self(SavedWire {
+            version: 1,
+            enabled: false,
+            networks: alloc::vec::Vec::new(),
+        })
+    }
+}
+
+impl Saved {
+    pub fn parse(bytes: &[u8]) -> Result<Self, Error> {
+        if bytes.len() > MAX_SAVED_BYTES {
+            return Err(Error::Size);
+        }
+        let wire: SavedWire = serde_json::from_slice(bytes).map_err(|_| Error::Format)?;
+        if wire.version != 1 {
+            return Err(Error::Version);
+        }
+        if wire.networks.len() > MAX_NETWORKS {
+            return Err(Error::Size);
+        }
+        for network in &wire.networks {
+            validate(&network.ssid, &network.password)?;
+        }
+        Ok(Self(wire))
+    }
+    pub fn to_bytes(&self) -> Zeroizing<alloc::vec::Vec<u8>> {
+        Zeroizing::new(serde_json::to_vec(&self.0).expect("plain strings serialize"))
+    }
+    pub fn enabled(&self) -> bool {
+        self.0.enabled
+    }
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.0.enabled = enabled;
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.networks.is_empty()
+    }
+    pub fn password(&self, ssid: &str) -> Option<&str> {
+        self.0
+            .networks
+            .iter()
+            .find(|network| network.ssid == ssid)
+            .map(|network| network.password.as_str())
+    }
+    /// Remembers a network as the most recent, replacing an entry with the
+    /// same name and dropping the least recent beyond [`MAX_NETWORKS`].
+    pub fn remember(&mut self, ssid: &str, password: &str) -> Result<(), Error> {
+        validate(ssid, password)?;
+        self.forget(ssid);
+        self.0.networks.insert(
+            0,
+            SavedNetwork {
+                ssid: ssid.into(),
+                password: Zeroizing::new(password.into()),
+            },
+        );
+        self.0.networks.truncate(MAX_NETWORKS);
+        Ok(())
+    }
+    pub fn forget(&mut self, ssid: &str) -> bool {
+        let before = self.0.networks.len();
+        self.0.networks.retain(|network| network.ssid != ssid);
+        before != self.0.networks.len()
+    }
+    /// The remembered network with the strongest signal among those visible.
+    pub fn choose<'a>(&self, visible: impl IntoIterator<Item = (&'a str, i8)>) -> Option<&str> {
+        visible
+            .into_iter()
+            .filter(|(ssid, _)| self.password(ssid).is_some())
+            .max_by_key(|(_, signal)| *signal)
+            .and_then(|(ssid, _)| {
+                self.0
+                    .networks
+                    .iter()
+                    .find(|network| network.ssid == ssid)
+                    .map(|network| network.ssid.as_str())
+            })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     None,

@@ -70,7 +70,7 @@ fn failed_sleep_retains_bluetooth_and_restores_touched_drivers() {
         }
         assert_eq!(calls.contains(&"panel-resume"), ["panel", "wifi"].contains(&fault));
         assert_eq!(calls.contains(&"wifi-resume"), fault == "wifi");
-        if ["panel", "wifi"].contains(&fault) { assert_eq!(screen.fast_count, 5); }
+        if ["panel", "wifi"].contains(&fault) { assert_eq!(screen.fast_count, u8::MAX); }
     }
 }
 '''

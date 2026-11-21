@@ -257,13 +257,20 @@ fn run() -> Result<(), String> {
     let mut console = console::Console::open();
     let (mut turning_forward, mut preparing) = (true, true);
     let mut stay_awake = false;
+    let (mut carry, mut dirty) = (None::<input::Event>, false);
     let mut setup = setup::Setup::default();
     let mut last_input = Instant::now();
     let mut busy_since: Option<(Instant, bool)> = None;
     loop {
         std::thread::sleep(Duration::from_millis(10));
         screen.poll_wifi();
-        let diagnostic_event = console.poll().and_then(|command| {
+        // A carried event is handled before any new console command is read.
+        let command = if carry.is_some() {
+            None
+        } else {
+            console.poll()
+        };
+        let diagnostic_event = command.and_then(|command| {
             use femto_picco_board::console::Command;
             log::info!("USB command: {command:?}");
             match command {
@@ -300,11 +307,15 @@ fn run() -> Result<(), String> {
                 }
             }
         });
-        let event = diagnostic_event.or_else(|| screen.event()).or_else(|| {
-            screen
-                .remote_turn(&reader.state, !ui.is_open())
-                .map(input::Event::Turn)
-        });
+        let event = carry
+            .take()
+            .or(diagnostic_event)
+            .or_else(|| screen.event())
+            .or_else(|| {
+                screen
+                    .remote_turn(&reader.state, !ui.is_open())
+                    .map(input::Event::Turn)
+            });
         if let Some(event) = event {
             idle.activity(idle_epoch.elapsed().as_millis().min(u64::MAX as u128) as u64);
             ui.set_device_status(&format!(
@@ -398,7 +409,15 @@ fn run() -> Result<(), String> {
                 }
                 effect = Effect::Redraw;
             }
-            if effect == Effect::Redraw {
+            // Input that arrived during the last panel update is handled
+            // before drawing again, so typing and repeated turns are not
+            // held up by one refresh per event.
+            dirty |= effect == Effect::Redraw;
+            if dirty {
+                carry = screen.event();
+            }
+            if dirty && carry.is_none() {
+                dirty = false;
                 if ui.take_light_request() {
                     let light = reader.state.frontlight;
                     if let Err(error) = screen.set_light(light.brightness, light.warmth) {

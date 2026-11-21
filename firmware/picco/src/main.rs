@@ -64,6 +64,9 @@ fn report_heap(stage: &str) {
     }
 }
 
+/// Names the book being opened at startup until its first page is shown.
+const OPENING_MARKER: &str = "/sdcard/femto/.opening";
+
 fn run() -> Result<(), String> {
     let mut screen = panel::open()?;
     report_heap("peripherals");
@@ -131,6 +134,15 @@ fn run() -> Result<(), String> {
                 candidates.push((path, false));
             }
         }
+    }
+    // A marker left by the previous start means its book never finished
+    // opening, most likely because it reset the device. Skip that book once
+    // so one bad file cannot keep the reader from starting.
+    let failed_open = std::fs::read_to_string(OPENING_MARKER).ok();
+    if let Some(path) = &failed_open {
+        log::warn!("Previous start did not finish opening {path}; skipping it");
+        candidates.retain(|(candidate, _)| candidate.as_os_str() != path.as_str());
+        let _ = std::fs::remove_file(OPENING_MARKER);
     }
     report_heap("before layout");
     // Chapter page indexes are recorded per firmware build, because layout
@@ -210,8 +222,11 @@ fn run() -> Result<(), String> {
         ui.configure_library_scan("/sdcard/femto".into(), 256)
             .map_err(|e| e.to_string())?;
     }
-    if choose_book {
+    if choose_book || failed_open.is_some() {
         ui.open_library();
+    }
+    if failed_open.is_some() {
+        ui.show_error("The last book did not open".into());
     }
     if let Err(error) = screen.set_light(
         reader.state.frontlight.brightness,
@@ -226,6 +241,8 @@ fn run() -> Result<(), String> {
     render(&mut reader, &ui, &mut plane)?;
     screen.set_full_refresh_interval(reader.state.full_refresh_interval);
     screen.present_oriented(&plane, orientation(reader.state.rotation))?;
+    // The book opened and its page is on the panel.
+    let _ = std::fs::remove_file(OPENING_MARKER);
     log::info!(
         "Reader ready: {} pages; GPIO21 previous, GPIO9 next",
         reader.page_count()
@@ -661,6 +678,9 @@ fn startup_reader(
     let mut plane =
         vec![255; femto_picco_board::PLANE_BYTES * if cfg!(feature = "grayscale") { 2 } else { 1 }];
     'books: for (path, resumed) in candidates {
+        if let Err(error) = std::fs::write(OPENING_MARKER, path.as_os_str().as_encoded_bytes()) {
+            log::warn!("Cannot mark {} as opening: {error}", path.display());
+        }
         if let Err(error) = startup.open_cached_file(&path, "/sdcard/femto", 256) {
             log::warn!("Cannot open {}: {error}", path.display());
             continue;

@@ -946,9 +946,22 @@ fn search_keyboard_filters_and_opens_books_without_losing_the_query() {
     finish_open(&mut ui, &mut reader); // b
     ui.tap(&mut reader, 180, 750).unwrap(); // space
     assert_eq!(ui.query(), "ab ");
-    ui.tap(&mut reader, 60, 750).unwrap(); // delete
+    ui.tap(&mut reader, 300, 750).unwrap(); // delete
     assert_eq!(ui.query(), "ab");
-    ui.tap(&mut reader, 300, 750).unwrap(); // clear
+    // The layer key switches to capitals, then symbols, then back.
+    ui.tap(&mut reader, 60, 750).unwrap();
+    ui.tap(&mut reader, 40, 150).unwrap();
+    assert_eq!(ui.query(), "abA");
+    ui.tap(&mut reader, 60, 750).unwrap();
+    ui.tap(&mut reader, 40, 150).unwrap();
+    assert_eq!(ui.query(), "abA.");
+    ui.tap(&mut reader, 60, 750).unwrap();
+    ui.tap(&mut reader, 40, 150).unwrap();
+    assert_eq!(ui.query(), "abA.a");
+    for _ in 0..5 {
+        ui.tap(&mut reader, 300, 750).unwrap();
+    }
+    assert_eq!(ui.query(), "");
     for c in "SAMPLE.EPUB".chars() {
         ui.type_char(c);
     }
@@ -1198,7 +1211,9 @@ fn catalog_search_keyboard_preserves_library_query_and_emits_submission() {
         ui.type_char('b');
     }
     assert_eq!(ui.query().len(), 64);
-    ui.tap(&mut reader, 300, 750).unwrap();
+    for _ in 0..64 {
+        ui.tap(&mut reader, 300, 750).unwrap();
+    }
     assert_eq!(ui.query(), "");
     ui.type_char('c');
     ui.tap(&mut reader, 420, 750).unwrap();
@@ -1332,9 +1347,11 @@ fn landscape_keyboard_letters_digits_and_actions_share_rendered_cells() {
     assert_ne!(ui.render(&mut reader, 2).unwrap(), before);
     ui.tap(&mut reader, 200, 479).unwrap();
     assert_eq!(ui.query(), "a09 ");
-    ui.tap(&mut reader, 0, 479).unwrap();
-    assert_eq!(ui.query(), "a09");
     ui.tap(&mut reader, 400, 479).unwrap();
+    assert_eq!(ui.query(), "a09");
+    for _ in 0..3 {
+        ui.tap(&mut reader, 400, 479).unwrap();
+    }
     assert_eq!(ui.query(), "");
     ui.tap(&mut reader, 799, 479).unwrap();
     assert_eq!(ui.take_catalog_event(), Some(CatalogEvent::Search));
@@ -2237,4 +2254,78 @@ fn missing_next_chapter_keeps_reader_usable_and_shows_error() {
     assert!(!ui.is_open());
     ui.turn(&mut reader, false).unwrap();
     assert!(reader.position() < before);
+}
+
+#[test]
+fn device_panel_reports_activation_and_text_entry_to_the_frontend() {
+    use femto_reader::ui::{DeviceEvent, DeviceRow, DeviceRowKind};
+    let mut reader = reader();
+    let mut ui = ReaderUi::default();
+    ui.set_device_available(true);
+    ui.open();
+    // The entry is offered in the root menu and opens on request only.
+    while ui.swipe(&mut reader, true).unwrap() == Effect::Redraw {}
+    let rows = |password: &str| {
+        vec![
+            DeviceRow {
+                label: "Wi-Fi".into(),
+                kind: DeviceRowKind::Toggle(false),
+            },
+            DeviceRow {
+                label: "Status".into(),
+                kind: DeviceRowKind::Info,
+            },
+            DeviceRow {
+                label: "Password".into(),
+                kind: DeviceRowKind::Text {
+                    value: password.into(),
+                    secret: true,
+                    limit: 8,
+                },
+            },
+            DeviceRow {
+                label: "Server".into(),
+                kind: DeviceRowKind::Text {
+                    value: "ab".into(),
+                    secret: false,
+                    limit: 8,
+                },
+            },
+        ]
+    };
+    ui.set_device_view("Network", rows("")).unwrap();
+    assert!(ui.is_device_open());
+    let unset = ui.render(&mut reader, 2).unwrap();
+    ui.tap(&mut reader, 240, 150).unwrap();
+    assert_eq!(ui.take_device_event(), Some(DeviceEvent::Activate(0)));
+    ui.tap(&mut reader, 240, 250).unwrap();
+    assert_eq!(ui.take_device_event(), None);
+    // A secret starts empty, respects its limit and is reported on Done.
+    ui.tap(&mut reader, 240, 350).unwrap();
+    assert!(ui.is_editing());
+    assert_eq!(ui.query(), "");
+    for c in "secret-and-more".chars() {
+        ui.type_char(c);
+    }
+    assert_eq!(ui.query(), "secret-a");
+    ui.tap(&mut reader, 420, 750).unwrap();
+    assert_eq!(
+        ui.take_device_event(),
+        Some(DeviceEvent::Text(2, "secret-a".into()))
+    );
+    assert!(ui.is_device_open() && !ui.is_editing());
+    ui.set_device_view("Network", rows("secret-a")).unwrap();
+    // The list shows only whether a secret is set.
+    assert_ne!(ui.render(&mut reader, 2).unwrap(), unset);
+    // Other text starts from its value; Back discards the edit.
+    ui.tap(&mut reader, 240, 450).unwrap();
+    assert_eq!(ui.query(), "ab");
+    ui.type_char('c');
+    ui.back(&mut reader).unwrap();
+    assert_eq!(ui.take_device_event(), None);
+    assert!(ui.is_device_open() && !ui.is_editing());
+    ui.back(&mut reader).unwrap();
+    assert_eq!(ui.take_device_event(), Some(DeviceEvent::Back));
+    ui.close_device();
+    assert!(ui.is_open() && !ui.is_device_open());
 }

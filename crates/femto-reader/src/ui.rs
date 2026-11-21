@@ -18,6 +18,10 @@ enum Panel {
     Rotation,
     Catalog,
     CatalogSearch,
+    /// A list of rows supplied by the device frontend.
+    Device,
+    /// Editing the text of one device row.
+    DeviceText(usize),
     Kosync,
     Tailnet,
     Contents,
@@ -52,6 +56,10 @@ enum Panel {
 enum Command {
     Kosync(KosyncEvent),
     Catalog(CatalogEvent),
+    DeviceOpen,
+    DeviceRow(usize),
+    /// Switch the keyboard between lower case, upper case and symbols.
+    Layer,
     Tailnet(TailnetEvent),
     Sleep,
     Rotation(crate::state::Rotation),
@@ -76,7 +84,6 @@ enum Command {
     CancelWord,
     Character(char),
     Delete,
-    Clear,
     Find,
     Open(Panel),
     Reader(Action),
@@ -180,6 +187,45 @@ impl Setting {
     }
 }
 
+/// One row of the device settings panel, defined by the frontend.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeviceRow {
+    pub label: String,
+    pub kind: DeviceRowKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DeviceRowKind {
+    /// Shown only; activating it does nothing.
+    Info,
+    Action,
+    Submenu,
+    Toggle(bool),
+    /// Opens the keyboard. `value` is shown beside the label unless secret,
+    /// and a secret starts from an empty field.
+    Text {
+        value: String,
+        secret: bool,
+        limit: usize,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DeviceEvent {
+    Open,
+    Back,
+    Activate(usize),
+    /// The text entered for a [`DeviceRowKind::Text`] row.
+    Text(usize, String),
+}
+
+const KEY_LAYERS: [&str; 3] = [
+    "abcdefghijklmnopqrstuvwxyz0123456789",
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+    ".,-_@:/?!#$%&*+=()'\";<>[]{}\\|~^`äöüé",
+];
+const LAYER_LABELS: [&str; 3] = ["ABC", "#+=", "abc"];
+
 /// What a menu row shows beside its label.
 enum Control {
     None,
@@ -252,6 +298,12 @@ pub struct ReaderUi {
     catalog_title: String,
     catalog_rows: Vec<String>,
     catalog_query: String,
+    device_available: bool,
+    device_event: Option<DeviceEvent>,
+    device_title: String,
+    device_rows: Vec<DeviceRow>,
+    device_text: String,
+    keyboard_layer: usize,
     kosync_available: bool,
     kosync_event: Option<KosyncEvent>,
     kosync_status: String,
@@ -563,11 +615,71 @@ impl ReaderUi {
         self.selected = 0;
         self.error = None;
     }
+    /// Offers the device settings panel in the root menu.
+    pub fn set_device_available(&mut self, available: bool) {
+        self.device_available = available;
+    }
+    pub fn take_device_event(&mut self) -> Option<DeviceEvent> {
+        self.device_event.take()
+    }
+    pub fn is_device_open(&self) -> bool {
+        matches!(self.panel, Some(Panel::Device | Panel::DeviceText(_)))
+    }
+    /// Shows the device settings panel with these rows. The selection is
+    /// kept when the rows are refreshed in place.
+    pub fn set_device_view(&mut self, title: &str, rows: Vec<DeviceRow>) -> Result<()> {
+        if rows.len() > 64 {
+            return Err(crate::Error::Limit("device menu rows"));
+        }
+        let clean = |text: &str| {
+            text.chars()
+                .filter(|c| !c.is_control())
+                .take(256)
+                .collect::<String>()
+        };
+        let title = clean(title);
+        if !matches!(self.panel, Some(Panel::Device)) || self.device_title != title {
+            self.selected = 0;
+        }
+        self.selected = self.selected.min(rows.len().saturating_sub(1));
+        self.device_title = title;
+        self.device_rows = rows
+            .into_iter()
+            .map(|row| DeviceRow {
+                label: clean(&row.label),
+                kind: row.kind,
+            })
+            .collect();
+        self.panel = Some(Panel::Device);
+        self.error = None;
+        Ok(())
+    }
+    /// Leaves the device settings panel for the root menu.
+    pub fn close_device(&mut self) {
+        if self.is_device_open() {
+            self.device_rows.clear();
+            self.device_text.clear();
+            self.open();
+        }
+    }
+    /// Bytes the field being edited accepts.
+    fn text_limit(&self) -> usize {
+        match self.panel {
+            Some(Panel::DeviceText(index)) => match self.device_rows.get(index) {
+                Some(DeviceRow {
+                    kind: DeviceRowKind::Text { limit, .. },
+                    ..
+                }) => (*limit).min(256),
+                _ => 0,
+            },
+            _ => 64,
+        }
+    }
     fn edit_query(&mut self) -> &mut String {
-        if matches!(self.panel, Some(Panel::CatalogSearch)) {
-            &mut self.catalog_query
-        } else {
-            &mut self.query
+        match self.panel {
+            Some(Panel::CatalogSearch) => &mut self.catalog_query,
+            Some(Panel::DeviceText(_)) => &mut self.device_text,
+            _ => &mut self.query,
         }
     }
     pub fn set_catalog_view(&mut self, title: &str, rows: &[String]) -> Result<()> {
@@ -669,7 +781,13 @@ impl ReaderUi {
             Command::SwapMenuButtons => Control::Toggle(state.swap_menu_buttons),
             Command::Hinting => Control::Toggle(state.text_raster.hinting),
             Command::Fractional => Control::Toggle(state.text_raster.fractional),
+            Command::DeviceRow(index) => match self.device_rows.get(index).map(|row| &row.kind) {
+                Some(DeviceRowKind::Toggle(on)) => Control::Toggle(*on),
+                Some(DeviceRowKind::Submenu | DeviceRowKind::Text { .. }) => Control::Submenu,
+                _ => Control::None,
+            },
             Command::Open(_)
+            | Command::DeviceOpen
             | Command::Kosync(KosyncEvent::Open)
             | Command::Catalog(CatalogEvent::Open)
             | Command::Tailnet(TailnetEvent::Open) => Control::Submenu,
@@ -881,19 +999,22 @@ impl ReaderUi {
         }
     }
     pub fn is_editing(&self) -> bool {
-        matches!(self.panel, Some(Panel::Search | Panel::CatalogSearch))
+        matches!(
+            self.panel,
+            Some(Panel::Search | Panel::CatalogSearch | Panel::DeviceText(_))
+        )
     }
     pub fn query(&self) -> &str {
-        if matches!(self.panel, Some(Panel::CatalogSearch)) {
-            &self.catalog_query
-        } else {
-            &self.query
+        match self.panel {
+            Some(Panel::CatalogSearch) => &self.catalog_query,
+            Some(Panel::DeviceText(_)) => &self.device_text,
+            _ => &self.query,
         }
     }
     pub fn type_char(&mut self, character: char) -> Effect {
         if !self.is_editing()
             || character.is_control()
-            || self.query().len() + character.len_utf8() > 64
+            || self.query().len() + character.len_utf8() > self.text_limit()
         {
             return Effect::Unchanged;
         }
@@ -918,6 +1039,15 @@ impl ReaderUi {
         }
         if matches!(self.panel, Some(Panel::CatalogSearch)) {
             self.catalog_event = Some(CatalogEvent::Search);
+            return Effect::Redraw;
+        }
+        if let Some(Panel::DeviceText(index)) = self.panel {
+            self.device_event = Some(DeviceEvent::Text(
+                index,
+                std::mem::take(&mut self.device_text),
+            ));
+            self.panel = Some(Panel::Device);
+            self.selected = index;
             return Effect::Redraw;
         }
         self.panel = Some(Panel::Results);
@@ -1026,6 +1156,17 @@ impl ReaderUi {
             }
             Some(Panel::Catalog | Panel::CatalogSearch) => {
                 self.catalog_event = Some(CatalogEvent::Back);
+                Ok(Effect::Redraw)
+            }
+            Some(Panel::Device) => {
+                self.device_event = Some(DeviceEvent::Back);
+                Ok(Effect::Redraw)
+            }
+            Some(Panel::DeviceText(index)) => {
+                // Leaving the keyboard discards the entry.
+                self.device_text.clear();
+                self.panel = Some(Panel::Device);
+                self.selected = index;
                 Ok(Effect::Redraw)
             }
             Some(Panel::Kosync) => {
@@ -1516,10 +1657,32 @@ impl ReaderUi {
             Command::Rescan => self.rescan_library(),
             Command::Character(character) => Ok(self.type_char(character)),
             Command::Delete => Ok(self.delete_char()),
-            Command::Clear => {
-                self.edit_query().clear();
+            Command::Layer => {
+                self.keyboard_layer = (self.keyboard_layer + 1) % KEY_LAYERS.len();
                 Ok(Effect::Redraw)
             }
+            Command::DeviceOpen => {
+                self.device_event = Some(DeviceEvent::Open);
+                Ok(Effect::Redraw)
+            }
+            Command::DeviceRow(index) => match self.device_rows.get(index).map(|row| &row.kind) {
+                None | Some(DeviceRowKind::Info) => Ok(Effect::Unchanged),
+                Some(DeviceRowKind::Text { value, secret, .. }) => {
+                    self.device_text = if *secret {
+                        String::new()
+                    } else {
+                        value.clone()
+                    };
+                    self.keyboard_layer = 0;
+                    self.panel = Some(Panel::DeviceText(index));
+                    self.selected = 0;
+                    Ok(Effect::Redraw)
+                }
+                Some(_) => {
+                    self.device_event = Some(DeviceEvent::Activate(index));
+                    Ok(Effect::Redraw)
+                }
+            },
             Command::RemoteCycle(usage) => {
                 let mut bindings = reader.state.remote_bindings.clone().unwrap_or_default();
                 bindings.cycle(usage).map(|()| {
@@ -1695,6 +1858,10 @@ impl ReaderUi {
             .chain(
                 self.catalog_available
                     .then(|| ("Catalog".into(), Command::Catalog(CatalogEvent::Open))),
+            )
+            .chain(
+                self.device_available
+                    .then(|| ("Network and services".into(), Command::DeviceOpen)),
             )
             .chain(
                 self.device_status
@@ -2022,15 +2189,40 @@ impl ReaderUi {
                         .collect()
                 })
                 .unwrap_or_default(),
-            Panel::Search | Panel::CatalogSearch => "abcdefghijklmnopqrstuvwxyz0123456789"
+            Panel::Search | Panel::CatalogSearch | Panel::DeviceText(_) => KEY_LAYERS
+                [self.keyboard_layer]
                 .chars()
                 .map(|c| (c.to_string(), Command::Character(c)))
                 .chain([
-                    ("Delete".into(), Command::Delete),
+                    (LAYER_LABELS[self.keyboard_layer].into(), Command::Layer),
                     ("Space".into(), Command::Character(' ')),
-                    ("Clear".into(), Command::Clear),
-                    ("Find".into(), Command::Find),
+                    ("Delete".into(), Command::Delete),
+                    ("Done".into(), Command::Find),
                 ])
+                .collect(),
+            Panel::Device => self
+                .device_rows
+                .iter()
+                .enumerate()
+                .map(|(index, row)| {
+                    let label = match &row.kind {
+                        DeviceRowKind::Text {
+                            secret: true,
+                            value,
+                            ..
+                        } => format!(
+                            "{}: {}",
+                            row.label,
+                            if value.is_empty() { "not set" } else { "set" }
+                        ),
+                        DeviceRowKind::Text { value, .. } if value.is_empty() => {
+                            format!("{}: not set", row.label)
+                        }
+                        DeviceRowKind::Text { value, .. } => format!("{}: {value}", row.label),
+                        _ => row.label.clone(),
+                    };
+                    (label, Command::DeviceRow(index))
+                })
                 .collect(),
             Panel::Folders => self
                 .folders
@@ -2162,41 +2354,81 @@ impl ReaderUi {
         let layout = reader.state.layout;
         let geometry = crate::menu::Geometry::new(layout.width, layout.height)?;
         geometry.keyboard()?;
+        let width = layout.width as usize;
+        let mut canvas = Canvas {
+            pixels: vec![255; width * layout.height as usize],
+            width,
+        };
+        let label = |text: &str, cell_width: usize, height: usize, size, bold| {
+            reader.render_styled_cell(
+                text,
+                cell_width as u32,
+                height as u32,
+                levels,
+                crate::controller::CellStyle::Label { size, bold },
+            )
+        };
+        // The field shows the end of the text with a cursor, or the error.
         let tail: String = self
             .query()
             .graphemes(true)
             .rev()
-            .take(24)
+            .take(26)
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
             .collect();
-        let heading = self
-            .error
-            .as_ref()
-            .map(|error| format!("< Back | {error}"))
-            .unwrap_or_else(|| format!("< Back | {tail}_"));
-        let heading = heading.graphemes(true).take(32).collect::<String>();
-        let mut pixels = reader.render_rows(&[heading], None, levels)?;
-        for (index, (label, _)) in self.entries(reader).iter().enumerate() {
-            let (row, x, width) = geometry.key(index);
+        let field = match &self.error {
+            Some(error) => error.graphemes(true).take(64).collect(),
+            None => format!("{tail}_"),
+        };
+        let (top, height) = geometry.row(0);
+        let (top, height) = (top as usize, height as usize);
+        canvas.chevron(26, top + height / 2, false, 0);
+        canvas.blit(
+            44,
+            top,
+            &label(&field, width - 44, height, 24, false)?,
+            width - 44,
+            false,
+        );
+        canvas.rule(top + height - 1);
+        for (index, (text, _)) in self.entries(reader).iter().enumerate() {
+            let (row, x, key_width) = geometry.key(index);
             let (top, height) = geometry.row(row);
-            let cell = reader.render_cell(label, width, height, levels)?;
+            let (x, key_width, top, height) = (
+                x as usize,
+                key_width as usize,
+                top as usize,
+                height as usize,
+            );
+            let selected = self.selected == index;
+            if selected {
+                canvas.fill(x, top, key_width, height, 0);
+            }
+            // Keys are set from the left margin; copy their ink centered.
+            let size = if text.chars().count() == 1 { 28 } else { 22 };
+            let cell = label(text, key_width.max(160), height, size, false)?;
+            let cell_width = key_width.max(160);
+            let columns =
+                (0..cell_width).filter(|x| (0..height).any(|y| cell[y * cell_width + x] < 255));
+            let (left, right) = (
+                columns.clone().min().unwrap_or(0),
+                columns.max().unwrap_or(0),
+            );
+            let span = (right + 1 - left).min(key_width);
+            let offset = x + (key_width - span) / 2;
             for y in 0..height {
-                for dx in 0..width {
-                    let value = cell[(y * width + dx) as usize];
-                    pixels[((top + y) * layout.width + x + dx) as usize] =
-                        if y == height - 1 || dx == width - 1 {
-                            0
-                        } else if self.selected == index {
-                            255 - value
-                        } else {
-                            value
-                        };
+                for dx in 0..span {
+                    let value = cell[y * cell_width + left + dx];
+                    canvas.pixels[(top + y) * width + offset + dx] =
+                        if selected { 255 - value } else { value };
                 }
             }
+            canvas.fill(x + key_width - 1, top, 1, height, 0);
+            canvas.fill(x, top + height - 1, key_width, 1, 0);
         }
-        Ok(pixels)
+        Ok(canvas.pixels)
     }
     /// Renders the current view, with an hourglass in the top-right corner
     /// while background work is pending.
@@ -2265,7 +2497,8 @@ impl ReaderUi {
         let title = match panel {
             Panel::Errors => "Scan errors",
             Panel::Diagnostic(_) => "Error details",
-            Panel::Search | Panel::CatalogSearch => "Search",
+            Panel::Search | Panel::CatalogSearch | Panel::DeviceText(_) => "Search",
+            Panel::Device => &self.device_title,
             Panel::Results => "Search results",
             Panel::Root => &reader_title,
             Panel::Rotation => "Screen orientation",

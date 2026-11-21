@@ -1506,11 +1506,12 @@ fn link_menu_preview_closes_without_navigation_and_follows_explicitly() {
             ui.tap(&mut reader, width - 1, height - 1).unwrap();
             assert!(ui.is_navigating());
             assert_eq!(reader.position(), origin);
-            if back {
-                ui.back(&mut reader).unwrap();
-            } else {
+            if !back {
+                // Other input waits for the pending move.
                 ui.select(&mut reader).unwrap();
+                assert!(ui.is_navigating());
             }
+            ui.back(&mut reader).unwrap();
             assert!(!ui.is_navigating());
             assert_eq!(ui.render(&mut reader, 4).unwrap(), preview_pixels);
             assert_eq!(reader.dispatch(Action::Back).unwrap(), Effect::Unchanged);
@@ -1697,7 +1698,7 @@ fn finish_navigation(ui: &mut ReaderUi, reader: &mut Reader) {
 }
 
 #[test]
-fn chapter_menu_and_boundary_taps_use_cancellable_navigation() {
+fn chapter_menu_and_boundary_taps_keep_the_view_until_navigation_finishes() {
     use femto_reader::controller::Action;
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
     let mut reader = Reader::new(
@@ -1721,13 +1722,15 @@ fn chapter_menu_and_boundary_taps_use_cancellable_navigation() {
         assert_eq!(reader.position(), before);
         assert_eq!(reader.render(2).unwrap(), pixels);
         assert_eq!(ui.resize(&reader, 2.0).unwrap(), Effect::Unchanged);
-        if back {
-            ui.back(&mut reader).unwrap();
-        } else {
+        if !back {
+            // Other input waits for the pending move; the list stays visible.
             ui.select(&mut reader).unwrap();
+            ui.turn(&mut reader, true).unwrap();
+            assert!(ui.is_navigating());
         }
+        ui.back(&mut reader).unwrap();
         assert!(!ui.is_navigating());
-        assert!(ui.is_open()); // Restored chapter list.
+        assert!(ui.is_open()); // The chapter list was never replaced.
     }
     ui.select(&mut reader).unwrap();
     finish_navigation(&mut ui, &mut reader);
@@ -1744,8 +1747,9 @@ fn chapter_menu_and_boundary_taps_use_cancellable_navigation() {
     assert_eq!(reader.page_index() + 1, reader.page_count());
     ui.turn(&mut reader, true).unwrap();
     assert!(ui.is_navigating());
-    ui.open(); // An external panel change cancels pending navigation.
-    ui.poll_navigation(&mut reader);
+    // The page stays visible while the next chapter is indexed; Back abandons it.
+    assert!(!ui.is_open());
+    ui.back(&mut reader).unwrap();
     assert!(!ui.is_navigating());
     assert_eq!(reader.position().chapter, 0);
 }
@@ -1786,6 +1790,8 @@ fn stale_preview_follow_returns_to_a_renderable_menu_on_poll_or_cancellation() {
             }
             _ => {
                 ui.select(&mut reader).unwrap();
+                assert!(ui.is_navigating());
+                assert_eq!(ui.poll_navigation(&mut reader), Effect::Redraw);
             }
         }
         assert!(!ui.is_navigating());

@@ -49,7 +49,6 @@ enum Panel {
     Scanning,
     Opening,
     Reflowing,
-    Navigating,
     Errors,
     Diagnostic(usize),
 }
@@ -67,7 +66,6 @@ enum Command {
     CancelOpen,
     CancelPreview,
     CancelReflow,
-    CancelNavigation,
     Noop,
     ClipPage,
     DeleteClipping(usize),
@@ -379,13 +377,13 @@ impl ReaderUi {
             }
         }
     }
+    /// The visible page or menu stays in place until the destination is
+    /// indexed; Back abandons the move.
     fn start_navigation(&mut self, job: Navigating) -> Effect {
         self.navigation = Some(job);
         self.navigation_return = self.panel;
-        self.panel = Some(Panel::Navigating);
-        self.selected = 0;
         self.error = None;
-        Effect::Redraw
+        Effect::Unchanged
     }
     fn cancel_navigation(&mut self, reader: &Reader) -> Effect {
         self.navigation = None;
@@ -405,17 +403,6 @@ impl ReaderUi {
         Effect::Redraw
     }
     pub fn poll_navigation(&mut self, reader: &mut Reader) -> Effect {
-        if !matches!(self.panel, Some(Panel::Navigating)) {
-            if self.navigation.is_some()
-                && matches!(self.navigation_return, Some(Panel::LinkPreview))
-            {
-                self.preview = None;
-                self.preview_return = None;
-            }
-            self.navigation = None;
-            self.navigation_return = None;
-            return Effect::Unchanged;
-        }
         let Some(mut job) = self.navigation.take() else {
             return Effect::Unchanged;
         };
@@ -546,6 +533,10 @@ impl ReaderUi {
     }
     /// A swipe turns a reading page and moves a menu by one page of entries.
     pub fn swipe(&mut self, reader: &mut Reader, next: bool) -> Result<Effect> {
+        // Input waits for a pending move to another chapter; Back abandons it.
+        if self.is_navigating() {
+            return Ok(Effect::Unchanged);
+        }
         if matches!(
             self.panel,
             None | Some(Panel::SelectWord | Panel::LinkPreview)
@@ -876,6 +867,10 @@ impl ReaderUi {
         self.panel.is_some()
     }
     pub fn back(&mut self, reader: &mut Reader) -> Result<Effect> {
+        if self.is_navigating() {
+            self.cancel_navigation(reader);
+            return Ok(Effect::Redraw);
+        }
         match self.panel {
             Some(Panel::DictionaryOpening | Panel::DictionaryResult) => {
                 if let Some(dictionary) = self.dictionary_job.take().filter(|d| d.is_ready()) {
@@ -908,7 +903,6 @@ impl ReaderUi {
                 self.selected = 0;
                 Ok(Effect::Redraw)
             }
-            Some(Panel::Navigating) => Ok(self.cancel_navigation(reader)),
             Some(Panel::PreviewOpening) => Ok(self.cancel_preview()),
             Some(Panel::LinkPreview) => {
                 self.preview = None;
@@ -983,6 +977,10 @@ impl ReaderUi {
         self.error = None;
     }
     pub fn turn(&mut self, reader: &mut Reader, next: bool) -> Result<Effect> {
+        // Input waits for a pending move to another chapter; Back abandons it.
+        if self.is_navigating() {
+            return Ok(Effect::Unchanged);
+        }
         if matches!(self.panel, Some(Panel::SelectWord)) {
             let changed = self.word_pan != next;
             self.word_pan = next;
@@ -1114,6 +1112,10 @@ impl ReaderUi {
     }
 
     pub fn tap(&mut self, reader: &mut Reader, x: u32, y: u32) -> Result<Effect> {
+        // Input waits for a pending move to another chapter; Back abandons it.
+        if self.is_navigating() {
+            return Ok(Effect::Unchanged);
+        }
         let layout = reader.state.layout;
         if x >= layout.width || y >= layout.height {
             return Ok(Effect::Unchanged);
@@ -1212,6 +1214,10 @@ impl ReaderUi {
         self.activate(reader, *command)
     }
     pub fn select(&mut self, reader: &mut Reader) -> Result<Effect> {
+        // Input waits for a pending move to another chapter; Back abandons it.
+        if self.is_navigating() {
+            return Ok(Effect::Unchanged);
+        }
         if matches!(self.panel, Some(Panel::SelectWord)) {
             return self.back(reader);
         }
@@ -1472,7 +1478,6 @@ impl ReaderUi {
                 None => Err(crate::Error::Document("library entry unavailable".into())),
             },
             Command::CancelReflow => Ok(self.cancel_reflow()),
-            Command::CancelNavigation => Ok(self.cancel_navigation(reader)),
             Command::CancelPreview => Ok(self.cancel_preview()),
             Command::CancelOpen => {
                 self.opening = None;
@@ -1940,7 +1945,6 @@ impl ReaderUi {
                 ),
             ],
             Panel::Reflowing => vec![("Cancel reflow".into(), Command::CancelReflow)],
-            Panel::Navigating => vec![("Cancel jump".into(), Command::CancelNavigation)],
             Panel::PreviewOpening => vec![("Cancel preview".into(), Command::CancelPreview)],
             Panel::Opening => vec![("Cancel opening".into(), Command::CancelOpen)],
             Panel::Scanning => vec![("Cancel scan".into(), Command::CancelScan)],
@@ -2237,7 +2241,6 @@ impl ReaderUi {
         );
         let title = match panel {
             Panel::Reflowing => "Reflowing pages",
-            Panel::Navigating => "Opening chapter",
             Panel::Opening => "Opening book",
             Panel::PreviewOpening => "Opening note preview",
             Panel::Scanning => "Scanning library",

@@ -459,6 +459,8 @@ fn run() -> Result<(), String> {
             screen.present(&plane)?;
         }
         let navigated = ui.poll_navigation(&mut reader) == Effect::Redraw;
+        // A new chapter has new neighbouring pages to prepare.
+        preparing |= navigated;
         if ui.poll_open(&mut reader) == Effect::Redraw || navigated {
             if !ui.is_open() {
                 let access = reader

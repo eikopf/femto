@@ -73,7 +73,16 @@ fn chapter_indexer(
     })
 }
 
-type CellKey = (String, u32, u32, u16);
+type CellKey = (String, u32, u32, u16, CellStyle);
+
+/// How a menu cell's text is set.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CellStyle {
+    /// Small text from the top-left corner, for dense grids and status lines.
+    Compact,
+    /// A label of the given pixel size, centered vertically.
+    Label { size: u32, bold: bool },
+}
 
 /// Everything a rendered reading page depends on besides the fonts, which are
 /// fixed for a reader. A pagination belongs to one chapter of one document.
@@ -1676,10 +1685,21 @@ impl Reader {
         height: u32,
         levels: u16,
     ) -> Result<Vec<u8>> {
+        self.render_styled_cell(text, width, height, levels, CellStyle::Compact)
+    }
+
+    pub(crate) fn render_styled_cell(
+        &self,
+        text: &str,
+        width: u32,
+        height: u32,
+        levels: u16,
+        style: CellStyle,
+    ) -> Result<Vec<u8>> {
         const CELLS: usize = 48;
         let mut cells = self.cells.lock().unwrap_or_else(|e| e.into_inner());
-        let known = cells.iter().position(|((known, w, h, l), _)| {
-            known == text && (*w, *h, *l) == (width, height, levels)
+        let known = cells.iter().position(|((known, w, h, l, s), _)| {
+            known == text && (*w, *h, *l, *s) == (width, height, levels, style)
         });
         let entry = match known {
             Some(index) => cells.remove(index),
@@ -1688,8 +1708,8 @@ impl Reader {
                     cells.remove(0);
                 }
                 (
-                    (text.to_owned(), width, height, levels),
-                    self.rasterize_cell(text, width, height, levels)?,
+                    (text.to_owned(), width, height, levels, style),
+                    self.rasterize_cell(text, width, height, levels, style)?,
                 )
             }
         };
@@ -1698,7 +1718,18 @@ impl Reader {
         Ok(pixels)
     }
 
-    fn rasterize_cell(&self, text: &str, width: u32, height: u32, levels: u16) -> Result<Vec<u8>> {
+    fn rasterize_cell(
+        &self,
+        text: &str,
+        width: u32,
+        height: u32,
+        levels: u16,
+        style: CellStyle,
+    ) -> Result<Vec<u8>> {
+        let (size, bold) = match style {
+            CellStyle::Compact => (18, false),
+            CellStyle::Label { size, bold } => (size, bold),
+        };
         let chapter = Chapter {
             language: "und".into(),
             index: 0,
@@ -1713,31 +1744,86 @@ impl Reader {
                 spans: vec![Span {
                     language: None,
                     range: 0..text.len(),
-                    style: TextStyle::default(),
+                    style: TextStyle {
+                        bold,
+                        ..TextStyle::default()
+                    },
                 }],
             })],
         };
-        let config = LayoutConfig {
-            width,
-            height,
-            // Retain the layout engine's three-line minimum for 18 px menu text.
-            margin: 12.min(height.saturating_sub(65) / 2),
-            font_size: 18.0,
-            line_height: 1.2,
-            hyphenation: crate::layout::Hyphenation::Off,
+        let raster = |config: LayoutConfig| {
+            let pages = paginate(&chapter, &self.fonts, config)?;
+            let page = pages
+                .pages
+                .first()
+                .ok_or(Error::Layout("menu cell has no page"))?;
+            let pixels = rasterize_display(
+                page,
+                &self.fonts,
+                config,
+                Default::default(),
+                levels,
+                |_| Err(Error::Document("menu resource".into())),
+            )?;
+            let lines: Vec<_> = page
+                .lines
+                .iter()
+                .map(|line| (line.baseline, line.baseline - line.ascent))
+                .collect();
+            Ok::<_, Error>((pixels, lines, pages.pages.len()))
         };
-        let pages = paginate(&chapter, &self.fonts, config)?;
-        if pages.pages.len() != 1 {
-            return Err(Error::Layout("menu row exceeds viewport"));
+        let CellStyle::Label { .. } = style else {
+            let (pixels, _, pages) = raster(LayoutConfig {
+                width,
+                height,
+                // Retain the layout engine's three-line minimum for 18 px menu text.
+                margin: 12.min(height.saturating_sub(65) / 2),
+                font_size: 18.0,
+                line_height: 1.2,
+                hyphenation: crate::layout::Hyphenation::Off,
+            })?;
+            if pages != 1 {
+                return Err(Error::Layout("menu row exceeds viewport"));
+            }
+            return Ok(pixels);
+        };
+        // Lay the label out on a taller canvas, then cut the cell out around
+        // the lines that fit, so every label shares one vertical alignment.
+        let line_height = 1.2;
+        let margin = 20.min(width / 8);
+        let canvas = height.max((4.0 * size as f32 * line_height) as u32 + 2 * margin);
+        let (pixels, lines, _) = raster(LayoutConfig {
+            width,
+            height: canvas,
+            margin,
+            font_size: size as f32,
+            line_height,
+            hyphenation: crate::layout::Hyphenation::Off,
+        })?;
+        let fitting = ((height as f32 / (size as f32 * line_height)) as usize).max(1);
+        let shown = &lines[..lines.len().min(fitting)];
+        // Center the span from the first line's capital height to the last
+        // baseline; font ascent and descent are too uneven to center on.
+        let (top, bottom) = match (shown.first(), shown.last()) {
+            (Some(first), Some(last)) => (first.0 - 0.68 * size as f32, last.0),
+            _ => (0.0, 0.0),
+        };
+        // Canvas row shown at the cell's first row; negative when the text
+        // has to move down.
+        let start = ((top + bottom) / 2.0 - height as f32 / 2.0).round() as i64;
+        // Lines that do not fit are left out instead of showing a sliver.
+        let end = lines
+            .get(shown.len())
+            .map_or(i64::from(canvas), |next| next.1.floor() as i64);
+        let mut cell = vec![255; (width * height) as usize];
+        for (row, target) in cell.chunks_exact_mut(width as usize).enumerate() {
+            let source = start + row as i64;
+            if (0..end.min(i64::from(canvas))).contains(&source) {
+                let offset = source as usize * width as usize;
+                target.copy_from_slice(&pixels[offset..offset + width as usize]);
+            }
         }
-        rasterize_display(
-            &pages.pages[0],
-            &self.fonts,
-            config,
-            Default::default(),
-            levels,
-            |_| Err(Error::Document("menu resource".into())),
-        )
+        Ok(cell)
     }
 
     fn move_to(&mut self, target: Locator, remember: bool) -> Result<Effect> {

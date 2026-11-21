@@ -80,22 +80,112 @@ enum Command {
     Find,
     Open(Panel),
     Reader(Action),
-    Size(f32),
     Hyphenation,
     ResetTypography,
     RemoteCycle(u32),
     RemoteDefaults,
     RemoteDisable,
-    LineSpacing,
-    Margin,
-    Stroke,
-    Gamma,
     Hinting,
     Fractional,
     Book(usize),
-    Light { brightness: u8, warmth: u8 },
+    /// Advance a stepped setting, wrapping to its first value.
+    Step(Setting),
+    /// Choose a value of a stepped setting by position.
+    Set(Setting, usize),
     SwapPageButtons,
     SwapMenuButtons,
+}
+
+/// A setting with a short ordered list of values, drawn as a stepped slider.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Setting {
+    Brightness,
+    Warmth,
+    TextSize,
+    LineSpacing,
+    Margin,
+    Stroke,
+    Coverage,
+}
+
+const TEXT_SIZES: [f32; 12] = [
+    14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0, 32.0, 36.0, 40.0,
+];
+const LINE_SPACINGS: [f32; 5] = [1.0, 1.15, 1.35, 1.6, 2.0];
+const MARGINS: [f32; 7] = [0.0, 8.0, 16.0, 24.0, 32.0, 40.0, 48.0];
+const STROKES: [f32; 3] = [0.0, 0.2, 0.4];
+const COVERAGES: [f32; 3] = [1.0, 0.85, 0.7];
+
+impl Setting {
+    /// Values in slider order; frontlight levels are their own positions.
+    fn values(self) -> &'static [f32] {
+        match self {
+            Self::Brightness => &[0.0; 11],
+            Self::Warmth => &[0.0; 10],
+            Self::TextSize => &TEXT_SIZES,
+            Self::LineSpacing => &LINE_SPACINGS,
+            Self::Margin => &MARGINS,
+            Self::Stroke => &STROKES,
+            Self::Coverage => &COVERAGES,
+        }
+    }
+    fn positions(self) -> usize {
+        self.values().len()
+    }
+    /// Position of the listed value nearest the current one.
+    fn position(self, state: &crate::state::ReaderState) -> usize {
+        let current = match self {
+            Self::Brightness => return usize::from(state.frontlight.brightness).min(10),
+            Self::Warmth => return usize::from(state.frontlight.warmth).min(9),
+            Self::TextSize => state.layout.font_size,
+            Self::LineSpacing => state.layout.line_height,
+            Self::Margin => state.layout.margin as f32,
+            Self::Stroke => state.text_raster.stroke,
+            Self::Coverage => state.text_raster.coverage_gamma,
+        };
+        (0..self.positions())
+            .min_by(|a, b| {
+                let distance = |i: &usize| (self.values()[*i] - current).abs();
+                distance(a).total_cmp(&distance(b))
+            })
+            .unwrap_or(0)
+    }
+    /// The layout with this setting at `position`; unchanged for settings
+    /// that do not affect layout.
+    fn layout(
+        self,
+        mut layout: crate::layout::LayoutConfig,
+        position: usize,
+    ) -> crate::layout::LayoutConfig {
+        if let Some(&value) = self.values().get(position) {
+            match self {
+                Self::TextSize => layout.font_size = value,
+                Self::LineSpacing => layout.line_height = value,
+                Self::Margin => layout.margin = value as u32,
+                _ => {}
+            }
+        }
+        layout
+    }
+    fn label(self, state: &crate::state::ReaderState) -> String {
+        match self {
+            Self::Brightness => format!("Brightness {}", state.frontlight.brightness),
+            Self::Warmth => format!("Warmth {}", state.frontlight.warmth),
+            Self::TextSize => format!("Text size {:.0}", state.layout.font_size),
+            Self::LineSpacing => format!("Line spacing {:.2}", state.layout.line_height),
+            Self::Margin => format!("Margins {}", state.layout.margin),
+            Self::Stroke => format!("Stroke weight +{:.1}", state.text_raster.stroke),
+            Self::Coverage => format!("Edge darkness {}", self.position(state)),
+        }
+    }
+}
+
+/// What a menu row shows beside its label.
+enum Control {
+    None,
+    Submenu,
+    Toggle(bool),
+    Slider { position: usize, positions: usize },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -568,28 +658,50 @@ impl ReaderUi {
         ]);
         reader.render_panel(&lines, levels)
     }
-    /// Value and maximum of the stepped slider shown in a menu row.
-    fn slider(&self, reader: &Reader, index: usize) -> Option<(u8, u8)> {
-        let light = reader.state.frontlight;
-        match (self.panel?, index) {
-            (Panel::Light, 0) => Some((light.brightness, 10)),
-            (Panel::Light, 1) => Some((light.warmth, 9)),
-            _ => None,
+    fn control(&self, reader: &Reader, command: &Command) -> Control {
+        let state = &reader.state;
+        match *command {
+            Command::Step(setting) => Control::Slider {
+                position: setting.position(state),
+                positions: setting.positions(),
+            },
+            Command::SwapPageButtons => Control::Toggle(state.swap_page_buttons),
+            Command::SwapMenuButtons => Control::Toggle(state.swap_menu_buttons),
+            Command::Hinting => Control::Toggle(state.text_raster.hinting),
+            Command::Fractional => Control::Toggle(state.text_raster.fractional),
+            Command::Open(_)
+            | Command::Kosync(KosyncEvent::Open)
+            | Command::Catalog(CatalogEvent::Open)
+            | Command::Tailnet(TailnetEvent::Open) => Control::Submenu,
+            _ => Control::None,
         }
     }
-    fn slider_command(&self, reader: &Reader, index: usize, value: u8) -> Command {
-        let crate::state::FrontlightSettings { brightness, warmth } = reader.state.frontlight;
-        if index == 0 {
-            Command::Light {
-                brightness: value,
-                warmth,
+    fn set(&mut self, reader: &mut Reader, setting: Setting, position: usize) -> Result<Effect> {
+        let Some(&value) = setting.values().get(position) else {
+            return Ok(Effect::Unchanged);
+        };
+        let layout = setting.layout(reader.state.layout, position);
+        match setting {
+            Setting::Brightness | Setting::Warmth => {
+                let light = &mut reader.state.frontlight;
+                if setting == Setting::Brightness {
+                    light.brightness = position as u8;
+                } else {
+                    light.warmth = position as u8;
+                }
+                self.light_request = true;
+                return Ok(Effect::Redraw);
             }
-        } else {
-            Command::Light {
-                brightness,
-                warmth: value,
-            }
+            Setting::Stroke => reader.state.text_raster.stroke = value,
+            Setting::Coverage => reader.state.text_raster.coverage_gamma = value,
+            Setting::TextSize | Setting::LineSpacing | Setting::Margin => {}
         }
+        if layout == reader.state.layout {
+            return Ok(Effect::Redraw);
+        }
+        layout.validate()?;
+        // Show the chosen value at once; the pages follow when reflow finishes.
+        self.reflow(reader, layout).map(|_| Effect::Redraw)
     }
     pub fn set_sleep_available(&mut self, available: bool) {
         self.sleep_available = available;
@@ -686,8 +798,8 @@ impl ReaderUi {
     }
     fn cancel_reflow(&mut self) -> Effect {
         self.reflow = None;
+        // The panel never changed, so the selection stays on its row.
         self.panel = self.reflow_return.take();
-        self.selected = 0;
         Effect::Redraw
     }
     pub fn poll_reflow(&mut self, reader: &mut Reader) -> Effect {
@@ -1193,10 +1305,11 @@ impl ReaderUi {
         };
         let moved = self.selected != index;
         self.selected = index;
-        if let Some((_, max)) = self.slider(reader, index) {
-            let value = (u64::from(x) * (u64::from(max) + 1) / u64::from(layout.width)) as u8;
-            let command = self.slider_command(reader, index, value);
-            return self.activate(reader, command);
+        if let Command::Step(setting) = *command {
+            // One tap target per value across the row.
+            let position =
+                (u64::from(x) * setting.positions() as u64 / u64::from(layout.width)) as usize;
+            return self.activate(reader, Command::Set(setting, position));
         }
         // Show the tapped row even when its action only starts pending work.
         Ok(match self.activate(reader, *command)? {
@@ -1448,11 +1561,21 @@ impl ReaderUi {
                 Ok(Effect::Redraw)
             }
             Command::Find => Ok(self.submit_search()),
-            Command::Light { brightness, warmth } => {
-                self.light_request = true;
-                reader.state.frontlight = crate::state::FrontlightSettings { brightness, warmth };
-                Ok(Effect::Redraw)
+            Command::Step(setting) => {
+                // Advance to the next value that the layout accepts, wrapping.
+                let current = setting.position(&reader.state);
+                let next = (1..=setting.positions())
+                    .map(|step| (current + step) % setting.positions())
+                    .find(|position| {
+                        setting
+                            .layout(reader.state.layout, *position)
+                            .validate()
+                            .is_ok()
+                    })
+                    .unwrap_or(current);
+                self.set(reader, setting, next)
             }
+            Command::Set(setting, position) => self.set(reader, setting, position),
             Command::Book(index) => match self.library.entries.get(index) {
                 Some(entry) => {
                     let opening = if let Some((root, limit)) = &self.scan_root {
@@ -1485,7 +1608,6 @@ impl ReaderUi {
                 }
                 Effect::Redraw
             }),
-            Command::Size(delta) => self.resize(reader, delta),
             Command::ResetTypography => self.typography(
                 reader,
                 crate::state::BookTypography::current(&crate::state::ReaderState::default()),
@@ -1494,59 +1616,6 @@ impl ReaderUi {
                 let mut next = reader.state.layout;
                 next.hyphenation = next.hyphenation.next();
                 self.reflow(reader, next)
-            }
-            Command::LineSpacing => {
-                let current = reader.state.layout;
-                let values = [1.0, 1.15, 1.35, 1.6, 2.0];
-                let next = values
-                    .into_iter()
-                    .filter(|value| *value > current.line_height)
-                    .chain(
-                        values
-                            .into_iter()
-                            .filter(|value| *value <= current.line_height),
-                    )
-                    .map(|line_height| crate::layout::LayoutConfig {
-                        line_height,
-                        ..current
-                    })
-                    .find(|config| config.validate().is_ok())
-                    .unwrap_or(current);
-                self.reflow(reader, next)
-            }
-            Command::Margin => {
-                let current = reader.state.layout;
-                let values = [0, 8, 16, 24, 32, 40, 48];
-                let next = values
-                    .into_iter()
-                    .filter(|value| *value > current.margin)
-                    .chain(values.into_iter().filter(|value| *value <= current.margin))
-                    .map(|margin| crate::layout::LayoutConfig { margin, ..current })
-                    .find(|config| config.validate().is_ok())
-                    .unwrap_or(current);
-                self.reflow(reader, next)
-            }
-            Command::Stroke => {
-                let value = reader.state.text_raster.stroke;
-                reader.state.text_raster.stroke = if value < 0.1 {
-                    0.2
-                } else if value < 0.3 {
-                    0.4
-                } else {
-                    0.0
-                };
-                Ok(Effect::Redraw)
-            }
-            Command::Gamma => {
-                let value = reader.state.text_raster.coverage_gamma;
-                reader.state.text_raster.coverage_gamma = if value > 0.9 {
-                    0.85
-                } else if value > 0.75 {
-                    0.7
-                } else {
-                    1.0
-                };
-                Ok(Effect::Redraw)
             }
             Command::Hinting => {
                 reader.state.text_raster.hinting = !reader.state.text_raster.hinting;
@@ -1667,22 +1736,9 @@ impl ReaderUi {
             .chain(
                 self.page_buttons_available
                     .then(|| {
-                        let on = |swapped| if swapped { "on" } else { "off" };
                         [
-                            (
-                                format!(
-                                    "Swap page-turn buttons ({})",
-                                    on(reader.state.swap_page_buttons)
-                                ),
-                                Command::SwapPageButtons,
-                            ),
-                            (
-                                format!(
-                                    "Swap menu buttons ({})",
-                                    on(reader.state.swap_menu_buttons)
-                                ),
-                                Command::SwapMenuButtons,
-                            ),
+                            ("Swap page-turn buttons".into(), Command::SwapPageButtons),
+                            ("Swap menu buttons".into(), Command::SwapMenuButtons),
                         ]
                     })
                     .into_iter()
@@ -2073,73 +2129,33 @@ impl ReaderUi {
                 .enumerate()
                 .map(|(i, l)| (l.label.clone(), Command::Reader(Action::Link(i))))
                 .collect(),
-            Panel::Light => {
-                let crate::state::FrontlightSettings { brightness, warmth } =
-                    reader.state.frontlight;
-                // Selecting a slider steps it up and wraps; a tap sets it directly.
-                vec![
-                    (
-                        format!("Brightness {brightness}/10"),
-                        Command::Light {
-                            brightness: (brightness + 1) % 11,
-                            warmth,
-                        },
-                    ),
-                    (
-                        format!("Warmth {warmth}/9"),
-                        Command::Light {
-                            brightness,
-                            warmth: (warmth + 1) % 10,
-                        },
-                    ),
-                    (
-                        "Off".into(),
-                        Command::Light {
-                            brightness: 0,
-                            warmth,
-                        },
-                    ),
-                ]
-            }
-            Panel::Settings => vec![
+            Panel::Light => [Setting::Brightness, Setting::Warmth]
+                .into_iter()
+                .map(|setting| (setting.label(&reader.state), Command::Step(setting)))
+                .chain(std::iter::once((
+                    "Turn off".into(),
+                    Command::Set(Setting::Brightness, 0),
+                )))
+                .collect(),
+            Panel::Settings => [
+                Setting::TextSize,
+                Setting::LineSpacing,
+                Setting::Margin,
+                Setting::Stroke,
+                Setting::Coverage,
+            ]
+            .into_iter()
+            .map(|setting| (setting.label(&reader.state), Command::Step(setting)))
+            .chain([
                 (
-                    format!("Larger text ({:.0} px)", reader.state.layout.font_size),
-                    Command::Size(2.0),
-                ),
-                (
-                    format!("Smaller text ({:.0} px)", reader.state.layout.font_size),
-                    Command::Size(-2.0),
-                ),
-                (
-                    format!("Stroke: {:.1} px", reader.state.text_raster.stroke),
-                    Command::Stroke,
-                ),
-                (
-                    format!("Coverage: {:.2}", reader.state.text_raster.coverage_gamma),
-                    Command::Gamma,
-                ),
-                (
-                    format!("Hinting: {}", reader.state.text_raster.hinting),
-                    Command::Hinting,
-                ),
-                (
-                    format!("Fractional: {}", reader.state.text_raster.fractional),
-                    Command::Fractional,
-                ),
-                (
-                    format!("Auto hyphens: {}", reader.state.layout.hyphenation.label()),
+                    format!("Hyphenation: {}", reader.state.layout.hyphenation.label()),
                     Command::Hyphenation,
                 ),
+                ("Font hinting".into(), Command::Hinting),
+                ("Fractional positions".into(), Command::Fractional),
                 ("Reset book typography".into(), Command::ResetTypography),
-                (
-                    format!("Line spacing: {:.2}", reader.state.layout.line_height),
-                    Command::LineSpacing,
-                ),
-                (
-                    format!("Margins: {} px", reader.state.layout.margin),
-                    Command::Margin,
-                ),
-            ],
+            ])
+            .collect(),
         }
     }
     fn render_keyboard(&self, reader: &Reader, levels: u16) -> Result<Vec<u8>> {
@@ -2281,67 +2297,205 @@ impl ReaderUi {
             Panel::Folders | Panel::Folder(_) => "Folders",
         };
         let entries = self.entries(reader);
-        let geometry =
-            crate::menu::Geometry::new(reader.state.layout.width, reader.state.layout.height)?;
+        let layout = reader.state.layout;
+        let geometry = crate::menu::Geometry::new(layout.width, layout.height)?;
         let count = geometry.items;
         let start = self.selected / count * count;
-        let mut rows = vec![
-            self.error
-                .clone()
-                .unwrap_or_else(|| format!("< Back | {title}")),
-        ];
-        for i in start..start + count {
-            rows.push(
-                entries
-                    .get(i)
-                    .map(|(label, _)| label.clone())
-                    .unwrap_or_default(),
-            );
-        }
-        if entries.is_empty() {
-            rows[1] = "No entries".into();
-        }
-        rows.push(format!(
-            "< Previous | {}/{} | Next >",
-            start / count + 1,
-            entries.len().div_ceil(count).max(1)
-        ));
-        for row in &mut rows {
-            *row = row.graphemes(true).take(32).collect();
-        }
-        let selected = (!entries.is_empty()).then_some(self.selected % count + 1);
-        let mut pixels = reader.render_rows(&rows, selected, levels)?;
-        let width = reader.state.layout.width as usize;
+        let width = layout.width as usize;
+        let mut canvas = Canvas {
+            pixels: vec![255; width * layout.height as usize],
+            width,
+        };
+        let cell = |text: &str, cell_width: usize, height: u32, size, bold| {
+            let text: String = text.graphemes(true).take(96).collect();
+            reader.render_styled_cell(
+                &text,
+                cell_width as u32,
+                height,
+                levels,
+                crate::controller::CellStyle::Label { size, bold },
+            )
+        };
+
+        // Heading: a back chevron and the panel title or the current error.
+        let (top, height) = geometry.row(0);
+        let (top, height) = (top as usize, height as usize);
+        let heading = self.error.as_deref().unwrap_or(title);
+        canvas.chevron(26, top + height / 2, false, 0);
+        canvas.blit(
+            44,
+            top,
+            &cell(heading, width - 44, height as u32, 24, true)?,
+            width - 44,
+            false,
+        );
+
         for row in 1..=count {
-            let Some((value, max)) = self.slider(reader, start + row - 1) else {
+            let (top, height) = geometry.row(row);
+            let (top, height) = (top as usize, height as usize);
+            let Some((label, command)) = entries.get(start + row - 1) else {
+                if entries.is_empty() && row == 1 {
+                    canvas.blit(
+                        0,
+                        top,
+                        &cell("No entries", width, height as u32, 26, false)?,
+                        width,
+                        false,
+                    );
+                }
                 continue;
             };
-            // One cell per value, matching the tap targets. The first cell
-            // stands for zero and stays hollow.
-            let ink = if selected == Some(row) { 255 } else { 0 };
-            let (top, height) = geometry.row(row);
-            let (top, bottom) = (
-                (top + height * 11 / 20) as usize,
-                (top + height * 16 / 20) as usize,
+            let selected = self.selected == start + row - 1;
+            let ink = if selected { 255 } else { 0 };
+            if selected {
+                canvas.fill(0, top, width, height - 1, 0);
+            }
+            let control = self.control(reader, command);
+            let (text_width, text_height) = match control {
+                Control::None => (width, height),
+                Control::Submenu => (width - 48, height),
+                Control::Toggle(_) => (width - 96, height),
+                // The label sits above the slider track.
+                Control::Slider { .. } => (width, height * 11 / 20),
+            };
+            canvas.blit(
+                0,
+                top,
+                &cell(label, text_width, text_height as u32, 26, false)?,
+                text_width,
+                selected,
             );
-            let cells = usize::from(max) + 1;
-            for step in 0..cells {
-                let (x0, x1) = (step * width / cells + 3, (step + 1) * width / cells - 3);
-                for y in top..bottom {
-                    let edge = y == top || y + 1 == bottom;
-                    for x in x0..x1 {
-                        if (1..=usize::from(value)).contains(&step)
-                            || edge
-                            || x == x0
-                            || x + 1 == x1
-                        {
-                            pixels[y * width + x] = ink;
+            let middle = top + height / 2;
+            match control {
+                Control::None => {}
+                Control::Submenu => canvas.chevron(width - 28, middle, true, ink),
+                Control::Toggle(on) => canvas.toggle(width - 20 - 56, middle - 14, on, ink),
+                Control::Slider {
+                    position,
+                    positions,
+                } => {
+                    // One cell per value, matching the tap targets; the
+                    // first cell stands for the lowest value and stays hollow.
+                    let (y0, y1) = (top + height * 12 / 20, top + height * 16 / 20);
+                    for step in 0..positions {
+                        let (x0, x1) = (
+                            step * width / positions + 3,
+                            (step + 1) * width / positions - 3,
+                        );
+                        canvas.frame(x0, y0, x1 - x0, y1 - y0, ink);
+                        if (1..=position).contains(&step) {
+                            canvas.fill(x0, y0, x1 - x0, y1 - y0, ink);
                         }
                     }
                 }
             }
         }
-        Ok(pixels)
+
+        // Footer: position among the pages of entries, with chevrons toward
+        // the pages that exist. The left and right halves are the tap targets.
+        let pages = entries.len().div_ceil(count).max(1);
+        let page = start / count;
+        if pages > 1 {
+            let (top, height) = geometry.row(count + 1);
+            let (top, height) = (top as usize, height as usize);
+            let text = cell(
+                &format!("{} / {pages}", page + 1),
+                width,
+                height as u32,
+                22,
+                false,
+            )?;
+            let columns = (0..width).filter(|x| (0..height).any(|y| text[y * width + x] < 255));
+            let (left, right) = (
+                columns.clone().min().unwrap_or(0),
+                columns.max().unwrap_or(0),
+            );
+            // The cell is set from its left margin; copy its ink centered.
+            let span = right + 1 - left;
+            let offset = (width - span) / 2;
+            for y in 0..height {
+                let source = &text[y * width + left..][..span];
+                canvas.pixels[(top + y) * width + offset..][..span].copy_from_slice(source);
+            }
+            if page > 0 {
+                canvas.chevron(28, top + height / 2, false, 0);
+            }
+            if page + 1 < pages {
+                canvas.chevron(width - 28, top + height / 2, true, 0);
+            }
+        }
+        for row in 0..=count {
+            let (top, height) = geometry.row(row);
+            canvas.rule((top + height - 1) as usize);
+        }
+        Ok(canvas.pixels)
+    }
+}
+
+/// Pixel drawing for menu rows.
+struct Canvas {
+    pixels: Vec<u8>,
+    width: usize,
+}
+
+impl Canvas {
+    fn fill(&mut self, x: usize, y: usize, width: usize, height: usize, value: u8) {
+        for row in self
+            .pixels
+            .chunks_exact_mut(self.width)
+            .skip(y)
+            .take(height)
+        {
+            row[x..x + width].fill(value);
+        }
+    }
+    fn frame(&mut self, x: usize, y: usize, width: usize, height: usize, value: u8) {
+        self.fill(x, y, width, 2, value);
+        self.fill(x, y + height - 2, width, 2, value);
+        self.fill(x, y, 2, height, value);
+        self.fill(x + width - 2, y, 2, height, value);
+    }
+    fn rule(&mut self, y: usize) {
+        self.fill(0, y, self.width, 1, 0);
+    }
+    /// Copies a cell whose rows are `cell_width` wide, optionally inverted.
+    fn blit(&mut self, x: usize, y: usize, cell: &[u8], cell_width: usize, invert: bool) {
+        for (row, source) in cell.chunks_exact(cell_width).enumerate() {
+            let start = (y + row) * self.width + x;
+            for (destination, &value) in self.pixels[start..start + cell_width]
+                .iter_mut()
+                .zip(source)
+            {
+                *destination = if invert { 255 - value } else { value };
+            }
+        }
+    }
+    /// A chevron about 12 pixels tall centered at the point.
+    fn chevron(&mut self, x: usize, y: usize, right: bool, value: u8) {
+        for offset in 0..=6isize {
+            // Distance from the tip grows toward both ends of the stroke.
+            let reach = 6 - offset;
+            let tip = if right {
+                x as isize + 3 - reach
+            } else {
+                x as isize - 3 + reach
+            };
+            for dy in [-(6 - offset), 6 - offset] {
+                let row = (y as isize + dy) as usize;
+                self.fill((tip - 1).max(0) as usize, row, 3, 1, value);
+            }
+        }
+    }
+    /// A 56 by 28 switch: a hollow track with the knob left when off, a
+    /// solid track with the knob right when on.
+    fn toggle(&mut self, x: usize, y: usize, on: bool, ink: u8) {
+        let paper = 255 - ink;
+        self.fill(x, y, 56, 28, ink);
+        if !on {
+            self.fill(x + 2, y + 2, 52, 24, paper);
+        }
+        let knob = if on { x + 32 } else { x + 4 };
+        self.fill(knob, y + 4, 20, 20, if on { paper } else { ink });
     }
 }
 

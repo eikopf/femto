@@ -691,26 +691,41 @@ fn center_tap_and_button_selection_open_and_close_the_same_menu() {
 }
 
 #[test]
-fn paged_typography_controls_preserve_menu_access_and_validate_settings() {
+fn typography_sliders_and_toggles_set_values_by_tap_and_step_by_selection() {
     let mut reader = reader();
     let mut ui = ReaderUi::default();
     ui.open();
     ui.tap(&mut reader, 400, 750).unwrap();
-    ui.tap(&mut reader, 240, 150).unwrap();
-    let size = reader.state.layout.font_size;
-    ui.tap(&mut reader, 240, 150).unwrap();
-    finish_reflow(&mut ui, &mut reader);
-    assert_eq!(reader.state.layout.font_size, size + 2.0);
-    ui.tap(&mut reader, 240, 250).unwrap();
-    finish_reflow(&mut ui, &mut reader);
-    assert_eq!(reader.state.layout.font_size, size);
-    ui.tap(&mut reader, 240, 350).unwrap();
-    assert_eq!(reader.state.text_raster.stroke, 0.2);
+    ui.tap(&mut reader, 240, 150).unwrap(); // Typography.
+    assert_eq!(reader.state.layout.font_size, 24.0);
+    // Text size has twelve values across the row; 24 px is the sixth.
+    for (x, size) in [
+        (260, 26.0),
+        (220, 24.0),
+        (479, 40.0),
+        (0, 14.0),
+        (220, 24.0),
+    ] {
+        ui.tap(&mut reader, x, 150).unwrap();
+        assert!(ui.is_reflowing());
+        finish_reflow(&mut ui, &mut reader);
+        assert_eq!(reader.state.layout.font_size, size);
+    }
+    assert_eq!(ui.tap(&mut reader, 220, 150).unwrap(), Effect::Redraw);
+    assert!(!ui.is_reflowing());
     ui.tap(&mut reader, 240, 450).unwrap();
-    assert_eq!(reader.state.text_raster.coverage_gamma, 0.85);
+    assert_eq!(reader.state.text_raster.stroke, 0.2);
     ui.tap(&mut reader, 240, 550).unwrap();
+    assert_eq!(reader.state.text_raster.coverage_gamma, 0.85);
+    // Selection steps the highlighted slider and wraps.
+    for expected in [0.7, 1.0, 0.85] {
+        ui.select(&mut reader).unwrap();
+        assert_eq!(reader.state.text_raster.coverage_gamma, expected);
+    }
+    ui.tap(&mut reader, 400, 750).unwrap();
+    ui.tap(&mut reader, 240, 150).unwrap();
     assert!(!reader.state.text_raster.hinting);
-    ui.tap(&mut reader, 240, 650).unwrap();
+    ui.tap(&mut reader, 240, 250).unwrap();
     assert!(reader.state.text_raster.fractional);
     reader.state.text_raster.validate().unwrap();
     assert!(ui.is_open());
@@ -730,16 +745,14 @@ fn hyphenation_menu_reflow_cancels_and_persists_without_moving_source_anchor() {
     ui.tap(&mut reader, 240, 150).unwrap(); // Typography.
     let position = reader.position();
     let pixels = reader.render(2).unwrap();
-    ui.tap(&mut reader, 400, 750).unwrap(); // Second settings page.
-    ui.tap(&mut reader, 240, 150).unwrap(); // Automatic hyphenation.
+    ui.tap(&mut reader, 240, 650).unwrap(); // Automatic hyphenation.
     assert!(ui.is_reflowing());
     assert_eq!(reader.state.layout.hyphenation, Hyphenation::Book);
     ui.back(&mut reader).unwrap();
     assert!(!ui.is_reflowing());
     assert_eq!(reader.render(2).unwrap(), pixels);
     for expected in [Hyphenation::Off, Hyphenation::English] {
-        ui.tap(&mut reader, 400, 750).unwrap();
-        ui.tap(&mut reader, 240, 150).unwrap();
+        ui.tap(&mut reader, 240, 650).unwrap();
         assert!(ui.is_reflowing());
         finish_reflow(&mut ui, &mut reader);
         assert_eq!(reader.state.layout.hyphenation, expected);
@@ -1818,15 +1831,14 @@ fn book_typography_reset_is_cancellable_atomic_and_persisted() {
     ui.tap(&mut reader, 400, 750).unwrap();
     ui.tap(&mut reader, 240, 150).unwrap(); // Typography.
     ui.tap(&mut reader, 400, 750).unwrap(); // Second page.
-    ui.tap(&mut reader, 240, 250).unwrap(); // Reset book typography.
+    ui.tap(&mut reader, 240, 350).unwrap(); // Reset book typography.
     assert!(ui.is_reflowing());
     ui.poll_reflow(&mut reader);
     ui.back(&mut reader).unwrap();
     assert!(!ui.is_reflowing());
     assert_eq!(serde_json::to_value(&reader.state).unwrap(), original);
     assert_eq!(reader.render(4).unwrap(), pixels);
-    ui.tap(&mut reader, 400, 750).unwrap();
-    ui.tap(&mut reader, 240, 250).unwrap();
+    ui.select(&mut reader).unwrap(); // The selection is still on the reset row.
     assert!(ui.is_reflowing());
     finish_reflow(&mut ui, &mut reader);
     let defaults = BookTypography::current(&ReaderState::default());
@@ -1841,15 +1853,13 @@ fn book_typography_reset_is_cancellable_atomic_and_persisted() {
         loaded.books[&reader.document.metadata.id].typography,
         Some(defaults)
     );
-    ui.tap(&mut reader, 400, 750).unwrap();
-    // Resetting defaults only moves the highlight to the tapped row.
-    assert_eq!(ui.tap(&mut reader, 240, 250).unwrap(), Effect::Redraw);
-    assert_eq!(ui.tap(&mut reader, 240, 250).unwrap(), Effect::Unchanged);
+    // Resetting defaults again changes nothing.
+    assert_eq!(ui.tap(&mut reader, 240, 350).unwrap(), Effect::Unchanged);
     assert!(!ui.is_reflowing());
 }
 
 #[test]
-fn spacing_and_margins_cycle_cancel_and_persist_as_book_preferences() {
+fn spacing_and_margin_sliders_cancel_and_persist_as_book_preferences() {
     use femto_reader::{controller::Action, state::BookTypography};
     let mut reader = reader();
     reader.dispatch(Action::Next).unwrap();
@@ -1857,30 +1867,29 @@ fn spacing_and_margins_cycle_cancel_and_persist_as_book_preferences() {
     let mut ui = ReaderUi::default();
     ui.open();
     ui.tap(&mut reader, 400, 750).unwrap();
-    ui.tap(&mut reader, 240, 150).unwrap();
+    ui.tap(&mut reader, 240, 150).unwrap(); // Typography.
     let pixels = reader.render(4).unwrap();
-    ui.tap(&mut reader, 400, 750).unwrap();
-    ui.tap(&mut reader, 240, 350).unwrap();
+    // Line spacing has five values across its row.
+    ui.tap(&mut reader, 48 + 96 * 3, 250).unwrap();
     assert!(ui.is_reflowing());
     assert_eq!(reader.state.layout.line_height, 1.35);
     ui.back(&mut reader).unwrap();
     assert_eq!(reader.render(4).unwrap(), pixels);
-    for expected in [1.6, 2.0, 1.0, 1.15, 1.35] {
-        ui.tap(&mut reader, 400, 750).unwrap();
-        ui.tap(&mut reader, 240, 350).unwrap();
+    for (index, expected) in [(3, 1.6), (4, 2.0), (0, 1.0), (1, 1.15), (2, 1.35)] {
+        ui.tap(&mut reader, 48 + 96 * index, 250).unwrap();
         assert!(ui.is_reflowing());
         finish_reflow(&mut ui, &mut reader);
         assert_eq!(reader.state.layout.line_height, expected);
         assert_eq!(reader.position(), position);
     }
-    ui.tap(&mut reader, 400, 750).unwrap();
-    ui.tap(&mut reader, 240, 450).unwrap();
+    // Margins have seven values.
+    let margin_x = |index: u32| 34 + 480 * index / 7;
+    ui.tap(&mut reader, margin_x(4), 350).unwrap();
     assert!(ui.is_reflowing());
     ui.back(&mut reader).unwrap();
     assert_eq!(reader.state.layout.margin, 24);
-    for expected in [32, 40, 48, 0, 8, 16, 24, 32] {
-        ui.tap(&mut reader, 400, 750).unwrap();
-        ui.tap(&mut reader, 240, 450).unwrap();
+    for (index, expected) in [(4, 32), (6, 48), (0, 0), (1, 8), (3, 24), (4, 32)] {
+        ui.tap(&mut reader, margin_x(index), 350).unwrap();
         assert!(ui.is_reflowing());
         finish_reflow(&mut ui, &mut reader);
         assert_eq!(reader.state.layout.margin, expected);
@@ -1917,22 +1926,15 @@ fn spacing_and_margin_controls_skip_presets_that_do_not_fit() {
         ui.turn(&mut reader, true).unwrap();
     }
     ui.select(&mut reader).unwrap(); // Typography.
-    for _ in 0..8 {
-        ui.turn(&mut reader, true).unwrap();
-    }
-    ui.select(&mut reader).unwrap(); // Spacing: 1.15 still fits.
+    ui.turn(&mut reader, true).unwrap(); // Line spacing.
+    ui.select(&mut reader).unwrap(); // 1.15 still fits.
     assert!(ui.is_reflowing());
     finish_reflow(&mut ui, &mut reader);
     assert_eq!(reader.state.layout.line_height, 1.15);
-    for _ in 0..8 {
-        ui.turn(&mut reader, true).unwrap();
-    }
     ui.select(&mut reader).unwrap(); // Skip 1.35, 1.6, 2.0, wrap to 1.0.
     finish_reflow(&mut ui, &mut reader);
     assert_eq!(reader.state.layout.line_height, 1.0);
-    for _ in 0..9 {
-        ui.turn(&mut reader, true).unwrap();
-    }
+    ui.turn(&mut reader, true).unwrap(); // Margins.
     ui.select(&mut reader).unwrap(); // Larger margins cannot fit; wrap to zero.
     finish_reflow(&mut ui, &mut reader);
     assert_eq!(reader.state.layout.margin, 0);

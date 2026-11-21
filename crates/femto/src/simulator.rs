@@ -412,7 +412,8 @@ fn main() -> Result<()> {
                 }
                 dirty = true;
             }
-            if catalog.poll(&mut catalog_jobs, &mut ui) {
+            let items = ui.menu_items(&reader);
+            if catalog.poll(&mut catalog_jobs, &mut ui, items) {
                 dirty = true;
             }
         }

@@ -185,3 +185,49 @@ fn malformed_and_oversized_feeds_are_rejected() {
     assert_eq!(empty.title, "Catalog");
     assert!(empty.navigation.is_empty() && empty.publications.is_empty());
 }
+
+#[test]
+fn later_pages_join_the_listing_until_one_is_empty() {
+    let page = |number: u32, next: Option<u32>, books: u32| {
+        let next = next.map_or(String::new(), |next| {
+            format!(r#"<link rel="next" href="/list?page={next}" type="application/atom+xml"/>"#)
+        });
+        let entries: String = (0..books)
+            .map(|book| {
+                format!(
+                    "<entry><title>{number}.{book}</title><link rel=\"http://opds-spec.org/acquisition\" \
+                     href=\"/b/{number}/{book}\" type=\"application/epub+zip\"/></entry>"
+                )
+            })
+            .collect();
+        let source = format!("https://library.test/list?page={number}");
+        Catalog::parse(
+            format!("<feed><title>List</title>{next}{entries}</feed>").as_bytes(),
+            &source,
+        )
+        .unwrap()
+    };
+    let mut browser = Browser::new(page(1, Some(2), 2));
+    assert_eq!(
+        browser.continuation(),
+        Some("https://library.test/list?page=2")
+    );
+    assert!(browser.append(page(2, Some(3), 2)));
+    assert_eq!(
+        browser.continuation(),
+        Some("https://library.test/list?page=3")
+    );
+    let titles: Vec<_> = browser.publications().map(|p| p.title.as_str()).collect();
+    assert_eq!(titles, ["1.0", "1.1", "2.0", "2.1"]);
+    // A page that points at itself, or back at the start, ends the listing.
+    assert!(browser.append(page(3, Some(3), 1)));
+    assert_eq!(browser.continuation(), None);
+    let mut looped = Browser::new(page(1, Some(2), 1));
+    assert!(looped.append(page(2, Some(1), 1)));
+    assert_eq!(looped.continuation(), None);
+    // So does a page without entries.
+    let mut ended = Browser::new(page(1, Some(2), 1));
+    assert!(!ended.append(page(2, Some(3), 0)));
+    assert_eq!(ended.continuation(), None);
+    assert_eq!(ended.publications().count(), 1);
+}

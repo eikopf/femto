@@ -42,7 +42,7 @@ fn sd_credentials_load_before_any_request_and_errors_disable_catalog() {
         .unwrap();
     let end = Instant::now() + Duration::from_secs(5);
     while worker.is_busy() {
-        menu.poll(&mut worker, &mut ui);
+        menu.poll(&mut worker, &mut ui, 6);
         assert!(Instant::now() < end);
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -60,7 +60,7 @@ fn download_publishes_valid_epub_and_starts_library_rescan() {
     fn finish(menu: &mut catalog::CatalogMenu, jobs: &mut catalog::Jobs, ui: &mut ReaderUi) {
         let until = Instant::now() + Duration::from_secs(5);
         while jobs.is_busy() {
-            menu.poll(jobs, ui);
+            menu.poll(jobs, ui, 6);
             assert!(Instant::now() < until);
             std::thread::sleep(Duration::from_millis(1));
         }
@@ -161,7 +161,7 @@ fn invalid_and_cancelled_downloads_leave_no_published_or_partial_book() {
         menu.event(CatalogEvent::Open, &mut jobs, &mut ui).unwrap();
         let end = Instant::now() + Duration::from_secs(5);
         while jobs.is_busy() {
-            menu.poll(&mut jobs, &mut ui);
+            menu.poll(&mut jobs, &mut ui, 6);
             assert!(Instant::now() < end);
             std::thread::sleep(Duration::from_millis(1));
         }
@@ -173,7 +173,7 @@ fn invalid_and_cancelled_downloads_leave_no_published_or_partial_book() {
             menu.event(CatalogEvent::Back, &mut jobs, &mut ui).unwrap();
         }
         while jobs.is_busy() {
-            menu.poll(&mut jobs, &mut ui);
+            menu.poll(&mut jobs, &mut ui, 6);
             assert!(Instant::now() < end);
             std::thread::sleep(Duration::from_millis(1));
         }
@@ -240,7 +240,7 @@ fn configured_tailnet_origins_require_a_factory_and_reach_each_request() {
     menu.event(CatalogEvent::Open, &mut jobs, &mut ui).unwrap();
     let end = Instant::now() + Duration::from_secs(2);
     while jobs.is_busy() {
-        menu.poll(&mut jobs, &mut ui);
+        menu.poll(&mut jobs, &mut ui, 6);
         assert!(Instant::now() < end);
         std::thread::sleep(Duration::from_millis(1));
     }

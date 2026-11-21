@@ -405,6 +405,7 @@ fn run() -> Result<(), String> {
                             &refs,
                         )?))
                     }));
+                    log::info!("Catalog event: {event:?}");
                     if let Err(error) = catalog.event(event, &mut screen.catalog, &mut ui) {
                         ui.show_error(error);
                     }
@@ -511,10 +512,11 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        if catalog
-            .as_mut()
-            .is_some_and(|catalog| catalog.poll(&mut screen.catalog, &mut ui))
-        {
+        if catalog.as_mut().is_some_and(|catalog| {
+            let items = ui.menu_items(&reader);
+            catalog.poll(&mut screen.catalog, &mut ui, items)
+        }) {
+            log::info!("Catalog view updated");
             render(&mut reader, &ui, &mut plane)?;
             screen.present(&plane)?;
         }

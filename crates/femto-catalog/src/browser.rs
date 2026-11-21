@@ -25,6 +25,26 @@ const PAGING: [(&str, &str); 6] = [
     ("start", "Catalog home"),
 ];
 
+/// The address of a link that leads to another feed this crate can read.
+fn feed(link: &Link) -> Option<&str> {
+    if link.templated || link.indirect {
+        return None;
+    }
+    let kind = link
+        .media_type
+        .as_deref()
+        .unwrap_or("application/opds+json")
+        .split(';')
+        .next()?
+        .trim();
+    if !kind.eq_ignore_ascii_case("application/opds+json")
+        && !kind.eq_ignore_ascii_case("application/atom+xml")
+    {
+        return None;
+    }
+    link.resolved.as_deref()
+}
+
 impl Browser {
     pub fn new(current: Catalog) -> Self {
         Self {
@@ -89,26 +109,34 @@ impl Browser {
             .ok_or(crate::Error::Field("search number"))?
             .search(&self.current.source, query)
     }
+    /// The next page of this listing.
+    pub fn continuation(&self) -> Option<&str> {
+        let link = self
+            .current
+            .links
+            .iter()
+            .find(|link| link.has_relation("next"))?;
+        feed(link).filter(|source| *source != self.current.source)
+    }
+    /// Adds the next page's entries to this listing and adopts its
+    /// continuation. A page without entries ends the listing.
+    pub fn append(&mut self, page: Catalog) -> bool {
+        self.current.links.retain(|link| !link.has_relation("next"));
+        if page.navigation.is_empty() && page.publications.is_empty() && page.groups.is_empty() {
+            return false;
+        }
+        self.current.navigation.extend(page.navigation);
+        self.current.publications.extend(page.publications);
+        self.current.groups.extend(page.groups);
+        let next = page
+            .links
+            .into_iter()
+            .find(|link| link.has_relation("next") && link.resolved.as_ref() != Some(&page.source));
+        self.current.links.extend(next);
+        true
+    }
     /// Sections first, then paging links that lead somewhere else.
     pub fn destinations(&self) -> Vec<Destination<'_>> {
-        fn feed(link: &Link) -> Option<&str> {
-            if link.templated || link.indirect {
-                return None;
-            }
-            let kind = link
-                .media_type
-                .as_deref()
-                .unwrap_or("application/opds+json")
-                .split(';')
-                .next()?
-                .trim();
-            if !kind.eq_ignore_ascii_case("application/opds+json")
-                && !kind.eq_ignore_ascii_case("application/atom+xml")
-            {
-                return None;
-            }
-            link.resolved.as_deref()
-        }
         let sections = self
             .current
             .navigation

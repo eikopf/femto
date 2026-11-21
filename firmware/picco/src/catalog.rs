@@ -25,11 +25,31 @@ enum Action {
     Download(String),
     Search(usize),
     Follow(String),
-    Refresh,
     Publication(usize),
     Back,
     None,
 }
+/// A listing the reader came through, kept so that Back is immediate.
+struct Level {
+    feed: femto_catalog::Catalog,
+    position: usize,
+}
+/// Work the reader is waiting on.
+enum Request {
+    Enter(Search),
+    Download(String),
+}
+enum Pending {
+    Enter,
+    /// The next page of the listing on screen; nobody is waiting on it.
+    More,
+    Download,
+}
+const MAX_LEVELS: usize = 8;
+/// Entries in one listing.
+const MAX_ENTRIES: usize = 1024;
+/// Further pages are fetched while fewer entries than this lie ahead.
+const AHEAD: usize = 100;
 pub type TransportFactory =
     Arc<dyn Fn(&[String]) -> io::Result<Box<dyn femto_catalog::http::Transport>> + Send + Sync>;
 
@@ -40,8 +60,14 @@ pub struct CatalogMenu {
     directory: PathBuf,
     auth: Option<BasicAuth>,
     browser: Option<Browser>,
+    above: Vec<Level>,
+    /// The selected entry of the listing, while something else covers it.
+    position: usize,
     actions: Vec<Action>,
-    pending: Option<(u64, bool)>,
+    wanted: Option<Request>,
+    pending: Option<(u64, Pending)>,
+    /// The listing has no further pages worth asking for.
+    complete: bool,
     detail: bool,
     search: Option<usize>,
     download_progress: Option<DownloadProgress>,
@@ -217,56 +243,35 @@ impl CatalogMenu {
             directory: "/sdcard/femto".into(),
             auth: None,
             browser: None,
+            above: Vec::new(),
+            position: 0,
             actions: Vec::new(),
+            wanted: None,
             pending: None,
+            complete: false,
             detail: false,
             search: None,
             download_progress: None,
         })
     }
-    fn start(
-        &mut self,
-        source: String,
-        back: bool,
-        worker: &mut Jobs,
-        ui: &mut ReaderUi,
-    ) -> Result<(), String> {
-        self.request(Search::Feed(source), back, worker, ui)
-    }
-    fn request(
-        &mut self,
-        target: Search,
-        back: bool,
-        worker: &mut Jobs,
-        ui: &mut ReaderUi,
-    ) -> Result<(), String> {
+    fn fetch(&self, target: Search, worker: &mut Jobs) -> io::Result<u64> {
         let auth = self.auth.clone();
         let factory = self.transport.clone();
         let origins = self.origins.clone();
         let deadline = Instant::now() + Duration::from_secs(30);
-        let id = worker
-            .submit(deadline, move |_, cancel| {
-                let mut transport = request_transport(factory.as_ref(), &origins)?;
-                let feed = femto_catalog::http::fetch_search(
-                    &mut transport,
-                    &target,
-                    deadline,
-                    cancel,
-                    auth.as_ref(),
-                )?;
-                Ok(Output::Feed(Box::new(feed)))
-            })
-            .map_err(|e| e.to_string())?;
-        self.pending = Some((id, back));
-        ui.set_catalog_view("Loading catalog", &["Cancel".into()])
-            .map_err(|e| e.to_string())
+        worker.submit(deadline, move |_, cancel| {
+            let mut transport = request_transport(factory.as_ref(), &origins)?;
+            let feed = femto_catalog::http::fetch_search(
+                &mut transport,
+                &target,
+                deadline,
+                cancel,
+                auth.as_ref(),
+            )?;
+            Ok(Output::Feed(Box::new(feed)))
+        })
     }
-    fn download(
-        &mut self,
-        source: String,
-        worker: &mut Jobs,
-        ui: &mut ReaderUi,
-    ) -> Result<(), String> {
+    fn download(&mut self, source: String, worker: &mut Jobs) -> io::Result<u64> {
         let directory = self.directory.clone();
         let auth = self.auth.clone();
         let factory = self.transport.clone();
@@ -274,80 +279,144 @@ impl CatalogMenu {
         let deadline = Instant::now() + Duration::from_secs(120);
         let count = Arc::new(DownloadCount::default());
         let observed = count.clone();
-        let id = worker
-            .submit(deadline, move |budget, cancel| {
-                let mut transport = request_transport(factory.as_ref(), &origins)?;
-                let mut staged = femto_reader::download::Staged::new(&directory)
-                    .map_err(std::io::Error::other)?;
-                femto_catalog::http::download_epub(
-                    &mut transport,
-                    &source,
-                    deadline,
-                    cancel,
-                    auth.as_ref(),
-                    &mut Counted {
-                        output: &mut staged,
-                        count: &count,
-                    },
-                )?;
-                budget.check()?;
-                count.checking.store(true, Ordering::Release);
-                let ready = staged.validate().map_err(std::io::Error::other)?;
-                budget.check()?;
-                Ok(Output::Book {
-                    ready: Box::new(ready),
-                    budget,
-                })
+        let id = worker.submit(deadline, move |budget, cancel| {
+            let mut transport = request_transport(factory.as_ref(), &origins)?;
+            let mut staged =
+                femto_reader::download::Staged::new(&directory).map_err(std::io::Error::other)?;
+            femto_catalog::http::download_epub(
+                &mut transport,
+                &source,
+                deadline,
+                cancel,
+                auth.as_ref(),
+                &mut Counted {
+                    output: &mut staged,
+                    count: &count,
+                },
+            )?;
+            budget.check()?;
+            count.checking.store(true, Ordering::Release);
+            let ready = staged.validate().map_err(std::io::Error::other)?;
+            budget.check()?;
+            Ok(Output::Book {
+                ready: Box::new(ready),
+                budget,
             })
-            .map_err(|e| e.to_string())?;
-        self.pending = Some((id, false));
+        })?;
         self.download_progress = Some(DownloadProgress {
             count: observed,
             last: Instant::now(),
             shown: (0, false),
         });
-        ui.set_catalog_view("Downloading book", &["Cancel".into()])
-            .map_err(|e| e.to_string())
+        Ok(id)
     }
-    fn show(&mut self, ui: &mut ReaderUi) -> Result<(), String> {
-        self.detail = false;
-        self.search = None;
-        let Some(browser) = &self.browser else {
-            ui.open();
-            return Ok(());
+    /// Asks for something the reader then waits on. The view stays in place
+    /// under the busy mark; a page being fetched in the background gives way.
+    fn want(
+        &mut self,
+        request: Request,
+        worker: &mut Jobs,
+        ui: &mut ReaderUi,
+    ) -> Result<(), String> {
+        if let Some(position) = ui.catalog_position().filter(|_| !self.detail) {
+            self.position = position;
+        }
+        worker.cancel();
+        self.pending = None;
+        self.wanted = Some(request);
+        if !ui.is_catalog_open() {
+            ui.set_catalog_view("Catalog", &[])
+                .map_err(|e| e.to_string())?;
+        }
+        ui.set_catalog_busy(true);
+        self.dispatch(worker, ui);
+        Ok(())
+    }
+    /// Starts wanted work once the worker is free.
+    fn dispatch(&mut self, worker: &mut Jobs, ui: &mut ReaderUi) {
+        if worker.is_busy() {
+            return;
+        }
+        let started = match self.wanted.take() {
+            Some(Request::Enter(target)) => {
+                self.fetch(target, worker).map(|id| (id, Pending::Enter))
+            }
+            Some(Request::Download(source)) => self
+                .download(source, worker)
+                .map(|id| (id, Pending::Download)),
+            None => return,
         };
-        // Search, then sections and books, then paging and refresh.
+        match started {
+            Ok(pending) => self.pending = Some(pending),
+            Err(error) => {
+                ui.set_catalog_busy(false);
+                ui.show_error(error.to_string());
+            }
+        }
+    }
+    /// Fetches the next page of the listing on screen before it is reached.
+    fn fetch_ahead(&mut self, worker: &mut Jobs, ui: &ReaderUi) {
+        if self.complete || self.detail || self.pending.is_some() || worker.is_busy() {
+            return;
+        }
+        let (Some(position), Some(browser)) = (ui.catalog_position(), &self.browser) else {
+            return;
+        };
+        if self.actions.len() >= MAX_ENTRIES || position + AHEAD < self.actions.len() {
+            return;
+        }
+        let Some(source) = browser.continuation() else {
+            self.complete = true;
+            return;
+        };
+        match self.fetch(Search::Feed(source.to_owned()), worker) {
+            Ok(id) => self.pending = Some((id, Pending::More)),
+            Err(_) => self.complete = true,
+        }
+    }
+    /// Search, then sections, then books: one list, as far as it is loaded.
+    fn rows(&mut self) -> Vec<String> {
         let mut rows = Vec::new();
-        let mut actions = Vec::new();
+        self.actions.clear();
+        let Some(browser) = &self.browser else {
+            return rows;
+        };
         for (index, link) in browser.searches().enumerate() {
             rows.push(
                 link.title
                     .clone()
                     .unwrap_or_else(|| "Search catalog".into()),
             );
-            actions.push(Action::Search(index));
+            self.actions.push(Action::Search(index));
         }
-        let destinations = browser.destinations();
-        for destination in destinations.iter().filter(|d| !d.paging) {
+        for destination in browser.destinations().iter().filter(|d| !d.paging) {
             rows.push(destination.label.to_owned());
-            actions.push(Action::Follow(destination.source.to_owned()));
+            self.actions
+                .push(Action::Follow(destination.source.to_owned()));
         }
         for (index, publication) in browser.publications().enumerate() {
             rows.push(match publication.authors.first() {
                 Some(author) => format!("{} - {author}", publication.title),
                 None => publication.title.clone(),
             });
-            actions.push(Action::Publication(index));
+            self.actions.push(Action::Publication(index));
         }
-        for destination in destinations.iter().filter(|d| d.paging) {
-            rows.push(destination.label.to_owned());
-            actions.push(Action::Follow(destination.source.to_owned()));
+        rows.truncate(2048);
+        self.actions.truncate(2048);
+        rows
+    }
+    fn show(&mut self, ui: &mut ReaderUi) -> Result<(), String> {
+        self.detail = false;
+        self.search = None;
+        if self.browser.is_none() {
+            ui.open();
+            return Ok(());
         }
-        rows.push("Refresh".into());
-        actions.push(Action::Refresh);
-        ui.set_catalog_view(&browser.current().title, &rows)
+        let rows = self.rows();
+        let title = &self.browser.as_ref().unwrap().current().title;
+        ui.set_catalog_view(title, &rows)
             .map_err(|e| e.to_string())?;
-        self.actions = actions;
+        ui.set_catalog_position(self.position);
         Ok(())
     }
     pub fn event(
@@ -356,10 +425,15 @@ impl CatalogMenu {
         worker: &mut Jobs,
         ui: &mut ReaderUi,
     ) -> Result<(), String> {
-        if self.pending.is_some() {
+        // Back, or any input during a download, abandons what was asked for.
+        if self.wanted.is_some()
+            || matches!(self.pending, Some((_, Pending::Enter | Pending::Download)))
+        {
             worker.cancel();
             self.pending = None;
+            self.wanted = None;
             self.download_progress = None;
+            ui.set_catalog_busy(false);
             return self.show(ui);
         }
         match event {
@@ -371,35 +445,47 @@ impl CatalogMenu {
                     .ok_or("No catalog loaded")?
                     .search(index, ui.query())
                     .map_err(|e| e.to_string())?;
-                self.request(search, false, worker, ui)
+                self.show(ui)?;
+                self.want(Request::Enter(search), worker, ui)
             }
-            CatalogEvent::Open if self.browser.is_none() => {
-                self.start(self.source.clone(), false, worker, ui)
-            }
+            CatalogEvent::Open if self.browser.is_none() => self.want(
+                Request::Enter(Search::Feed(self.source.clone())),
+                worker,
+                ui,
+            ),
             CatalogEvent::Open => self.show(ui),
             CatalogEvent::Back if self.detail || self.search.is_some() => self.show(ui),
             CatalogEvent::Back => {
-                if let Some(source) = self.browser.as_ref().and_then(|b| b.back_source()) {
-                    self.start(source.to_owned(), true, worker, ui)
-                } else {
+                let Some(level) = self.above.pop() else {
                     ui.open();
-                    Ok(())
-                }
+                    return Ok(());
+                };
+                // A page still arriving for the listing being left is dropped.
+                worker.cancel();
+                self.pending = None;
+                self.browser = Some(Browser::new(level.feed));
+                self.position = level.position;
+                self.complete = false;
+                self.show(ui)
             }
             CatalogEvent::Activate(index) => match self.actions.get(index) {
-                Some(Action::Download(source)) => self.download(source.clone(), worker, ui),
+                Some(Action::Download(source)) => {
+                    let source = source.clone();
+                    self.want(Request::Download(source), worker, ui)?;
+                    ui.set_catalog_busy(false);
+                    ui.set_catalog_view("Downloading book", &["Cancel".into()])
+                        .map_err(|e| e.to_string())
+                }
                 Some(Action::Search(index)) => {
                     self.search = Some(*index);
+                    self.position = ui.catalog_position().unwrap_or(self.position);
                     ui.open_catalog_search();
                     Ok(())
                 }
-                Some(Action::Follow(source)) => self.start(source.clone(), false, worker, ui),
-                Some(Action::Refresh) => self.start(
-                    self.browser.as_ref().unwrap().current().source.clone(),
-                    false,
-                    worker,
-                    ui,
-                ),
+                Some(Action::Follow(source)) => {
+                    let source = source.clone();
+                    self.want(Request::Enter(Search::Feed(source)), worker, ui)
+                }
                 Some(Action::Back) => self.show(ui),
                 Some(Action::Publication(index)) => {
                     let book = self
@@ -426,6 +512,7 @@ impl CatalogMenu {
                     }
                     rows.push("Back to catalog".into());
                     actions.push(Action::Back);
+                    self.position = ui.catalog_position().unwrap_or(self.position);
                     ui.set_catalog_view("Publication", &rows)
                         .map_err(|e| e.to_string())?;
                     self.detail = true;
@@ -436,9 +523,12 @@ impl CatalogMenu {
             },
         }
     }
-    pub fn poll(&mut self, worker: &mut Jobs, ui: &mut ReaderUi) -> bool {
+    /// Advances catalog work; true when the screen needs drawing again.
+    /// `page_items` is the number of entries on one menu page.
+    pub fn poll(&mut self, worker: &mut Jobs, ui: &mut ReaderUi, page_items: usize) -> bool {
         let Some(completion) = worker.poll() else {
-            if self.pending.is_some()
+            self.dispatch(worker, ui);
+            if matches!(self.pending, Some((_, Pending::Download)))
                 && ui.is_catalog_open()
                 && let Some(title) = self
                     .download_progress
@@ -447,18 +537,25 @@ impl CatalogMenu {
             {
                 return ui.set_catalog_view(&title, &["Cancel".into()]).is_ok();
             }
+            self.fetch_ahead(worker, ui);
             return false;
         };
-        let Some((id, back)) = self.pending else {
-            return false;
+        let pending = match self.pending.take() {
+            Some((id, pending)) if id == completion.id => pending,
+            // Abandoned work has finished; what replaced it can start.
+            other => {
+                self.pending = other;
+                self.dispatch(worker, ui);
+                return false;
+            }
         };
-        if id != completion.id {
-            return false;
+        if let Pending::More = pending {
+            return self.extend(completion.result, ui, page_items);
         }
-        self.pending = None;
         self.download_progress = None;
+        ui.set_catalog_busy(false);
         if !ui.is_catalog_open() {
-            return false;
+            return true;
         }
         match completion.result {
             Ok(Output::Book { ready, budget }) => {
@@ -488,27 +585,21 @@ impl CatalogMenu {
                 }
             }
             Ok(Output::Feed(feed)) => {
-                let candidate = Browser::new(*feed);
-                if 1 + candidate.searches().count()
-                    + candidate.destinations().len()
-                    + candidate.publications().count()
-                    > 2048
+                // Loading a listing again replaces it; anything else is below it.
+                if let Some(current) = self.browser.take().map(Browser::into_current)
+                    && current.source != feed.source
                 {
-                    let _ = self.show(ui);
-                    ui.show_error("Catalog exceeds menu row limit".into());
-                    return true;
-                }
-                let feed = candidate.into_current();
-                if let Some(browser) = &mut self.browser {
-                    if back {
-                        let _ = browser.back(|_| Ok::<_, ()>(feed));
-                    } else {
-                        let source = feed.source.clone();
-                        let _ = browser.follow(&source, |_| Ok::<_, ()>(feed));
+                    if self.above.len() == MAX_LEVELS {
+                        self.above.remove(0);
                     }
-                } else {
-                    self.browser = Some(Browser::new(feed));
+                    self.above.push(Level {
+                        feed: current,
+                        position: self.position,
+                    });
                 }
+                self.browser = Some(Browser::new(*feed));
+                self.position = 0;
+                self.complete = false;
                 if let Err(error) = self.show(ui) {
                     ui.show_error(error);
                 }
@@ -519,6 +610,34 @@ impl CatalogMenu {
             }
         }
         true
+    }
+    /// Adds a page that arrived in the background. The screen is drawn again
+    /// only if the new entries land on the page being shown.
+    fn extend(
+        &mut self,
+        result: Result<Output, femto_catalog::http::Error>,
+        ui: &mut ReaderUi,
+        page_items: usize,
+    ) -> bool {
+        let (Ok(Output::Feed(page)), Some(browser)) = (result, &mut self.browser) else {
+            self.complete = true;
+            return false;
+        };
+        if !browser.append(*page) {
+            self.complete = true;
+            return false;
+        }
+        // Another view covers the list; it is rebuilt when shown again.
+        let Some(position) = ui.catalog_position().filter(|_| !self.detail) else {
+            return false;
+        };
+        let before = self.actions.len();
+        let rows = self.rows();
+        if ui.set_catalog_rows(&rows).is_err() {
+            return false;
+        }
+        let items = page_items.max(1);
+        !before.is_multiple_of(items) && position / items == before / items
     }
 }
 
@@ -545,11 +664,21 @@ mod tests {
     use super::*;
     fn finish(menu: &mut CatalogMenu, worker: &mut Jobs, ui: &mut ReaderUi) {
         let deadline = Instant::now() + Duration::from_secs(5);
-        while worker.is_busy() {
-            menu.poll(worker, ui);
-            assert!(Instant::now() < deadline);
-            std::thread::sleep(Duration::from_millis(1));
+        // The second round lets a background page start and arrive.
+        for _ in 0..2 {
+            loop {
+                menu.poll(worker, ui, 6);
+                if !worker.is_busy() && menu.wanted.is_none() {
+                    break;
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
         }
+    }
+    fn enter(menu: &mut CatalogMenu, source: &str, worker: &mut Jobs, ui: &mut ReaderUi) {
+        menu.want(Request::Enter(Search::Feed(source.into())), worker, ui)
+            .unwrap();
     }
     #[test]
     fn feed_navigation_details_and_failure_preserve_state() {
@@ -563,27 +692,30 @@ mod tests {
         assert!(ui.is_catalog_open());
         finish(&mut menu, &mut worker, &mut ui);
         assert_eq!(menu.browser.as_ref().unwrap().current().title, "/start");
-        menu.event(CatalogEvent::Activate(1), &mut worker, &mut ui)
-            .unwrap();
+        // The next page joined the list in the background and ended it.
+        assert_eq!(menu.actions.len(), 2);
+        assert!(menu.browser.as_ref().unwrap().continuation().is_none() && !ui.is_busy());
+        ui.set_catalog_position(1);
+        enter(&mut menu, "https://example.com/next", &mut worker, &mut ui);
+        // The list stays in place while the reader waits.
+        assert!(ui.is_busy() && ui.catalog_position() == Some(1));
         finish(&mut menu, &mut worker, &mut ui);
         assert_eq!(menu.browser.as_ref().unwrap().current().title, "/next");
+        assert_eq!(ui.catalog_position(), Some(0));
+        // Back needs no request and returns to the entry that was left.
         menu.event(CatalogEvent::Back, &mut worker, &mut ui)
             .unwrap();
-        finish(&mut menu, &mut worker, &mut ui);
+        assert!(!worker.is_busy());
         assert_eq!(menu.browser.as_ref().unwrap().current().title, "/start");
+        assert_eq!(ui.catalog_position(), Some(1));
+        assert_eq!(menu.actions.len(), 2);
         menu.event(CatalogEvent::Activate(0), &mut worker, &mut ui)
             .unwrap();
         assert!(menu.detail);
         menu.event(CatalogEvent::Back, &mut worker, &mut ui)
             .unwrap();
         assert!(!menu.detail);
-        menu.start(
-            "https://example.com/fail".into(),
-            false,
-            &mut worker,
-            &mut ui,
-        )
-        .unwrap();
+        enter(&mut menu, "https://example.com/fail", &mut worker, &mut ui);
         finish(&mut menu, &mut worker, &mut ui);
         assert_eq!(menu.browser.as_ref().unwrap().current().title, "/start");
         assert!(ui.is_catalog_open());
@@ -605,13 +737,12 @@ mod tests {
             .unwrap();
         finish(&mut menu, &mut worker, &mut ui);
         assert_eq!(menu.browser.as_ref().unwrap().current().title, "/start");
-        menu.start(
-            "https://other.example/next".into(),
-            false,
+        enter(
+            &mut menu,
+            "https://other.example/next",
             &mut worker,
             &mut ui,
-        )
-        .unwrap();
+        );
         finish(&mut menu, &mut worker, &mut ui);
         assert_eq!(menu.browser.as_ref().unwrap().current().title, "/next");
         menu.event(CatalogEvent::Back, &mut worker, &mut ui)
@@ -660,7 +791,7 @@ mod tests {
             .unwrap();
         assert!(!ui.is_editing());
         assert!(!worker.is_busy());
-        assert_eq!(menu.browser.as_ref().unwrap().history_len(), 0);
+        assert!(menu.above.is_empty());
         menu.event(CatalogEvent::Activate(0), &mut worker, &mut ui)
             .unwrap();
         ui.type_char('x');
@@ -673,7 +804,7 @@ mod tests {
             menu.browser.as_ref().unwrap().current().title,
             "/searchable"
         );
-        assert_eq!(menu.browser.as_ref().unwrap().history_len(), 0);
+        assert!(menu.above.is_empty());
     }
     #[test]
     fn cancelling_initial_load_cannot_reopen_closed_menu() {
@@ -720,7 +851,7 @@ mod download_progress_tests {
         // Cancellation before entry correctly skips the operation. This test
         // needs an active operation whose completion remains under its control.
         ready.recv_timeout(Duration::from_secs(5)).unwrap();
-        menu.pending = Some((id, false));
+        menu.pending = Some((id, Pending::Download));
         let count = Arc::new(DownloadCount::default());
         count.bytes.store(4096, Ordering::Relaxed);
         menu.download_progress = Some(DownloadProgress {
@@ -729,18 +860,18 @@ mod download_progress_tests {
             shown: (0, false),
         });
         let mut ui = ReaderUi::default();
-        assert!(!menu.poll(&mut worker, &mut ui));
+        assert!(!menu.poll(&mut worker, &mut ui, 6));
         ui.set_catalog_view("Downloading book", &["Cancel".into()])
             .unwrap();
-        assert!(menu.poll(&mut worker, &mut ui));
-        assert!(!menu.poll(&mut worker, &mut ui));
+        assert!(menu.poll(&mut worker, &mut ui, 6));
+        assert!(!menu.poll(&mut worker, &mut ui, 6));
         menu.event(CatalogEvent::Back, &mut worker, &mut ui)
             .unwrap();
         assert!(menu.pending.is_none());
         assert!(menu.download_progress.is_none());
         send.send(()).unwrap();
         assert!(worker.cancel_and_wait(Duration::from_secs(1)));
-        assert!(!menu.poll(&mut worker, &mut ui));
+        assert!(!menu.poll(&mut worker, &mut ui, 6));
         assert!(!ui.is_catalog_open());
     }
 

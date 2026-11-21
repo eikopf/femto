@@ -38,3 +38,12 @@ CONFIG_LWIP_SNTP_MAXIMUM_STARTUP_DELAY=5000
 CONFIG_MBEDTLS_THREADING_C=y
 CONFIG_MBEDTLS_THREADING_ALT=n
 CONFIG_MBEDTLS_THREADING_PTHREAD=y
+
+# A sleep shorter than one tick spins instead of yielding, which starves
+# every lower-priority task; network code sleeps for 1 ms between polls.
+CONFIG_FREERTOS_HZ=1000
+
+# Catalog feeds run to 100 KB; the default 5.7 KB window costs a radio
+# round trip for every few packets.
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32

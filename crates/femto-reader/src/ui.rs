@@ -242,6 +242,10 @@ pub enum CatalogEvent {
     Back,
 }
 
+fn rows_clean(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).take(256).collect()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KosyncEvent {
     Open,
@@ -298,6 +302,7 @@ pub struct ReaderUi {
     catalog_title: String,
     catalog_rows: Vec<String>,
     catalog_query: String,
+    catalog_busy: bool,
     device_available: bool,
     device_event: Option<DeviceEvent>,
     device_title: String,
@@ -683,21 +688,40 @@ impl ReaderUi {
         }
     }
     pub fn set_catalog_view(&mut self, title: &str, rows: &[String]) -> Result<()> {
-        if rows.len() > 2048 {
-            return Err(crate::Error::Limit("catalog menu rows"));
-        }
-        let clean = |text: &str| {
-            text.chars()
-                .filter(|c| !c.is_control())
-                .take(256)
-                .collect::<String>()
-        };
-        self.catalog_title = clean(title);
-        self.catalog_rows = rows.iter().map(|row| clean(row)).collect();
+        self.set_catalog_rows(rows)?;
+        self.catalog_title = rows_clean(title);
         self.panel = Some(Panel::Catalog);
         self.selected = 0;
         self.error = None;
         Ok(())
+    }
+    /// Replaces the rows of the catalog list without moving the selection,
+    /// for a list that grows while it is being read.
+    pub fn set_catalog_rows(&mut self, rows: &[String]) -> Result<()> {
+        if rows.len() > 2048 {
+            return Err(crate::Error::Limit("catalog menu rows"));
+        }
+        self.catalog_rows = rows.iter().map(|row| rows_clean(row)).collect();
+        Ok(())
+    }
+    /// The selected row of the catalog list, while that list is showing.
+    pub fn catalog_position(&self) -> Option<usize> {
+        matches!(self.panel, Some(Panel::Catalog)).then_some(self.selected)
+    }
+    pub fn set_catalog_position(&mut self, position: usize) {
+        if matches!(self.panel, Some(Panel::Catalog)) {
+            self.selected = position.min(self.catalog_rows.len().saturating_sub(1));
+        }
+    }
+    /// Marks a catalog request the reader is waiting on: the view stays in
+    /// place under the busy mark and Back abandons the request.
+    pub fn set_catalog_busy(&mut self, busy: bool) {
+        self.catalog_busy = busy;
+    }
+    /// Entries on one page of a menu.
+    pub fn menu_items(&self, reader: &Reader) -> usize {
+        crate::menu::Geometry::new(reader.state.layout.width, reader.state.layout.height)
+            .map_or(1, |geometry| geometry.items)
     }
 
     /// Offers the e-paper full-refresh interval.
@@ -1095,10 +1119,14 @@ impl ReaderUi {
             || self.is_preview_opening()
             || self.is_scanning()
             || self.is_dictionary_opening()
+            || self.catalog_busy
     }
     pub fn back(&mut self, reader: &mut Reader) -> Result<Effect> {
         // Back abandons pending work and leaves the view it started from.
         if self.is_busy() {
+            if self.catalog_busy {
+                self.catalog_event = Some(CatalogEvent::Back);
+            }
             if self.is_navigating() {
                 self.cancel_navigation(reader);
             }

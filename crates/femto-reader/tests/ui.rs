@@ -852,34 +852,69 @@ fn library_switching_preserves_positions_and_keeps_failed_targets_in_the_menu() 
 }
 
 #[test]
-fn frontlight_menu_clamps_levels_and_can_turn_off() {
+fn frontlight_sliders_set_levels_by_tap_and_step_by_selection() {
     let mut reader = reader();
     let mut ui = ReaderUi::default();
     ui.open();
     ui.tap(&mut reader, 400, 750).unwrap();
     ui.tap(&mut reader, 240, 450).unwrap();
-    for _ in 0..20 {
-        ui.tap(&mut reader, 240, 150).unwrap();
+    let plain = ui.render(&mut reader, 2).unwrap();
+    // Each slider has one tap target per value across the row.
+    for (x, brightness) in [(0, 0), (479, 10), (240, 5), (43, 0), (44, 1)] {
+        ui.tap(&mut reader, x, 150).unwrap();
+        assert_eq!(reader.state.frontlight.brightness, brightness);
+        assert!(ui.take_light_request());
     }
-    assert_eq!(reader.state.frontlight.brightness, 10);
-    for _ in 0..20 {
-        ui.tap(&mut reader, 240, 350).unwrap();
+    for (x, warmth) in [(479, 9), (0, 0), (240, 5)] {
+        ui.tap(&mut reader, x, 250).unwrap();
+        assert_eq!(reader.state.frontlight.warmth, warmth);
     }
-    assert_eq!(reader.state.frontlight.warmth, 9);
-    for _ in 0..20 {
-        ui.tap(&mut reader, 240, 450).unwrap();
+    assert_eq!(reader.state.frontlight.brightness, 1);
+    assert_ne!(ui.render(&mut reader, 2).unwrap(), plain);
+    // Selection steps the highlighted slider up and wraps to zero.
+    for expected in [6, 7, 8, 9, 0, 1] {
+        ui.select(&mut reader).unwrap();
+        assert_eq!(reader.state.frontlight.warmth, expected);
     }
-    assert_eq!(reader.state.frontlight.warmth, 0);
-    ui.tap(&mut reader, 240, 550).unwrap();
+    ui.turn(&mut reader, true).unwrap();
+    ui.select(&mut reader).unwrap();
     assert_eq!(reader.state.frontlight.brightness, 0);
     assert!(ui.take_light_request());
     assert!(!ui.take_light_request());
-    ui.tap(&mut reader, 240, 550).unwrap();
-    assert!(ui.take_light_request());
-    ui.tap(&mut reader, 240, 250).unwrap();
-    assert_eq!(reader.state.frontlight.brightness, 0);
     assert!(ui.is_open());
     assert_eq!(ui.render(&mut reader, 2).unwrap().len(), 480 * 800);
+}
+
+#[test]
+fn swipes_page_menus_and_power_sleeps_only_while_reading() {
+    let mut reader = reader();
+    let mut ui = ReaderUi::default();
+    // Without a way to sleep the power button opens the menu.
+    ui.power(&mut reader).unwrap();
+    assert!(ui.is_open() && !ui.take_sleep_request());
+    ui.back(&mut reader).unwrap();
+    ui.set_sleep_available(true);
+    ui.power(&mut reader).unwrap();
+    assert!(!ui.is_open() && ui.take_sleep_request());
+    assert_eq!(ui.render_sleep(&reader, 2).unwrap().len(), 480 * 800);
+
+    ui.open();
+    let first = ui.render(&mut reader, 2).unwrap();
+    assert_eq!(ui.swipe(&mut reader, false).unwrap(), Effect::Unchanged);
+    assert_eq!(ui.swipe(&mut reader, true).unwrap(), Effect::Redraw);
+    let second = ui.render(&mut reader, 2).unwrap();
+    assert_ne!(first, second);
+    while ui.swipe(&mut reader, true).unwrap() == Effect::Redraw {}
+    assert_ne!(ui.render(&mut reader, 2).unwrap(), second);
+    while ui.swipe(&mut reader, false).unwrap() == Effect::Redraw {}
+    assert_eq!(ui.render(&mut reader, 2).unwrap(), first);
+    // Inside a menu the power button selects: the first row resumes reading.
+    ui.power(&mut reader).unwrap();
+    assert!(!ui.is_open() && !ui.take_sleep_request());
+
+    let page = reader.page_index();
+    ui.swipe(&mut reader, true).unwrap();
+    assert_eq!(reader.page_index(), page + 1);
 }
 
 #[test]

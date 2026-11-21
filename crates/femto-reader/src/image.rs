@@ -79,12 +79,14 @@ fn png_reader(bytes: &[u8]) -> Result<png::Reader<Cursor<&[u8]>>> {
     Ok(reader)
 }
 
-fn jpeg_reader(bytes: &[u8]) -> Result<JpegDecoder<ZCursor<&[u8]>>> {
+/// The decoder holds tens of kilobytes of tables. It stays on the heap so
+/// that callers do not each reserve a copy on a small device stack.
+fn jpeg_reader(bytes: &[u8]) -> Result<Box<JpegDecoder<ZCursor<&[u8]>>>> {
     let options = DecoderOptions::default()
         .set_max_width(MAX_DIMENSION as usize)
         .set_max_height(MAX_DIMENSION as usize)
         .jpeg_set_out_colorspace(ColorSpace::Luma);
-    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
+    let mut decoder = Box::new(JpegDecoder::new_with_options(ZCursor::new(bytes), options));
     decoder
         .decode_headers()
         .map_err(|e| Error::Image(e.to_string()))?;
@@ -218,26 +220,44 @@ impl GrayImage {
         if self.pixels.len() != self.size.width as usize * self.size.height as usize {
             return Err(Error::Image("invalid grayscale buffer".into()));
         }
+        // Exact integer weights: along each axis a source pixel spans `target`
+        // units and a target pixel spans `source` units of a common grid.
+        // Devices without double-precision hardware make float weights
+        // thousands of times slower.
+        let spans = |source: u32, target: u32| -> Vec<(u32, u32, u64, u64)> {
+            (0..u64::from(target))
+                .map(|index| {
+                    let (start, end) = (index * u64::from(source), (index + 1) * u64::from(source));
+                    let first = (start / u64::from(target)) as u32;
+                    let last = end.div_ceil(u64::from(target)) as u32;
+                    (first, last, start, end)
+                })
+                .collect()
+        };
+        let overlap = |pixel: u32, unit: u32, start: u64, end: u64| {
+            let (low, high) = (
+                u64::from(pixel) * u64::from(unit),
+                (u64::from(pixel) + 1) * u64::from(unit),
+            );
+            high.min(end) - low.max(start)
+        };
+        let columns = spans(self.size.width, target.width);
+        let area = u64::from(self.size.width) * u64::from(self.size.height);
         let mut pixels = Vec::with_capacity(target.width as usize * target.height as usize);
-        for y in 0..target.height {
-            let top = y as f64 * self.size.height as f64 / target.height as f64;
-            let bottom = (y + 1) as f64 * self.size.height as f64 / target.height as f64;
-            for x in 0..target.width {
-                let left = x as f64 * self.size.width as f64 / target.width as f64;
-                let right = (x + 1) as f64 * self.size.width as f64 / target.width as f64;
-                let mut sum = 0.0;
-                for sy in top.floor() as u32..(bottom.ceil() as u32).min(self.size.height) {
-                    let dy = bottom.min(sy as f64 + 1.0) - top.max(sy as f64);
-                    for sx in left.floor() as u32..(right.ceil() as u32).min(self.size.width) {
-                        let dx = right.min(sx as f64 + 1.0) - left.max(sx as f64);
-                        sum += self.pixels[(sy * self.size.width + sx) as usize] as f64 * dx * dy;
+        for (top, bottom, y_start, y_end) in spans(self.size.height, target.height) {
+            for &(left, right, x_start, x_end) in &columns {
+                let mut sum = 0;
+                for sy in top..bottom {
+                    let row =
+                        &self.pixels[(sy * self.size.width) as usize..][..self.size.width as usize];
+                    let mut line = 0;
+                    for sx in left..right {
+                        line +=
+                            u64::from(row[sx as usize]) * overlap(sx, target.width, x_start, x_end);
                     }
+                    sum += line * overlap(sy, target.height, y_start, y_end);
                 }
-                pixels.push(
-                    (sum / ((right - left) * (bottom - top)))
-                        .round()
-                        .clamp(0.0, 255.0) as u8,
-                );
+                pixels.push(((sum + area / 2) / area) as u8);
             }
         }
         Ok(Self {

@@ -182,6 +182,7 @@ fn run() -> Result<(), String> {
     ui.set_kosync_available(kosync.is_some());
     ui.set_tailnet_available(true);
     ui.set_rotation_available(true);
+    ui.set_page_buttons_available(true);
     ui.set_device_status(&format!(
         "{} | {}",
         battery_label(screen.battery()),
@@ -219,6 +220,7 @@ fn run() -> Result<(), String> {
     let mut heap_report = Instant::now();
     let mut console = console::Console::open();
     let (mut turning_forward, mut preparing) = (true, true);
+    let mut stay_awake = false;
     loop {
         std::thread::sleep(Duration::from_millis(10));
         screen.poll_wifi();
@@ -240,6 +242,13 @@ fn run() -> Result<(), String> {
                 Command::Previous => Some(input::Event::Turn(Turn::Previous)),
                 Command::Select => Some(input::Event::Select),
                 Command::Back => Some(input::Event::Back),
+                Command::Power => Some(input::Event::Power),
+                Command::Awake => {
+                    stay_awake = true;
+                    log::info!("USB awake: automatic sleep suppressed until restart");
+                    None
+                }
+                Command::Swipe(turn) => Some(input::Event::Swipe(turn)),
                 Command::Tap { x, y } => Some(input::Event::Tap { x, y }),
                 Command::Frame => {
                     console::dump_frame(&plane);
@@ -267,12 +276,19 @@ fn run() -> Result<(), String> {
             let previous_light = reader.state.frontlight;
             let received = Instant::now();
             let effect = match event {
+                input::Event::Power => ui.power(&mut reader),
                 input::Event::Select => ui.select(&mut reader),
                 input::Event::Back => ui.back(&mut reader),
-                input::Event::Turn(Turn::Previous) => ui.turn(&mut reader, false),
-                input::Event::Turn(Turn::Next) => ui.turn(&mut reader, true),
+                input::Event::Button(turn) => {
+                    // The upper button turns forward unless the buttons are swapped.
+                    let forward = (turn == Turn::Previous) != reader.state.swap_page_buttons;
+                    ui.turn(&mut reader, forward)
+                }
+                input::Event::Swipe(turn) => ui.swipe(&mut reader, turn == Turn::Next),
+                input::Event::Turn(turn) => ui.turn(&mut reader, turn == Turn::Next),
                 input::Event::Tap { x, y } => ui.tap(&mut reader, x.into(), y.into()),
             };
+            screen.set_long_presses(ui.is_open());
             let mut effect = match effect {
                 Ok(effect) => effect,
                 Err(error) => {
@@ -376,8 +392,14 @@ fn run() -> Result<(), String> {
             }
         }
         if let Some(event) = event {
-            if let input::Event::Turn(turn) = event {
-                turning_forward = turn == Turn::Next;
+            match event {
+                input::Event::Turn(turn) | input::Event::Swipe(turn) => {
+                    turning_forward = turn == Turn::Next;
+                }
+                input::Event::Button(turn) => {
+                    turning_forward = (turn == Turn::Previous) != reader.state.swap_page_buttons;
+                }
+                _ => {}
             }
             preparing = true;
         } else if preparing && !ui.is_open() {
@@ -502,7 +524,7 @@ fn run() -> Result<(), String> {
                 || screen.catalog.is_busy()
                 || kosync.as_ref().is_some_and(|sync| sync.is_busy()),
         );
-        if manual_sleep || automatic_sleep {
+        if manual_sleep || (automatic_sleep && !stay_awake) {
             idle.suppress_until_activity();
             let prepared = (|| -> Result<(), String> {
                 power::wait_for_release()?;
@@ -528,6 +550,12 @@ fn run() -> Result<(), String> {
                     .save(&reader.state)
                     .map_err(|e| format!("Sleep save failed: {e}"))?;
                 ui.release_dictionary();
+                let levels = if cfg!(feature = "grayscale") { 4 } else { 2 };
+                let pixels = ui
+                    .render_sleep(&reader, levels)
+                    .map_err(|e| format!("Sleep screen failed: {e}"))?;
+                pack_pixels(&pixels, reader.state.rotation, &mut plane)?;
+                screen.present_clean(&plane)?;
                 screen.prepare_sleep()
             })();
             match prepared {
@@ -596,7 +624,17 @@ fn startup_reader(
                 log::info!("Startup opening cancelled");
                 break 'books;
             }
-            match startup.step_for(Duration::from_millis(5)) {
+            let stepped = Instant::now();
+            let step = startup.step_for(Duration::from_millis(5));
+            if stepped.elapsed() >= Duration::from_millis(250) {
+                log::info!(
+                    "Startup step took {} ms; {} pages indexed",
+                    stepped.elapsed().as_millis(),
+                    startup.indexed_pages()
+                );
+                report_heap("startup");
+            }
+            match step {
                 Ok(true) => {
                     return startup
                         .finish()

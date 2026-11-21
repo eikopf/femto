@@ -103,6 +103,7 @@ enum Command {
     Fractional,
     Book(usize),
     Light { brightness: u8, warmth: u8 },
+    SwapPageButtons,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -181,6 +182,7 @@ pub struct ReaderUi {
     light_request: bool,
     sleep_available: bool,
     sleep_request: bool,
+    page_buttons_available: bool,
     query: String,
     scan_root: Option<(PathBuf, usize)>,
     scan: Option<LibraryScan>,
@@ -521,6 +523,84 @@ impl ReaderUi {
         Ok(())
     }
 
+    /// Offers the setting that exchanges the two page buttons.
+    pub fn set_page_buttons_available(&mut self, available: bool) {
+        self.page_buttons_available = available;
+    }
+    /// The power button selects inside menus and requests sleep while
+    /// reading. Without a way to sleep it opens the menu instead.
+    pub fn power(&mut self, reader: &mut Reader) -> Result<Effect> {
+        if self.panel.is_none() && self.sleep_available {
+            self.sleep_request = true;
+            return Ok(Effect::Unchanged);
+        }
+        self.select(reader)
+    }
+    /// A swipe turns a reading page and moves a menu by one page of entries.
+    pub fn swipe(&mut self, reader: &mut Reader, next: bool) -> Result<Effect> {
+        if matches!(
+            self.panel,
+            None | Some(Panel::SelectWord | Panel::LinkPreview)
+        ) || self.is_editing()
+        {
+            return self.turn(reader, next);
+        }
+        let items =
+            crate::menu::Geometry::new(reader.state.layout.width, reader.state.layout.height)?
+                .items;
+        let page = self.selected / items;
+        let last = self.entries(reader).len().saturating_sub(1) / items;
+        let target = if next {
+            (page + 1).min(last)
+        } else {
+            page.saturating_sub(1)
+        };
+        if target == page {
+            return Ok(Effect::Unchanged);
+        }
+        self.selected = target * items;
+        Ok(Effect::Redraw)
+    }
+    /// The image left on an e-paper panel while the device sleeps.
+    pub fn render_sleep(&self, reader: &Reader, levels: u16) -> Result<Vec<u8>> {
+        let metadata = &reader.document.metadata;
+        let clip = |text: &str| text.graphemes(true).take(120).collect::<String>();
+        let mut lines = vec![String::new(), clip(&metadata.title)];
+        if !metadata.author.is_empty() {
+            lines.push(clip(&metadata.author));
+        }
+        if let Some(percent) = reader.book_progress_percent() {
+            lines.push(format!("~{percent}% read"));
+        }
+        lines.extend([
+            String::new(),
+            "Sleeping. Hold the power button to wake.".into(),
+        ]);
+        reader.render_panel(&lines, levels)
+    }
+    /// Value and maximum of the stepped slider shown in a menu row.
+    fn slider(&self, reader: &Reader, index: usize) -> Option<(u8, u8)> {
+        let light = reader.state.frontlight;
+        match (self.panel?, index) {
+            (Panel::Light, 0) => Some((light.brightness, 10)),
+            (Panel::Light, 1) => Some((light.warmth, 9)),
+            _ => None,
+        }
+    }
+    fn slider_command(&self, reader: &Reader, index: usize, value: u8) -> Command {
+        let crate::state::FrontlightSettings { brightness, warmth } = reader.state.frontlight;
+        if index == 0 {
+            Command::Light {
+                brightness: value,
+                warmth,
+            }
+        } else {
+            Command::Light {
+                brightness,
+                warmth: value,
+            }
+        }
+    }
     pub fn set_sleep_available(&mut self, available: bool) {
         self.sleep_available = available;
     }
@@ -1116,6 +1196,11 @@ impl ReaderUi {
             return Ok(Effect::Unchanged);
         };
         self.selected = index;
+        if let Some((_, max)) = self.slider(reader, index) {
+            let value = (u64::from(x) * (u64::from(max) + 1) / u64::from(layout.width)) as u8;
+            let command = self.slider_command(reader, index, value);
+            return self.activate(reader, command);
+        }
         self.activate(reader, *command)
     }
     pub fn select(&mut self, reader: &mut Reader) -> Result<Effect> {
@@ -1348,6 +1433,10 @@ impl ReaderUi {
                 self.sleep_request = true;
                 Ok(Effect::Unchanged)
             }
+            Command::SwapPageButtons => {
+                reader.state.swap_page_buttons = !reader.state.swap_page_buttons;
+                Ok(Effect::Redraw)
+            }
             Command::Find => Ok(self.submit_search()),
             Command::Light { brightness, warmth } => {
                 self.light_request = true;
@@ -1571,6 +1660,19 @@ impl ReaderUi {
                 "Remote buttons".into(),
                 Command::Open(Panel::Remote),
             )))
+            .chain(self.page_buttons_available.then(|| {
+                (
+                    format!(
+                        "Swap page buttons ({})",
+                        if reader.state.swap_page_buttons {
+                            "on"
+                        } else {
+                            "off"
+                        }
+                    ),
+                    Command::SwapPageButtons,
+                )
+            }))
             .collect(),
             Panel::Remote => {
                 use crate::remote::RemoteAction;
@@ -1949,33 +2051,20 @@ impl ReaderUi {
             Panel::Light => {
                 let crate::state::FrontlightSettings { brightness, warmth } =
                     reader.state.frontlight;
+                // Selecting a slider steps it up and wraps; a tap sets it directly.
                 vec![
                     (
-                        format!("Brighter ({brightness}/10)"),
+                        format!("Brightness {brightness}/10"),
                         Command::Light {
-                            brightness: brightness.saturating_add(1).min(10),
+                            brightness: (brightness + 1) % 11,
                             warmth,
                         },
                     ),
                     (
-                        format!("Dimmer ({brightness}/10)"),
-                        Command::Light {
-                            brightness: brightness.saturating_sub(1),
-                            warmth,
-                        },
-                    ),
-                    (
-                        format!("Warmer ({warmth}/9)"),
+                        format!("Warmth {warmth}/9"),
                         Command::Light {
                             brightness,
-                            warmth: warmth.saturating_add(1).min(9),
-                        },
-                    ),
-                    (
-                        format!("Cooler ({warmth}/9)"),
-                        Command::Light {
-                            brightness,
-                            warmth: warmth.saturating_sub(1),
+                            warmth: (warmth + 1) % 10,
                         },
                     ),
                     (
@@ -2191,11 +2280,39 @@ impl ReaderUi {
         for row in &mut rows {
             *row = row.graphemes(true).take(32).collect();
         }
-        reader.render_rows(
-            &rows,
-            (!entries.is_empty()).then_some(self.selected % count + 1),
-            levels,
-        )
+        let selected = (!entries.is_empty()).then_some(self.selected % count + 1);
+        let mut pixels = reader.render_rows(&rows, selected, levels)?;
+        let width = reader.state.layout.width as usize;
+        for row in 1..=count {
+            let Some((value, max)) = self.slider(reader, start + row - 1) else {
+                continue;
+            };
+            // One cell per value, matching the tap targets. The first cell
+            // stands for zero and stays hollow.
+            let ink = if selected == Some(row) { 255 } else { 0 };
+            let (top, height) = geometry.row(row);
+            let (top, bottom) = (
+                (top + height * 11 / 20) as usize,
+                (top + height * 16 / 20) as usize,
+            );
+            let cells = usize::from(max) + 1;
+            for step in 0..cells {
+                let (x0, x1) = (step * width / cells + 3, (step + 1) * width / cells - 3);
+                for y in top..bottom {
+                    let edge = y == top || y + 1 == bottom;
+                    for x in x0..x1 {
+                        if (1..=usize::from(value)).contains(&step)
+                            || edge
+                            || x == x0
+                            || x + 1 == x1
+                        {
+                            pixels[y * width + x] = ink;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(pixels)
     }
 }
 

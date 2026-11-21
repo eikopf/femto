@@ -113,8 +113,8 @@ def listing(port, directory):
     print(json.dumps(entries, indent=1, ensure_ascii=False))
 
 
-def frame(port, output):
-    """Save the framebuffer in native panel orientation; it is not a photo of the glass."""
+def frame(port, output, rotate):
+    """Save the framebuffer; it is what the firmware drew, not a photo of the glass."""
     from PIL import Image
     port.write(b"femto frame\n")
     data, size = bytearray(), None
@@ -136,7 +136,7 @@ def frame(port, output):
         high = Image.frombytes("1", (800, 480), bytes(data[:48000])).convert("L")
         low = Image.frombytes("1", (800, 480), bytes(data[48000:])).convert("L")
         image = Image.blend(low, high, 2 / 3)
-    image.save(output)
+    image.rotate(rotate, expand=True).save(output)
     print(json.dumps(dict(output=output, bytes=size)))
 
 
@@ -146,8 +146,9 @@ def main():
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--expect-page", type=int)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ["status", "reboot", *EVENTS]:
+    for name in ["status", "reboot", "awake", *EVENTS]:
         commands.add_parser(name)
+    commands.add_parser("swipe").add_argument("direction", choices=["next", "prev"])
     tap = commands.add_parser("tap", help="tap at reader-view coordinates")
     tap.add_argument("x", type=int)
     tap.add_argument("y", type=int)
@@ -156,7 +157,10 @@ def main():
     upload.add_argument("destination")
     commands.add_parser("ls").add_argument("directory", nargs="?", default="")
     commands.add_parser("rm").add_argument("path")
-    commands.add_parser("frame").add_argument("output")
+    capture = commands.add_parser("frame", help="save the framebuffer as an upright PNG")
+    capture.add_argument("output")
+    capture.add_argument("--rotate", type=int, default=270, choices=[0, 90, 180, 270],
+                         help="counterclockwise degrees from native panel orientation")
     args = parser.parse_args()
     if not 0 < args.timeout <= 300:
         parser.error("timeout must be between 0 and 300 seconds")
@@ -176,13 +180,15 @@ def main():
             port.write(f"femto rm {args.path}\n".encode())
             port.file_result(echo=False)
         elif args.command == "frame":
-            frame(port, args.output)
-        elif args.command == "reboot":
-            port.write(b"femto reboot\n")
+            frame(port, args.output, args.rotate)
+        elif args.command in ("reboot", "awake"):
+            port.write(f"femto {args.command}\n".encode())
         else:
             commands = f"femto {args.command}\n"
             if args.command == "tap":
                 commands = f"femto tap {args.x} {args.y}\n"
+            if args.command == "swipe":
+                commands = f"femto swipe {args.direction}\n"
             if args.command != "status":
                 commands += "femto status\n"
             port.write(commands.encode("ascii"))

@@ -15,6 +15,10 @@ pub enum Command {
     Previous,
     Select,
     Back,
+    Power,
+    /// Suppress automatic sleep until restart, for unattended test sessions.
+    Awake,
+    Swipe(crate::input::Turn),
     Tap {
         x: u16,
         y: u16,
@@ -50,6 +54,10 @@ fn parse(line: &str) -> Option<Command> {
         ("prev", "") => Command::Previous,
         ("select", "") => Command::Select,
         ("back", "") => Command::Back,
+        ("power", "") => Command::Power,
+        ("awake", "") => Command::Awake,
+        ("swipe", "next") => Command::Swipe(crate::input::Turn::Next),
+        ("swipe", "prev") => Command::Swipe(crate::input::Turn::Previous),
         ("frame", "") => Command::Frame,
         ("reboot", "") => Command::Reboot,
         ("tap", point) => {
@@ -169,6 +177,10 @@ mod tests {
     #[test]
     fn arguments_are_bounded_and_paths_stay_relative() {
         assert_eq!(
+            commands("femto power\nfemto swipe prev\n".as_bytes()),
+            [Command::Power, Command::Swipe(crate::input::Turn::Previous)]
+        );
+        assert_eq!(
             commands("femto tap 12 479\nfemto put 5 0000ABCD b\u{fc}cher/a b.epub\n".as_bytes()),
             [
                 Command::Tap { x: 12, y: 479 },
@@ -200,6 +212,8 @@ mod tests {
             "femto ls ./x",
             "femto tap 70000 1",
             "femto tap 1",
+            "femto swipe",
+            "femto swipe up",
         ] {
             let mut line = rejected.as_bytes().to_vec();
             line.push(b'\n');

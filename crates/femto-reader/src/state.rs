@@ -183,6 +183,9 @@ pub struct ReaderState {
     pub idle_sleep: IdleSleep,
     #[serde(default)]
     pub rotation: Rotation,
+    /// Exchanges the directions of a device's two page buttons.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub swap_page_buttons: bool,
     pub books: BTreeMap<String, BookState>,
 }
 
@@ -197,6 +200,7 @@ impl Default for ReaderState {
             frontlight: Default::default(),
             idle_sleep: IdleSleep::default(),
             rotation: Rotation::default(),
+            swap_page_buttons: false,
             books: BTreeMap::new(),
         }
     }

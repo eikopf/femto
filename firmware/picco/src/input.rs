@@ -5,7 +5,7 @@ use esp_idf_svc::hal::{
     i2c::I2cDriver,
 };
 use femto_picco_board::{
-    input::{Buttons, Turn, ViewGate},
+    input::{Buttons, Press, Turn, ViewGate},
     orientation::Orientation,
     touch::{Gesture, MAX_REPORT, Touch},
 };
@@ -21,10 +21,20 @@ use std::{
 
 #[derive(Clone, Copy)]
 pub enum Event {
+    /// The power button: sleep while reading, select inside menus.
+    Power,
+    /// Opens the menu or activates its selection.
     Select,
     Back,
+    /// A page button, named for its turn in the lower-forward arrangement.
+    Button(Turn),
+    Swipe(Turn),
+    /// A turn that is already in reading direction.
     Turn(Turn),
-    Tap { x: u16, y: u16 },
+    Tap {
+        x: u16,
+        y: u16,
+    },
 }
 
 pub struct TouchDevice {
@@ -175,7 +185,7 @@ impl TouchDevice {
             .report(&report[..len], now)
             .map(|gesture| match gesture {
                 Gesture::Tap { x, y } => Event::Tap { x, y },
-                Gesture::Swipe(turn) => Event::Turn(turn),
+                Gesture::Swipe(turn) => Event::Swipe(turn),
             }))
     }
 }
@@ -227,6 +237,7 @@ pub struct InputTask {
     battery: Arc<Mutex<Option<(Instant, femto_picco_board::battery::Sample)>>>,
     commands: SyncSender<Command>,
     stop: Arc<AtomicBool>,
+    long_presses: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
     generation: u64,
 }
@@ -245,14 +256,15 @@ impl InputTask {
         let battery_sample = battery.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = stop.clone();
+        let long_presses = Arc::new(AtomicBool::new(false));
+        let long = long_presses.clone();
         let worker = thread::Builder::new()
             .name("femto-input".into())
             .stack_size(8192)
             .spawn(move || {
                 let started = Instant::now();
                 let mut buttons = Buttons::default();
-                let mut select_button = Buttons::default();
-                let mut back_button = Buttons::default();
+                let mut power_button = Buttons::default();
                 let mut touch_errors = 0;
                 let mut battery_at: Option<Instant> = None;
                 let mut view = ViewGate::default();
@@ -312,24 +324,26 @@ impl InputTask {
                     let now = started.elapsed().as_millis() as u64;
                     let buttons_generation =
                         view.buttons(previous.is_high() && next.is_high() && select.is_high());
-                    if back_button
-                        .sample(previous.is_low() && next.is_low(), false, now)
+                    let send = |event| {
+                        if let Some(generation) = buttons_generation {
+                            let _ = sender.try_send((generation, Instant::now(), event));
+                        }
+                    };
+                    if power_button
+                        .sample(select.is_low(), false, now, false)
                         .is_some()
                     {
-                        if let Some(generation) = buttons_generation {
-                            let _ = sender.try_send((generation, Instant::now(), Event::Back));
-                        }
+                        send(Event::Power);
                     }
-                    if select_button.sample(select.is_low(), false, now).is_some() {
-                        if let Some(generation) = buttons_generation {
-                            let _ = sender.try_send((generation, Instant::now(), Event::Select));
-                        }
-                    }
-                    if let Some(turn) = buttons.sample(previous.is_low(), next.is_low(), now) {
-                        if let Some(generation) = buttons_generation {
-                            let _ =
-                                sender.try_send((generation, Instant::now(), Event::Turn(turn)));
-                        }
+                    match buttons.sample(
+                        previous.is_low(),
+                        next.is_low(),
+                        now,
+                        long.load(Ordering::Relaxed),
+                    ) {
+                        Some(Press::Short(turn)) => send(Event::Button(turn)),
+                        Some(Press::Long(_)) => send(Event::Back),
+                        None => {}
                     }
                     if let Some(device) = &mut touch {
                         match device.poll(now) {
@@ -361,9 +375,15 @@ impl InputTask {
             battery,
             commands,
             stop,
+            long_presses,
             worker: Some(worker),
             generation: 0,
         })
+    }
+    /// Long page-button presses mean back, which delays short presses until
+    /// release; reading keeps them immediate.
+    pub fn set_long_presses(&self, enabled: bool) {
+        self.long_presses.store(enabled, Ordering::Relaxed);
     }
     pub fn battery(&self) -> Option<femto_picco_board::battery::Sample> {
         self.battery

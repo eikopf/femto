@@ -290,6 +290,9 @@ impl Screen {
     pub fn event(&self) -> Option<crate::input::Event> {
         self.input.next()
     }
+    pub fn set_long_presses(&self, enabled: bool) {
+        self.input.set_long_presses(enabled);
+    }
 
     pub fn remote_turn(
         &mut self,
@@ -329,6 +332,12 @@ impl Screen {
         self.fast_count = 5;
         self.present(plane)?;
         self.input.set_view(orientation, false)
+    }
+
+    /// Presents with a full refresh, for images that stay on the panel.
+    pub fn present_clean(&mut self, plane: &[u8]) -> Result<(), String> {
+        self.fast_count = 5;
+        self.present(plane)
     }
 
     pub fn present(&mut self, plane: &[u8]) -> Result<(), String> {

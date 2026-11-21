@@ -45,7 +45,12 @@ pub struct Reader {
     links: Vec<DocumentLink>,
     /// Rendered reading pages, so prepared and recently shown pages need no rasterization.
     frames: Vec<(FrameKey, Vec<u8>)>,
+    /// Rendered menu cells by text, size and levels, most recently used last.
+    /// Menus redraw mostly unchanged rows on every selection change.
+    cells: std::sync::Mutex<Vec<(CellKey, Vec<u8>)>>,
 }
+
+type CellKey = (String, u32, u32, u16);
 
 /// Everything a rendered reading page depends on besides the fonts, which are
 /// fixed for a reader. A pagination belongs to one chapter of one document.
@@ -381,6 +386,7 @@ impl ReaderStartup {
             history: Vec::new(),
             links,
             frames: Vec::new(),
+            cells: Default::default(),
         })
     }
 }
@@ -452,6 +458,7 @@ impl Reader {
             history: Vec::new(),
             links,
             frames: Vec::new(),
+            cells: Default::default(),
         })
     }
 
@@ -1542,6 +1549,29 @@ impl Reader {
         height: u32,
         levels: u16,
     ) -> Result<Vec<u8>> {
+        const CELLS: usize = 48;
+        let mut cells = self.cells.lock().unwrap_or_else(|e| e.into_inner());
+        let known = cells.iter().position(|((known, w, h, l), _)| {
+            known == text && (*w, *h, *l) == (width, height, levels)
+        });
+        let entry = match known {
+            Some(index) => cells.remove(index),
+            None => {
+                if cells.len() == CELLS {
+                    cells.remove(0);
+                }
+                (
+                    (text.to_owned(), width, height, levels),
+                    self.rasterize_cell(text, width, height, levels)?,
+                )
+            }
+        };
+        let pixels = entry.1.clone();
+        cells.push(entry);
+        Ok(pixels)
+    }
+
+    fn rasterize_cell(&self, text: &str, width: u32, height: u32, levels: u16) -> Result<Vec<u8>> {
         let chapter = Chapter {
             language: "und".into(),
             index: 0,

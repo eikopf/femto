@@ -233,7 +233,11 @@ The test found four defects that the Headscale fixture does not exercise, all fi
 - The eight-packet input queue kept packets that no open flow or bound socket would ever consume, such as late segments of a closed connection. It filled after one large feed and every later connection timed out. A full queue now evicts its oldest unclaimed packet.
 - Modem sleep on a weak link (about -74 dBm) lost enough inbound packets to time out the coordinator name lookup. The radio stays awake while a session is open or other network work is in flight.
 
-A relayed (DERP) path, HTTPS to a peer, sleep with a session open, node-key renewal, a session lasting hours, and memory use with a session open were not tested on the device. While a session that had failed was still open, two firmware pushes over the USB console timed out; they succeeded after `Disconnect`. The cause is not known.
+Release 0.1.3, installed through the on-device update, repeated the catalog test after a restart. Sleeping with a session open closed the session and the radio and entered deep sleep 1.5 seconds after the power press. With a session open, internal memory had about 86 KiB free.
+
+Joining after a restart logs one ESP-IDF task watchdog warning: back-to-back TLS handshakes for the coordinator and relay keep CPU 0 busy for longer than the watchdog period. The warning does not restart the reader, and joining completes.
+
+A relayed (DERP) path, HTTPS to a peer, node-key renewal and a session lasting hours were not tested on the device. While a session that had failed was still open, two firmware pushes over the USB console timed out; they succeeded after `Disconnect`. The cause is not known.
 
 ## Catalog tailnet routing
 

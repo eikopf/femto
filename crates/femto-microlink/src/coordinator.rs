@@ -48,8 +48,7 @@ struct WireNode {
     key_expiry: Option<String>,
     #[serde(default)]
     expired: bool,
-    #[serde(default)]
-    machine_authorized: bool,
+    machine_authorized: Option<bool>,
     #[serde(default)]
     is_jailed: bool,
     #[serde(rename = "UnsignedPeerAPIOnly", default)]
@@ -260,6 +259,15 @@ impl Coordinator {
         }
         Ok(Some(answer))
     }
+    /// Peers in the map, and those of them traffic may be exchanged with.
+    pub fn peer_counts(&self) -> (usize, usize) {
+        let usable = self
+            .nodes
+            .values()
+            .filter(|node| node.permitted && !node.peer.addresses.is_empty())
+            .count();
+        (self.nodes.len(), usable)
+    }
     pub fn route(&mut self, key: Key, now_ms: u64) -> Result<Option<&PeerRoute>, MapError> {
         self.runtime_clock(now_ms)?;
         if self.plane.begin_handshake(key, now_ms).is_err() {
@@ -440,8 +448,13 @@ impl Coordinator {
         let mut local_address = self.local_address;
         let local_deadline = match map.node {
             Some(node) => {
+                let authorized = node.machine_authorized == Some(true);
                 let record = record(node, clock)?;
-                if record.peer.key != self.local_key || !record.permitted || record.peer.jailed {
+                if record.peer.key != self.local_key
+                    || !authorized
+                    || !record.permitted
+                    || record.peer.jailed
+                {
                     return Err(MapError::Node(
                         "local node not this device or not authorized",
                     ));
@@ -658,7 +671,11 @@ fn record(node: WireNode, clock: Clock) -> Result<Record, MapError> {
             expires_ms,
             jailed: node.is_jailed,
         },
-        permitted: node.machine_authorized && !node.unsigned_peer_api_only && !node.expired,
+        // Tailscale sets MachineAuthorized on the local node only; a peer's
+        // presence in the authenticated map authorizes it unless denied.
+        permitted: node.machine_authorized != Some(false)
+            && !node.unsigned_peer_api_only
+            && !node.expired,
     })
 }
 fn nonzero_discovery(key: PublicKey<Disco>) -> Option<PublicKey<Disco>> {
@@ -987,6 +1004,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn peers_need_no_authorization_flag_but_the_local_node_does() {
+        let mut peer = node(2, 2);
+        peer.as_object_mut().unwrap().remove("MachineAuthorized");
+        let mut c = coordinator();
+        apply(&mut c, json!({"Node":node(1,1), "Peers":[peer.clone()]}), 0).unwrap();
+        assert!(authorized(&mut c, 2, 0));
+        let mut local = node(1, 1);
+        local.as_object_mut().unwrap().remove("MachineAuthorized");
+        assert!(apply(&mut coordinator(), json!({"Node":local, "Peers":[peer]}), 0).is_err());
+    }
     #[test]
     fn first_map_may_list_peers_as_changes() {
         let mut c = coordinator();

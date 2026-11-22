@@ -144,6 +144,8 @@ pub struct Diagnostics {
     pub incoming_packets: usize,
     pub incoming_capacity_bytes: usize,
     pub tcp_connections: usize,
+    pub known_peers: usize,
+    pub usable_peers: usize,
 }
 
 pub struct Network<S: EpochStore> {
@@ -230,7 +232,10 @@ impl<S: EpochStore> Network<S> {
     /// Allocation-free snapshot. Buffer capacities exclude container metadata,
     /// allocator overhead, protocol state and transport-adapter queues.
     pub fn diagnostics(&self) -> Diagnostics {
+        let (known_peers, usable_peers) = self.coordinator.peer_counts();
         Diagnostics {
+            known_peers,
+            usable_peers,
             outgoing_packets: self.outgoing.len(),
             outgoing_capacity_bytes: self.outgoing.iter().map(|p| p.bytes.capacity()).sum(),
             incoming_packets: self.incoming.len(),
@@ -1387,7 +1392,14 @@ mod tests {
         assert_eq!(stats.outgoing_capacity_bytes, 0);
         assert!(!format!("{stats:?}").contains("private"));
         owner.disconnect();
-        assert_eq!(owner.diagnostics(), stats);
+        assert_eq!(
+            owner.diagnostics(),
+            Diagnostics {
+                known_peers: 0,
+                usable_peers: 0,
+                ..stats
+            }
+        );
         owner.diagnostics.receive_calls = u64::MAX;
         assert!(owner.receive(source, b"invalid", 1).is_err());
         assert_eq!(owner.diagnostics().receive_calls, u64::MAX);

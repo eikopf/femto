@@ -39,9 +39,6 @@ struct Setup {
     followup: Option<Followup>,
     authorized: AtomicBool,
 }
-/// How long the first endpoint publication waits for the home relay.
-const HOME_WAIT_MS: u64 = 10_000;
-
 /// Set from the USB console: sessions opened afterwards exchange no direct
 /// datagrams, which leaves only relayed paths to test.
 pub static RELAY_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -181,6 +178,10 @@ pub struct Runtime {
     reconnecting: bool,
     stopped: bool,
     next_diagnostics_ms: u64,
+    /// The last poll moved no packet on an established session.
+    quiet: bool,
+    /// Endpoints have been published since the address was assigned.
+    announced: bool,
 }
 impl Runtime {
     /// The caller explicitly opens or provisions the store before starting.
@@ -248,6 +249,8 @@ impl Runtime {
             reconnecting: false,
             stopped: false,
             next_diagnostics_ms: 30_000,
+            quiet: false,
+            announced: false,
         })
     }
     pub fn set_local_address_source(&mut self, source: femto_microlink::endpoints::LocalAddress) {
@@ -261,6 +264,11 @@ impl Runtime {
     }
     pub fn reconnecting(&self) -> bool {
         self.reconnecting
+    }
+    /// Whether the last poll found an established session with nothing to
+    /// do, so that the next one can wait.
+    pub fn quiet(&self) -> bool {
+        self.quiet && !self.reconnecting
     }
     fn drain_auxiliary(&mut self) -> bool {
         self.relays.close();
@@ -314,6 +322,7 @@ impl Runtime {
             self.registration = registration;
             self.publication = publication;
             self.assigned = None;
+            self.announced = false;
         }
         match progress {
             Ok(ReconnectProgress::Active) => self.reconnecting = false,
@@ -372,12 +381,14 @@ impl Runtime {
                         femto_microlink::control_worker::Error::Network(error.into())
                     })?;
             }
-            socket_network::poll_with_relays(
+            let stats = socket_network::poll_with_relays(
                 &mut self.owner,
                 &self.udp,
                 &mut self.relays,
                 clock(),
             )?;
+            self.quiet = self.assigned.is_some()
+                && stats.received + stats.sent + stats.relay_events + stats.stun_sent == 0;
             if self.publisher.is_none() {
                 self.publisher = self.publication.try_recv().ok();
             }
@@ -391,14 +402,18 @@ impl Runtime {
                 }
                 if let Some(publisher) = &mut self.publisher {
                     if assigned.is_some() {
-                        let since = *self.assigned.get_or_insert(now);
+                        self.assigned.get_or_insert(now);
                         let observed = network.observed_endpoints(now)?;
                         let local = self.local_address.endpoint(self.udp.local_addr()?.port());
                         let home = self.relays.home_region(network, now);
                         let snapshot = Snapshot::new(local, &observed)?.with_home_relay(home)?;
                         // Each publication costs a control connection, and
-                        // peers answer through the home relay: wait for it.
-                        let progress = if home.is_none() && now < since + HOME_WAIT_MS {
+                        // peers answer through the home relay, so the first
+                        // one waits for it unless none is coming.
+                        let progress = if home.is_none()
+                            && !self.announced
+                            && self.relays.home_expected(network, now)?
+                        {
                             PublicationProgress::Idle
                         } else {
                             publisher.poll(snapshot, now)?
@@ -415,8 +430,9 @@ impl Runtime {
                             PublicationProgress::Failed => {
                                 log::warn!("Endpoint publication failed; retry pending")
                             }
-                            #[cfg(target_os = "espidf")]
                             PublicationProgress::Published => {
+                                self.announced = true;
+                                #[cfg(target_os = "espidf")]
                                 log::info!("Endpoint snapshot published")
                             }
                             _ => {}

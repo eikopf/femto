@@ -254,6 +254,17 @@ impl<T: Transport> Pool<T> {
             .iter()
             .find_map(|(region, connection)| connection.plan.is_home().then_some(*region))
     }
+    /// Whether a home connection may still appear: the directory offers a
+    /// home relay and no setup of one is cooling down after a failure.
+    pub fn home_expected<S: crate::timestamp::EpochStore>(
+        &mut self,
+        network: &mut crate::network::Network<S>,
+        now_ms: u64,
+    ) -> Result<bool, crate::network::Error> {
+        self.failures.retain(|(_, until)| *until > now_ms);
+        Ok(!self.failures.iter().any(|(plan, _)| plan.is_home())
+            && network.offers_home_relay(now_ms)?)
+    }
     /// Home setup has priority over peer destinations, including an existing
     /// ordinary connection to the same region that needs replacement.
     pub fn next_plan<S: crate::timestamp::EpochStore>(
@@ -412,8 +423,8 @@ impl<T: Transport> Pool<T> {
         self.prefer_peer = false;
         Ok(())
     }
-    /// One bounded connection poll per region, at most four. Decrypted peer
-    /// payloads remain in Network's opaque, policy-checked receive queue.
+    /// As many events from each region as a poll takes datagrams from the
+    /// UDP socket, for at most four regions. Decrypted peer payloads remain in Network's opaque, policy-checked receive queue.
     pub fn poll<S: crate::timestamp::EpochStore>(
         &mut self,
         network: &mut crate::network::Network<S>,
@@ -426,46 +437,56 @@ impl<T: Transport> Pool<T> {
         };
         let regions: Vec<_> = self.connections.keys().copied().collect();
         for region in regions {
-            let result = self
-                .connections
-                .get_mut(&region)
-                .expect("existing relay region")
-                .poll(network, now_ms);
-            match result {
-                Ok(Some(event)) => {
-                    stats.events += 1;
-                    let remove = match event {
-                        Event::Packet { source, payload } => {
-                            if network
-                                .receive(crate::network::Source::Relay(source), &payload, now_ms)
-                                .is_err()
-                            {
-                                stats.rejected_packets += 1;
-                            } else if payload.get(..4) == Some(&2u32.to_le_bytes()) {
-                                stats.handshake_responses += 1;
+            for _ in 0..crate::socket_network::RECEIVE_BUDGET {
+                let Some(connection) = self.connections.get_mut(&region) else {
+                    break;
+                };
+                match connection.poll(network, now_ms) {
+                    Ok(Some(event)) => {
+                        stats.events += 1;
+                        let remove = match event {
+                            Event::Packet { source, payload } => {
+                                if network
+                                    .receive(
+                                        crate::network::Source::Relay(source),
+                                        &payload,
+                                        now_ms,
+                                    )
+                                    .is_err()
+                                {
+                                    stats.rejected_packets += 1;
+                                } else if payload.get(..4) == Some(&2u32.to_le_bytes()) {
+                                    stats.handshake_responses += 1;
+                                }
+                                false
                             }
-                            false
-                        }
-                        Event::Health(message) => !message.is_empty(),
-                        Event::Restarting {
-                            reconnect_in_ms,
-                            try_for_ms,
-                        } => {
-                            self.restarting(region, network, now_ms, reconnect_in_ms, try_for_ms);
+                            Event::Health(message) => !message.is_empty(),
+                            Event::Restarting {
+                                reconnect_in_ms,
+                                try_for_ms,
+                            } => {
+                                self.restarting(
+                                    region,
+                                    network,
+                                    now_ms,
+                                    reconnect_in_ms,
+                                    try_for_ms,
+                                );
+                                stats.removed += 1;
+                                false
+                            }
+                            _ => false,
+                        };
+                        if remove {
+                            self.remove_failed(region, network, now_ms);
                             stats.removed += 1;
-                            false
                         }
-                        _ => false,
-                    };
-                    if remove {
+                    }
+                    Ok(None) => break,
+                    Err(_) => {
                         self.remove_failed(region, network, now_ms);
                         stats.removed += 1;
                     }
-                }
-                Ok(None) => (),
-                Err(_) => {
-                    self.remove_failed(region, network, now_ms);
-                    stats.removed += 1;
                 }
             }
         }
@@ -564,8 +585,8 @@ impl<T: Transport> Connection<T> {
         let bytes = derp_frames::send_packet(peer, packet)?;
         self.enqueue(bytes, now_ms)
     }
-    /// One plaintext enqueue, one socket write, and one bounded receive step.
-    /// At most one event is returned. Pings queue their pong automatically.
+    /// One plaintext enqueue, one socket write, and the receipt of at most
+    /// one frame, which is returned as an event once it is complete. Pings queue their pong automatically.
     pub fn poll(&mut self, now_ms: u64) -> Result<Option<Event>, Error> {
         self.check(now_ms)?;
         let result = self.step(now_ms);
@@ -588,24 +609,31 @@ impl<T: Transport> Connection<T> {
         {
             self.output.pop_front();
         }
+        // A full packet frame takes three reads: its header and a body of up
+        // to 32 + MAX_DATAGRAM bytes in two parts.
         let mut buffer = [0; 1024];
-        let wanted = self.decoder.wanted().min(buffer.len());
-        let Some(count) = self.tls.receive(&mut buffer[..wanted])? else {
-            return Ok(None);
-        };
-        if count == 0 {
-            self.decoder.eof()?;
-            return Err(Error::Closed);
+        for _ in 0..3 {
+            let wanted = self.decoder.wanted().min(buffer.len());
+            let Some(count) = self.tls.receive(&mut buffer[..wanted])? else {
+                return Ok(None);
+            };
+            if count == 0 {
+                self.decoder.eof()?;
+                return Err(Error::Closed);
+            }
+            self.last_input_ms = now_ms;
+            let (used, event) = self.decoder.feed(&buffer[..count], now_ms)?;
+            if used != count {
+                return Err(derp_frames::Error::Frame.into());
+            }
+            if let Some(Event::Ping(value)) = &event {
+                self.enqueue(derp_frames::pong(*value), now_ms)?;
+            }
+            if event.is_some() {
+                return Ok(event);
+            }
         }
-        self.last_input_ms = now_ms;
-        let (used, event) = self.decoder.feed(&buffer[..count], now_ms)?;
-        if used != count {
-            return Err(derp_frames::Error::Frame.into());
-        }
-        if let Some(Event::Ping(value)) = &event {
-            self.enqueue(derp_frames::pong(*value), now_ms)?;
-        }
-        Ok(event)
+        Ok(None)
     }
     pub fn close(&mut self) {
         self.closed = true;

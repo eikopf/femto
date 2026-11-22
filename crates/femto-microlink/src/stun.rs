@@ -5,10 +5,6 @@ use std::{collections::BTreeMap, net::SocketAddrV4};
 const LIMIT: usize = 32;
 /// Hints published to the coordinator.
 const ENDPOINTS: usize = 8;
-/// Between requests of a round.
-const SPACING_MS: u64 = 50;
-/// How long after its last request the first round's nearby answers are in.
-const GRACE_MS: u64 = 300;
 const TIMEOUT_MS: u64 = 5000;
 
 #[derive(Debug, thiserror::Error)]
@@ -44,8 +40,8 @@ pub struct EndpointDiscovery {
     observations: BTreeMap<SocketAddrV4, (SocketAddrV4, u64, u64)>,
     cursor: usize,
     next_ms: u64,
-    /// When the first round sent its last request.
-    round_ms: Option<u64>,
+    /// The first round has sent all its requests.
+    asked: bool,
 }
 impl EndpointDiscovery {
     pub fn clear(&mut self) {
@@ -54,7 +50,7 @@ impl EndpointDiscovery {
         self.observations.clear();
         self.cursor = 0;
         self.next_ms = 0;
-        self.round_ms = None;
+        self.asked = false;
     }
     pub fn configure(&mut self, servers: &[SocketAddrV4]) -> Result<(), Error> {
         if servers.len() > LIMIT {
@@ -86,7 +82,7 @@ impl EndpointDiscovery {
             .retain(|_, (_, deadline, _)| *deadline > now_ms);
         Ok(())
     }
-    /// Requests in quick succession within a round, then a 30-second pause.
+    /// One request for each call within a round, then a 30-second pause.
     /// Failed socket sends consume the attempt and retry in a later round.
     pub fn request(&mut self, now_ms: u64) -> Result<Option<(SocketAddrV4, [u8; 40])>, Error> {
         self.maintain(now_ms)?;
@@ -95,15 +91,13 @@ impl EndpointDiscovery {
         }
         let next = (self.cursor + 1) % self.servers.len();
         let deadline = now_ms
-            .checked_add(if next == 0 { 30000 } else { SPACING_MS })
+            .checked_add(if next == 0 { 30000 } else { 0 })
             .ok_or(Error::Clock)?;
         let server = self.servers[self.cursor];
         let packet = self.transactions.begin(server, now_ms)?;
         self.cursor = next;
         self.next_ms = deadline;
-        if next == 0 {
-            self.round_ms.get_or_insert(now_ms);
-        }
+        self.asked |= next == 0;
         Ok(Some((server, packet)))
     }
     pub fn receive(
@@ -133,13 +127,23 @@ impl EndpointDiscovery {
         endpoints.truncate(ENDPOINTS);
         Ok(endpoints)
     }
-    /// Whether the servers nearby have had time to answer a first round, so
-    /// that [`Self::latencies`] can rank them. True without servers.
+    /// Whether [`Self::latencies`] already holds the fastest server: every
+    /// server has been asked, and each one still silent has been silent for
+    /// longer than the fastest answer took, so it cannot beat it. Without any
+    /// answer, the round settles when its last request expires. True without
+    /// servers.
     pub fn settled(&self, now_ms: u64) -> bool {
-        self.servers.is_empty()
-            || self
-                .round_ms
-                .is_some_and(|sent| now_ms >= sent.saturating_add(GRACE_MS))
+        if self.servers.is_empty() {
+            return true;
+        }
+        let waiting = self.transactions.pending.values();
+        match self.latencies().map(|(_, round_trip)| round_trip).min() {
+            _ if !self.asked => false,
+            Some(fastest) => waiting
+                .into_iter()
+                .all(|request| now_ms.saturating_sub(request.started) > fastest),
+            None => waiting.len() == 0,
+        }
     }
     /// Servers that answered, with their latest round-trip time.
     pub fn latencies(&self) -> impl Iterator<Item = (SocketAddrV4, u64)> + '_ {
@@ -303,25 +307,30 @@ mod tests {
         discovery.configure(&[server(), other]).unwrap();
         let (first, request) = discovery.request(0).unwrap().unwrap();
         assert_eq!(first, server());
-        assert!(discovery.request(49).unwrap().is_none());
-        assert!(!discovery.settled(49));
+        // Reordering an unchanged server set preserves the outstanding round.
+        discovery.configure(&[other, server()]).unwrap();
+        // One server answering does not settle a round with a request unsent.
+        assert!(!discovery.settled(0));
+        let (second, second_request) = discovery.request(10).unwrap().unwrap();
+        assert_eq!(second, other);
+        assert!(discovery.request(11).unwrap().is_none());
+        // Nothing has answered, and the requests have not expired.
+        assert!(!discovery.settled(20));
         discovery
             .receive(server(), &response(&request), 49)
             .unwrap();
         assert_eq!(discovery.endpoints(49).unwrap().len(), 1);
-        // Reordering an unchanged server set preserves the outstanding round.
-        discovery.configure(&[other, server()]).unwrap();
-        let (second, request) = discovery.request(50).unwrap().unwrap();
-        assert_eq!(second, other);
-        discovery.receive(other, &response(&request), 57).unwrap();
-        assert_eq!(discovery.endpoints(57).unwrap().len(), 1);
-        // The round is ranked once its nearby servers have had time to answer.
-        assert!(!discovery.settled(349));
-        assert!(discovery.settled(350));
+        // The other server, asked at 10, could still answer faster than 49 ms.
+        assert!(!discovery.settled(59));
+        assert!(discovery.settled(60));
+        discovery
+            .receive(other, &response(&second_request), 67)
+            .unwrap();
+        assert_eq!(discovery.endpoints(67).unwrap().len(), 1);
         let mut latencies: Vec<_> = discovery.latencies().collect();
         latencies.sort_unstable();
-        assert_eq!(latencies, [(server(), 49), (other, 7)]);
-        assert!(discovery.request(30049).unwrap().is_none());
+        assert_eq!(latencies, [(server(), 49), (other, 57)]);
+        assert!(discovery.request(30009).unwrap().is_none());
         let (_, request) = discovery.request(31000).unwrap().unwrap();
         discovery.configure(&[other]).unwrap();
         assert!(discovery.endpoints(31000).unwrap().is_empty());

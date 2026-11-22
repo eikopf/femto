@@ -150,6 +150,7 @@ fn connect_inner(
                 .map_or(std::ptr::null(), |name| name.as_ptr()),
             ..Default::default()
         };
+        let secured = Instant::now();
         budget.retry(|| {
             crate::clock::require_ready()?;
             // The hostname is length-delimited. Configuration stays alive for
@@ -169,6 +170,10 @@ fn connect_inner(
                 code => Err(tls_error(sys::EspError::from(code).unwrap())),
             }
         })?;
+        log::info!(
+            "Connection to {host}: TLS {} ms",
+            secured.elapsed().as_millis()
+        );
         crate::clock::require_ready()?;
         Ok(Connection {
             inner: Bounded::new(Box::new(Tls(tls)), budget),
@@ -182,15 +187,22 @@ fn connect_inner(
 
 fn connect_tcp(host: &str, port: u16, deadline: Instant, budget: &Budget) -> io::Result<TcpStream> {
     // Platform DNS is synchronous. Recheck the budget after it returns.
+    let looked_up = Instant::now();
     let addresses = (host.trim_start_matches('[').trim_end_matches(']'), port).to_socket_addrs()?;
+    let lookup = looked_up.elapsed().as_millis();
     let mut last = io::Error::new(io::ErrorKind::NotFound, "no request address");
     for address in addresses.take(8) {
         budget.check()?;
         let timeout = deadline
             .saturating_duration_since(Instant::now())
             .min(Duration::from_secs(5));
+        let dialled = Instant::now();
         match TcpStream::connect_timeout(&address, timeout) {
             Ok(stream) => {
+                log::info!(
+                    "Connection to {host}: lookup {lookup} ms, TCP {} ms",
+                    dialled.elapsed().as_millis()
+                );
                 budget.check()?;
                 stream.set_nonblocking(true)?;
                 return Ok(stream);

@@ -18,8 +18,6 @@ use std::{
 #[path = "network_tcp.rs"]
 mod tcp_owner;
 type Key = PublicKey<Node>;
-/// How long after the application last sent to a peer its direct path is probed.
-const WANTED_MS: u64 = 60_000;
 const OUTGOING: usize = 16;
 const INCOMING: usize = 8;
 
@@ -164,12 +162,16 @@ pub struct Network<S: EpochStore> {
     tcp_next: u64,
     tcp_port: u32,
     last_ms: u64,
+    /// The time of the last completed maintenance pass over unchanged
+    /// authorization; see [`Self::tick`].
+    maintained: Option<u64>,
     probe_cursor: Option<u64>,
     next_probe_scan_ms: u64,
     endpoints: crate::stun::EndpointDiscovery,
-    /// Peers the application has sent to lately, and until when a direct
-    /// path to them is worth looking for.
-    wanted: BTreeMap<Key, u64>,
+    /// Peers the application has sent to since the session began. Only
+    /// these are probed for a direct path: a probe costs a key exchange, a
+    /// reader talks to one or two peers, and a tailnet can hold hundreds.
+    wanted: std::collections::BTreeSet<Key>,
     /// The relay region each STUN server measures.
     stun_regions: Vec<(u64, std::net::SocketAddrV4)>,
     handshake_retry: BTreeMap<Key, u64>,
@@ -226,11 +228,12 @@ impl<S: EpochStore> Network<S> {
             tcp_next: 0,
             tcp_port: 49152,
             last_ms: 0,
+            maintained: None,
             probe_cursor: None,
             next_probe_scan_ms: 0,
             endpoints: Default::default(),
             stun_regions: Vec::new(),
-            wanted: BTreeMap::new(),
+            wanted: Default::default(),
             handshake_retry: BTreeMap::new(),
             retry_series: BTreeMap::new(),
             keepalives: BTreeMap::new(),
@@ -258,6 +261,7 @@ impl<S: EpochStore> Network<S> {
         self.handshakes.completed()
     }
     pub fn disconnect(&mut self) {
+        self.maintained = None;
         self.tcp_connections.clear();
         self.handshake_retry.clear();
         self.retry_series.clear();
@@ -283,6 +287,14 @@ impl<S: EpochStore> Network<S> {
             return Err(Error::Clock);
         }
         self.last_ms = now_ms;
+        // Every operation begins with this pass, dozens of times in one
+        // poll. A repeat within the millisecond over the same authorization
+        // finds nothing expired; work it would take up after a queue drains
+        // waits for the next millisecond.
+        if self.maintained == Some(now_ms) {
+            return Ok(());
+        }
+        self.maintained = None;
         if self.coordinator.local_address(now_ms)?.is_none() {
             self.tcp_connections.clear();
             self.udp_bindings.clear();
@@ -295,7 +307,6 @@ impl<S: EpochStore> Network<S> {
             .maintain(self.coordinator.data_plane(), now_ms)?;
         self.discovery.maintain(&mut self.coordinator, now_ms)?;
         self.endpoints.maintain(now_ms)?;
-        self.wanted.retain(|_, until| *until > now_ms);
         self.handshake_retry.retain(|peer, deadline| {
             *deadline > now_ms
                 && self
@@ -334,6 +345,7 @@ impl<S: EpochStore> Network<S> {
         self.poll_keepalives(now_ms)?;
         self.poll_silence(now_ms);
         self.poll_handshake_retries(now_ms);
+        self.maintained = Some(now_ms);
         Ok(())
     }
     fn poll_handshake_retries(&mut self, now_ms: u64) {
@@ -507,6 +519,7 @@ impl<S: EpochStore> Network<S> {
     pub fn apply_map(&mut self, body: &[u8], clock: Clock) -> Result<(), Error> {
         self.tick(clock.monotonic_ms)?;
         let authorization = self.coordinator.data_plane().authorization_identity();
+        self.maintained = None;
         match self.coordinator.apply_event(body, clock) {
             Ok(false) => return self.tick(clock.monotonic_ms),
             Ok(true) => {}
@@ -598,6 +611,14 @@ impl<S: EpochStore> Network<S> {
     /// first measurements are in.
     pub fn home_relay_plan(&mut self, now_ms: u64) -> Result<Option<RelayPlan>, Error> {
         self.home_relay_matching(now_ms, |_| true)
+    }
+    /// Whether the directory holds a relay that can be a home, measured or not.
+    pub(crate) fn offers_home_relay(&mut self, now_ms: u64) -> Result<bool, Error> {
+        self.tick(now_ms)?;
+        Ok(self
+            .coordinator
+            .home_relay_matching(now_ms, &[], |_, _| true)?
+            .is_some())
     }
     pub(crate) fn home_relay_matching(
         &mut self,
@@ -812,7 +833,7 @@ impl<S: EpochStore> Network<S> {
         self.coordinator
             .data_plane()
             .begin_handshake(peer, now_ms)?;
-        self.want(peer, now_ms);
+        self.want(peer);
         let active = self
             .coordinator
             .data_plane()
@@ -874,9 +895,10 @@ impl<S: EpochStore> Network<S> {
         Ok(true)
     }
     /// Notes that the application is sending to this peer.
-    fn want(&mut self, peer: Key, now_ms: u64) {
-        if self.wanted.len() < 256 || self.wanted.contains_key(&peer) {
-            self.wanted.insert(peer, now_ms.saturating_add(WANTED_MS));
+    fn want(&mut self, peer: Key) {
+        // As many as the handshake retry table holds.
+        if self.wanted.len() < 256 {
+            self.wanted.insert(peer);
         }
     }
     pub fn send_ip(&mut self, peer: Key, packet: &[u8], now_ms: u64) -> Result<(), Error> {
@@ -884,7 +906,7 @@ impl<S: EpochStore> Network<S> {
         if self.outgoing.len() >= OUTGOING {
             return Err(Error::Capacity);
         }
-        self.want(peer, now_ms);
+        self.want(peer);
         let packet = self.coordinator.data_plane().send(peer, packet, now_ms)?;
         self.queue(peer, Destination::Selected, packet, now_ms)
     }
@@ -1031,8 +1053,7 @@ impl<S: EpochStore> Network<S> {
         Ok(true)
     }
     /// Visits at most one authorized discovery peer per call, cycling through
-    /// the node IDs of peers the application has sent to lately; a sealed
-    /// probe costs a key exchange, and most peers are never spoken to. Successful probes are at least 50 ms apart; unsuccessful scans
+    /// the node IDs of peers the application has sent to. Successful probes are at least 50 ms apart; unsuccessful scans
     /// wait five milliseconds. Endpoint rotation and refresh use Discovery.
     pub fn schedule_probe(&mut self, now_ms: u64) -> Result<bool, Error> {
         self.tick(now_ms)?;
@@ -1043,7 +1064,7 @@ impl<S: EpochStore> Network<S> {
         let Some((id, peer)) =
             self.coordinator
                 .discovery_peer_after(self.probe_cursor, now_ms, |peer| {
-                    self.wanted.contains_key(peer)
+                    self.wanted.contains(peer)
                 })?
         else {
             self.probe_cursor = None;
@@ -2061,6 +2082,9 @@ mod tests {
         assert_eq!(na.outgoing.len(), OUTGOING);
         assert!(!na.keepalives[&bk].queued);
         na.outgoing.clear();
+        // The queue was emptied behind the owner's back; in use, the pass
+        // deferred by a full queue runs in the next millisecond.
+        na.maintained = None;
         na.tick(40014).unwrap();
         assert_eq!(na.outgoing.len(), 1);
         let previous = na.outgoing.front().unwrap().bytes.clone();
@@ -2133,6 +2157,9 @@ mod tests {
         assert!(na.silence.contains_key(&bk));
         assert_eq!(na.handshakes.pending_count(), 0);
         na.outgoing.clear();
+        // The queue was emptied behind the owner's back; in use, the pass
+        // deferred by a full queue runs in the next millisecond.
+        na.maintained = None;
         na.tick(deadline).unwrap();
         assert!(na.silence.is_empty());
         assert_eq!(na.handshakes.pending_count(), 1);
@@ -2669,10 +2696,13 @@ mod tests {
                 .receive(Source::Udp(server), &answer(request), now)
                 .unwrap();
         };
-        // Region 4 answers after 70 ms, region 1 after 190 ms, region 9 never.
+        // Region 4 answers after 70 ms. Region 9, asked at 101, could still
+        // answer faster until it has been silent for as long.
         reply(&mut owner, "192.0.2.4:3478", 121);
+        assert!(owner.home_relay_plan(171).unwrap().is_none());
+        assert_eq!(owner.home_relay_plan(172).unwrap().unwrap().region(), 4);
+        // Region 1 answers after 190 ms; region 9 never does.
         reply(&mut owner, "192.0.2.1:3478", 191);
-        assert!(owner.home_relay_plan(400).unwrap().is_none());
         assert_eq!(owner.home_relay_plan(401).unwrap().unwrap().region(), 4);
         // A nearest region that is refused yields the next nearest, then the rest.
         let mut refused = vec![4];
@@ -2715,15 +2745,10 @@ mod tests {
         owner
             .apply_map(&serde_json::to_vec(&map).unwrap(), clock(0))
             .unwrap();
-        // Peers the application has not sent to are not probed, and interest
-        // in a peer lapses a minute after the last send.
+        // Peers the application has not sent to are not probed.
         assert!(!owner.schedule_probe(0).unwrap());
-        owner.want(keys[0], 0);
-        assert!(owner.wanted.contains_key(&keys[0]));
-        owner.tick(0).unwrap();
-        assert_eq!(owner.wanted.get(&keys[0]), Some(&WANTED_MS));
         for key in &keys {
-            owner.wanted.insert(*key, u64::MAX);
+            owner.want(*key);
         }
         let mut sent = Vec::new();
         for (index, now) in [10, 60, 110].into_iter().enumerate() {
@@ -2770,7 +2795,7 @@ mod tests {
         owner.disconnect();
         assert!(!owner.schedule_probe(5200).unwrap());
         for key in &keys {
-            owner.wanted.insert(*key, u64::MAX);
+            owner.want(*key);
         }
         let mut ambiguous = map;
         ambiguous["Peers"][1]["DiscoKey"] = ambiguous["Peers"][0]["DiscoKey"].clone();

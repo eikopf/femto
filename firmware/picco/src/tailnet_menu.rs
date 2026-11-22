@@ -11,6 +11,13 @@ use std::{
 };
 use zeroize::Zeroizing;
 
+/// How long the main loop leaves an idle session alone. A request pumps the
+/// session from its own thread, so this only delays answers to peers
+/// (discovery pings, handshakes, relay keepalives), whose senders wait five
+/// seconds or more, and the session's own timers, the finest of which is the
+/// 50 ms between discovery probes. A poll costs about 5 ms of processor time.
+const IDLE_POLL: Duration = Duration::from_millis(100);
+
 pub type Driver = femto_microlink::application_tcp::ThreadShared<crate::tailnet::Runtime>;
 
 pub struct Manager {
@@ -23,6 +30,8 @@ pub struct Manager {
     /// edited settings apply to the next connection.
     source: Box<dyn Fn() -> Result<Config, String>>,
     stopping: bool,
+    /// When the session is next polled from the main loop.
+    next_poll: Instant,
     rows: Vec<String>,
 }
 impl Default for Manager {
@@ -44,6 +53,7 @@ impl Manager {
             followup: None,
             source: Box::new(source),
             stopping: false,
+            next_poll: Instant::now(),
             rows: vec!["Disconnected".into()],
         }
     }
@@ -164,9 +174,14 @@ impl Manager {
                 self.stopping = true;
                 self.close_and_wait(Duration::ZERO);
             }
-        } else if let Some(runtime) = self.runtime.clone() {
+        } else if let Some(runtime) = self.runtime.clone()
+            && Instant::now() >= self.next_poll
+        {
             if let Err(error) = runtime.with(|runtime| {
                 self.update(runtime);
+                if runtime.quiet() {
+                    self.next_poll = Instant::now() + IDLE_POLL;
+                }
                 Ok(())
             }) && error.kind() != std::io::ErrorKind::WouldBlock
             {

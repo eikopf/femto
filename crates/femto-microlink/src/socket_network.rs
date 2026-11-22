@@ -9,7 +9,7 @@ use crate::{
 };
 use std::io;
 
-const RECEIVE_BUDGET: usize = 8;
+pub(crate) const RECEIVE_BUDGET: usize = 8;
 pub(crate) const SEND_BUDGET: usize = 8;
 
 #[derive(Default, Debug)]

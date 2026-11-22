@@ -50,7 +50,11 @@ pub struct Probe {
     pub endpoint: SocketAddr,
     pub packet: Vec<u8>,
 }
-/// Probes sent half a second apart before the pace drops to five seconds.
+/// Probes sent half a second apart to a peer without a direct path before
+/// the pace drops to one in five seconds. Twenty cover the ten seconds a
+/// peer can take to learn this node's endpoints from the coordinator; a path
+/// that has not formed by then is not about to. Five seconds is the lifetime
+/// of a pending probe, the pace a peer with one endpoint gets anyway.
 const BRISK_PROBES: u32 = 20;
 #[derive(Default)]
 struct ProbeCursor {

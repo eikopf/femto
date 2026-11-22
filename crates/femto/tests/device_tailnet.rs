@@ -250,6 +250,8 @@ fn transient_setup_reconnects_with_same_store_then_stops_on_permission_failure()
             break;
         }
         saw_reconnecting |= runtime.reconnecting();
+        // A session without an address is never left unpolled.
+        assert!(!runtime.quiet());
         assert!(start.elapsed() < Duration::from_secs(8));
         std::thread::sleep(Duration::from_millis(5));
     }

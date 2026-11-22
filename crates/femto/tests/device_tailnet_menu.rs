@@ -98,6 +98,9 @@ mod tailnet {
         pub fn reconnecting(&self) -> bool {
             false
         }
+        pub fn quiet(&self) -> bool {
+            false
+        }
         pub fn start(config: Config, store: identity::Store) -> Result<Self, String> {
             Self::start_with_followup(config, store, None)
         }

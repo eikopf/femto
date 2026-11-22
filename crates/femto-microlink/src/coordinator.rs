@@ -281,10 +281,12 @@ impl Coordinator {
     }
     /// Returns the next authorized discovery peer in node-ID order. The cursor
     /// is only a traversal hint; each result checks current authorization.
+    /// The next peer after this node ID that can be probed and is `wanted`.
     pub(crate) fn discovery_peer_after(
         &mut self,
         after: Option<u64>,
         now_ms: u64,
+        wanted: impl Fn(&Key) -> bool,
     ) -> Result<Option<(u64, Key)>, MapError> {
         use std::ops::Bound::{Excluded, Unbounded};
         if self.local_address(now_ms)?.is_none() {
@@ -295,6 +297,7 @@ impl Coordinator {
             .range((after.map_or(Unbounded, Excluded), Unbounded))
         {
             if node.route.discovery_key.is_some()
+                && wanted(&node.peer.key)
                 && self.plane.begin_handshake(node.peer.key, now_ms).is_ok()
             {
                 return Ok(Some((id, node.peer.key)));

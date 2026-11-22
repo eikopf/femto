@@ -18,6 +18,8 @@ use std::{
 #[path = "network_tcp.rs"]
 mod tcp_owner;
 type Key = PublicKey<Node>;
+/// How long after the application last sent to a peer its direct path is probed.
+const WANTED_MS: u64 = 60_000;
 const OUTGOING: usize = 16;
 const INCOMING: usize = 8;
 
@@ -165,6 +167,9 @@ pub struct Network<S: EpochStore> {
     probe_cursor: Option<u64>,
     next_probe_scan_ms: u64,
     endpoints: crate::stun::EndpointDiscovery,
+    /// Peers the application has sent to lately, and until when a direct
+    /// path to them is worth looking for.
+    wanted: BTreeMap<Key, u64>,
     /// The relay region each STUN server measures.
     stun_regions: Vec<(u64, std::net::SocketAddrV4)>,
     handshake_retry: BTreeMap<Key, u64>,
@@ -225,6 +230,7 @@ impl<S: EpochStore> Network<S> {
             next_probe_scan_ms: 0,
             endpoints: Default::default(),
             stun_regions: Vec::new(),
+            wanted: BTreeMap::new(),
             handshake_retry: BTreeMap::new(),
             retry_series: BTreeMap::new(),
             keepalives: BTreeMap::new(),
@@ -256,6 +262,7 @@ impl<S: EpochStore> Network<S> {
         self.handshake_retry.clear();
         self.retry_series.clear();
         self.keepalives.clear();
+        self.wanted.clear();
         self.silence.clear();
         self.udp_bindings.clear();
         self.endpoints.clear();
@@ -288,6 +295,7 @@ impl<S: EpochStore> Network<S> {
             .maintain(self.coordinator.data_plane(), now_ms)?;
         self.discovery.maintain(&mut self.coordinator, now_ms)?;
         self.endpoints.maintain(now_ms)?;
+        self.wanted.retain(|_, until| *until > now_ms);
         self.handshake_retry.retain(|peer, deadline| {
             *deadline > now_ms
                 && self
@@ -804,6 +812,7 @@ impl<S: EpochStore> Network<S> {
         self.coordinator
             .data_plane()
             .begin_handshake(peer, now_ms)?;
+        self.want(peer, now_ms);
         let active = self
             .coordinator
             .data_plane()
@@ -864,11 +873,18 @@ impl<S: EpochStore> Network<S> {
         self.handshake_retry.insert(peer, retry);
         Ok(true)
     }
+    /// Notes that the application is sending to this peer.
+    fn want(&mut self, peer: Key, now_ms: u64) {
+        if self.wanted.len() < 256 || self.wanted.contains_key(&peer) {
+            self.wanted.insert(peer, now_ms.saturating_add(WANTED_MS));
+        }
+    }
     pub fn send_ip(&mut self, peer: Key, packet: &[u8], now_ms: u64) -> Result<(), Error> {
         self.tick(now_ms)?;
         if self.outgoing.len() >= OUTGOING {
             return Err(Error::Capacity);
         }
+        self.want(peer, now_ms);
         let packet = self.coordinator.data_plane().send(peer, packet, now_ms)?;
         self.queue(peer, Destination::Selected, packet, now_ms)
     }
@@ -1015,7 +1031,8 @@ impl<S: EpochStore> Network<S> {
         Ok(true)
     }
     /// Visits at most one authorized discovery peer per call, cycling through
-    /// node IDs. Successful probes are at least 50 ms apart; unsuccessful scans
+    /// the node IDs of peers the application has sent to lately; a sealed
+    /// probe costs a key exchange, and most peers are never spoken to. Successful probes are at least 50 ms apart; unsuccessful scans
     /// wait five milliseconds. Endpoint rotation and refresh use Discovery.
     pub fn schedule_probe(&mut self, now_ms: u64) -> Result<bool, Error> {
         self.tick(now_ms)?;
@@ -1023,9 +1040,11 @@ impl<S: EpochStore> Network<S> {
             return Ok(false);
         }
         self.next_probe_scan_ms = now_ms.checked_add(5).ok_or(Error::Clock)?;
-        let Some((id, peer)) = self
-            .coordinator
-            .discovery_peer_after(self.probe_cursor, now_ms)?
+        let Some((id, peer)) =
+            self.coordinator
+                .discovery_peer_after(self.probe_cursor, now_ms, |peer| {
+                    self.wanted.contains_key(peer)
+                })?
         else {
             self.probe_cursor = None;
             return Ok(false);
@@ -2696,8 +2715,18 @@ mod tests {
         owner
             .apply_map(&serde_json::to_vec(&map).unwrap(), clock(0))
             .unwrap();
+        // Peers the application has not sent to are not probed, and interest
+        // in a peer lapses a minute after the last send.
+        assert!(!owner.schedule_probe(0).unwrap());
+        owner.want(keys[0], 0);
+        assert!(owner.wanted.contains_key(&keys[0]));
+        owner.tick(0).unwrap();
+        assert_eq!(owner.wanted.get(&keys[0]), Some(&WANTED_MS));
+        for key in &keys {
+            owner.wanted.insert(*key, u64::MAX);
+        }
         let mut sent = Vec::new();
-        for (index, now) in [0, 50, 100].into_iter().enumerate() {
+        for (index, now) in [10, 60, 110].into_iter().enumerate() {
             assert!(owner.schedule_probe(now).unwrap());
             assert!(!owner.schedule_probe(now + 1).unwrap());
             assert!(
@@ -2740,6 +2769,9 @@ mod tests {
         );
         owner.disconnect();
         assert!(!owner.schedule_probe(5200).unwrap());
+        for key in &keys {
+            owner.wanted.insert(*key, u64::MAX);
+        }
         let mut ambiguous = map;
         ambiguous["Peers"][1]["DiscoKey"] = ambiguous["Peers"][0]["DiscoKey"].clone();
         owner

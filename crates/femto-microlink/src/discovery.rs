@@ -50,10 +50,14 @@ pub struct Probe {
     pub endpoint: SocketAddr,
     pub packet: Vec<u8>,
 }
+/// Probes sent half a second apart before the pace drops to five seconds.
+const BRISK_PROBES: u32 = 20;
 #[derive(Default)]
 struct ProbeCursor {
     index: usize,
     next_ms: u64,
+    /// Probes sent since a path was last validated.
+    unanswered: u32,
 }
 pub struct Discovery {
     local_node: Key,
@@ -201,8 +205,18 @@ impl Discovery {
                 continue;
             }
             let global_next = now_ms.checked_add(50).ok_or(Error::Clock)?;
+            // A peer without a direct path is tried briskly at first, then
+            // only often enough to notice when one appears.
+            let unanswered = match validated {
+                Some(_) => 0,
+                None => self.probes.get(&peer).map_or(0, |p| p.unanswered) + 1,
+            };
             let peer_next = now_ms
-                .checked_add(if validated.is_some() { 10000 } else { 500 })
+                .checked_add(match (validated, unanswered) {
+                    (Some(_), _) => 10000,
+                    (None, ..=BRISK_PROBES) => 500,
+                    (None, _) => 5000,
+                })
                 .ok_or(Error::Clock)?;
             let packet = self.ping(coordinator, peer, endpoint, now_ms)?;
             self.probes.insert(
@@ -210,6 +224,7 @@ impl Discovery {
                 ProbeCursor {
                     index: (index + 1) % endpoints.len(),
                     next_ms: peer_next,
+                    unanswered,
                 },
             );
             self.next_probe_ms = global_next;
@@ -509,6 +524,28 @@ mod tests {
             da.endpoint(&mut ca, b.node_key().public(), 30002).unwrap(),
             None
         );
+    }
+    #[test]
+    fn unanswered_probes_slow_down_after_a_brisk_start() {
+        let a = DeviceIdentity::generate().unwrap();
+        let b = DeviceIdentity::generate().unwrap();
+        let peer = b.node_key().public();
+        let mut c = Coordinator::discovering(a.node_key().public(), 4, 2, 0).unwrap();
+        let map = json!({"Node":{"ID":1,"Key":a.node_key().public().to_string(),"Addresses":["100.64.0.1/32"],"MachineAuthorized":true},"Peers":[{"ID":2,"Key":peer.to_string(),"DiscoKey":b.disco_key().public().to_string(),"Addresses":["100.64.0.2/32"],"Endpoints":["192.0.2.2:1","192.0.2.2:2","192.0.2.2:3","192.0.2.2:4","192.0.2.2:5","192.0.2.2:6","192.0.2.2:7","192.0.2.2:8","192.0.2.2:9","192.0.2.2:10","192.0.2.2:11","192.0.2.2:12"],"MachineAuthorized":true}],"PacketFilter":[]});
+        c.apply(&serde_json::to_vec(&map).unwrap(), clock(0))
+            .unwrap();
+        let mut d = Discovery::new(a.node_key().public(), a.disco_key().clone()).unwrap();
+        let mut sent = Vec::new();
+        for now in (0..40_000).step_by(100) {
+            if d.next_probe(&mut c, peer, now).unwrap().is_some() {
+                sent.push(now);
+            }
+        }
+        let gaps: Vec<u64> = sent.windows(2).map(|pair| pair[1] - pair[0]).collect();
+        let brisk = BRISK_PROBES as usize;
+        assert!(gaps[..brisk].iter().all(|gap| *gap == 500));
+        assert!(gaps[brisk..].iter().all(|gap| *gap == 5000));
+        assert!(gaps.len() > brisk + 3);
     }
     #[test]
     fn map_updates_and_wrong_node_bindings_cannot_validate_paths() {

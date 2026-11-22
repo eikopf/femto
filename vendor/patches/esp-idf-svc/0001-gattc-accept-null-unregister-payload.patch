@@ -1,0 +1,43 @@
+femto patch for esp-idf-svc 0.53.0
+Subject: bt/ble/gatt/client: accept ESP_GATTC_UNREG_EVT without a payload
+
+ESP-IDF 5.5.2 (btc_gattc.c) delivers ESP_GATTC_UNREG_EVT with a null
+parameter pointer. EspGattc::event_handler unwraps the pointer for every
+event, so application unregistration panics inside the Bluetooth callback.
+
+Map the unregister event to GattcEvent::ClientUnregistered before looking at
+the payload. Any other event that arrives with a null payload is logged and
+dropped instead of unwrapped.
+
+femto needs this for acknowledged GATT client shutdown of the HID remote.
+Host regression in femto: tests/firmware/test_gatt_callback.py.
+
+--- a/src/bt/ble/gatt/client.rs
++++ b/src/bt/ble/gatt/client.rs
+@@ -2,7 +2,7 @@
+ use core::fmt::{self, Debug};
+ use core::marker::PhantomData;
+ 
+-use ::log::trace;
++use ::log::{trace, warn};
+ use enumset::EnumSet;
+ use num_enum::TryFromPrimitive;
+ 
+@@ -1904,8 +1904,15 @@
+         gattc_if: esp_gatt_if_t,
+         param: *mut esp_ble_gattc_cb_param_t,
+     ) {
+-        let param = unsafe { param.as_ref() }.unwrap();
+-        let event = GattcEvent::from((event, param));
++        // ESP-IDF emits UNREG_EVT with a null payload.
++        let event = if event == esp_gattc_cb_event_t_ESP_GATTC_UNREG_EVT {
++            GattcEvent::ClientUnregistered
++        } else if let Some(param) = unsafe { param.as_ref() } {
++            GattcEvent::from((event, param))
++        } else {
++            warn!("Ignoring GATT client event {event} with a null payload");
++            return;
++        };
+ 
+         trace!("Got event {{ {event:#?} }}");
+ 

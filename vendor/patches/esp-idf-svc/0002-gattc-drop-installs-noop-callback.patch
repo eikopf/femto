@@ -1,0 +1,40 @@
+femto patch for esp-idf-svc 0.53.0
+Subject: bt/ble/gatt/client: install a no-op callback when EspGattc is dropped
+
+In ESP-IDF 5.5.2 esp_ble_gattc_register_callback(NULL) returns ESP_FAIL.
+Drop for EspGattc passes None and unwraps the result, so dropping a GATT
+client always panics on that SDK.
+
+Register a static extern "C" callback that ignores its arguments instead.
+It holds no driver or application state, so events that arrive after the
+owner is gone are discarded. The order (unsubscribe, replace callback,
+release singleton) is otherwise unchanged.
+
+Depends on 0001 only for patch context (same file); the changes are
+independent. Host regression in femto: tests/firmware/test_gatt_drop.py.
+
+--- a/src/bt/ble/gatt/client.rs
++++ b/src/bt/ble/gatt/client.rs
+@@ -1928,12 +1928,21 @@
+     fn drop(&mut self) {
+         self.unsubscribe().unwrap();
+ 
+-        esp!(unsafe { esp_ble_gattc_register_callback(None) }).unwrap();
++        // ESP-IDF rejects a null GATT client callback. The replacement is static
++        // and retains no application state after unsubscribe.
++        esp!(unsafe { esp_ble_gattc_register_callback(Some(discard_event)) }).unwrap();
+ 
+         SINGLETON.release().unwrap();
+     }
+ }
+ 
++unsafe extern "C" fn discard_event(
++    _event: esp_gattc_cb_event_t,
++    _interface: esp_gatt_if_t,
++    _param: *mut esp_ble_gattc_cb_param_t,
++) {
++}
++
+ unsafe impl<'d, M, T> Send for EspGattc<'d, M, T>
+ where
+     T: Borrow<BtDriver<'d, M>> + Send,

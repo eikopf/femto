@@ -1,0 +1,92 @@
+femto patch for epub-stream 0.1.0
+Subject: zip: keep central-directory entries and inflate state off the stack
+
+StreamingZip stores up to 256 CdEntry values in a heapless::Vec inside the
+struct and builds its InflateState with Box::new(InflateState::new(..)),
+which constructs the state on the stack first.
+
+Store the entries in an alloc Vec with the same 256-entry limit (still
+ZipError::CentralDirFull beyond it) and create the inflater with
+InflateState::new_boxed. new_boxed needs miniz_oxide's "with-alloc" feature,
+so enable it.
+
+femto opens books on a catalog worker with a 64 KiB stack; the inline array
+and the temporary inflate state produced stack frames too large for it.
+
+The Cargo.toml hunk is against the normalised manifest in the published
+crate. femto's vendored manifest is a hand-written reduction of it; see
+vendor/patches/epub-stream/README.md.
+
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -111,6 +111,7 @@
+ 
+ [dependencies.miniz_oxide]
+ version = "0.9"
++features = ["with-alloc"]
+ optional = true
+ default-features = false
+ 
+--- a/src/zip.rs
++++ b/src/zip.rs
+@@ -1,14 +1,14 @@
+ //! Streaming ZIP reader for EPUB files
+ //!
+ //! Memory-efficient ZIP reader that streams files without loading entire archive.
+-//! Uses fixed-size central directory cache (max 256 entries, ~4KB).
++//! Uses a heap-allocated central directory cache bounded to 256 entries.
+ //! Supports DEFLATE decompression using miniz_oxide.
+ 
+ extern crate alloc;
+ 
+ use alloc::boxed::Box;
+ use alloc::string::{String, ToString};
+-use heapless::Vec as HeaplessVec;
++use alloc::vec::Vec;
+ use log;
+ use miniz_oxide::{DataFormat, MZFlush, MZStatus};
+ use std::io::{Read, Seek, SeekFrom, Write};
+@@ -138,8 +138,8 @@
+ pub struct StreamingZip<F: Read + Seek> {
+     /// File handle
+     file: F,
+-    /// Central directory entries (fixed size)
+-    entries: HeaplessVec<CdEntry, MAX_CD_ENTRIES>,
++    /// Central directory entries (bounded heap storage)
++    entries: Vec<CdEntry>,
+     /// Number of entries in central directory
+     num_entries: usize,
+     /// Optional configurable resource/safety limits.
+@@ -166,7 +166,8 @@
+             return Err(ZipError::CentralDirFull);
+         }
+ 
+-        let mut entries: HeaplessVec<CdEntry, MAX_CD_ENTRIES> = HeaplessVec::new();
++        let mut entries =
++            Vec::with_capacity(core::cmp::min(eocd.num_entries, MAX_CD_ENTRIES as u64) as usize);
+ 
+         // Parse central directory entries
+         file.seek(SeekFrom::Start(eocd.cd_offset))
+@@ -186,7 +187,10 @@
+                 break;
+             }
+             if let Some(entry) = Self::read_cd_entry(&mut file)? {
+-                entries.push(entry).map_err(|_| ZipError::CentralDirFull)?;
++                if entries.len() == MAX_CD_ENTRIES {
++                    return Err(ZipError::CentralDirFull);
++                }
++                entries.push(entry);
+             } else if strict {
+                 return Err(ZipError::InvalidFormat);
+             } else {
+@@ -214,9 +218,7 @@
+             entries,
+             num_entries: core::cmp::min(eocd.num_entries, usize::MAX as u64) as usize,
+             limits,
+-            inflate_state: Box::new(miniz_oxide::inflate::stream::InflateState::new(
+-                DataFormat::Raw,
+-            )),
++            inflate_state: miniz_oxide::inflate::stream::InflateState::new_boxed(DataFormat::Raw),
+         })
+     }
+ 

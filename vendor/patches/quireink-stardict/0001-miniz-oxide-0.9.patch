@@ -1,0 +1,34 @@
+femto patch for quireink-stardict 0.3.0
+Subject: depend on miniz_oxide 0.9.1
+
+Move the miniz_oxide dependency (and dev-dependency) from 0.8 to 0.9.1. No
+source change is needed.
+
+femto patches miniz_oxide 0.9.1 (heap-allocated inflate state) and wants a
+single inflater version in the firmware.
+
+The diff is against the normalised Cargo.toml in the published crate. The
+upstream workspace manifest (crates/quireink-stardict/Cargo.toml, kept in the
+archive as Cargo.toml.orig) needs the same edit; Cargo.toml.orig is not
+touched here, matching the vendored tree.
+
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -53,7 +53,7 @@
+ path = "tests/real.rs"
+ 
+ [dependencies.miniz_oxide]
+-version = "0.8"
++version = "0.9.1"
+ features = ["with-alloc"]
+ default-features = false
+ 
+@@ -61,7 +61,7 @@
+ version = "0.3.0"
+ 
+ [dev-dependencies.miniz_oxide]
+-version = "0.8"
++version = "0.9.1"
+ features = ["with-alloc"]
+ 
+ [dev-dependencies.quireink-fs]

@@ -1,0 +1,163 @@
+femto patch for quireink-stardict 0.3.0
+Subject: validate .ifo metadata instead of defaulting
+
+Info::parse accepted any first line starting with the magic string, skipped
+lines without '=', turned unparsable counts into 0, treated any
+idxoffsetbits other than "64" as 32, and decoded the file lossily.
+
+- Require the exact magic line, UTF-8 input and key=value lines.
+- Reject duplicate known fields.
+- Require version (2.4.2 or 3.0.0; 64-bit offsets only with 3.0.0),
+  bookname, wordcount and idxfilesize; parse numbers strictly.
+- Reject idxoffsetbits other than 32/64 and non-alphabetic
+  sametypesequence values.
+- Add Info::index_size and check it against the size of the .idx file.
+- Reject a non-empty .syn file when synwordcount is absent or zero.
+
+femto loads dictionaries copied by the user onto the device and wants
+malformed files rejected at open rather than misread.
+
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -78,6 +78,8 @@
+     /// The dictionary's name.
+     pub name: String,
+     pub word_count: u32,
++    /// Declared uncompressed index size in bytes.
++    pub index_size: u64,
+     pub syn_count: u32,
+     /// 32 or 64: the size of definition offsets in the `.idx` file.
+     pub offset_bits: u8,
+@@ -90,41 +92,88 @@
+     /// Parses an `.ifo` file.
+     pub fn parse(text: &str) -> Result<Info, Error> {
+         let mut lines = text.lines();
+-        if !lines.next().is_some_and(|first| {
+-            first
+-                .trim_start_matches('\u{feff}')
+-                .starts_with("StarDict's dict ifo file")
+-        }) {
++        if lines.next().map(|s| s.trim_start_matches('\u{feff}'))
++            != Some("StarDict's dict ifo file")
++        {
+             return Err(malformed("not a StarDict .ifo file"));
+         }
+         let mut info = Info {
+             name: String::new(),
+             word_count: 0,
++            index_size: 0,
+             syn_count: 0,
+             offset_bits: 32,
+             types: None,
+         };
+-        for line in lines {
+-            let Some((key, value)) = line.split_once('=') else {
+-                continue;
+-            };
++        let mut seen = 0u8;
++        let mut version = "";
++        for line in lines.filter(|line| !line.trim().is_empty()) {
++            let (key, value) = line
++                .split_once('=')
++                .ok_or_else(|| malformed("invalid metadata line"))?;
+             let value = value.trim();
+-            match key.trim() {
++            let key = key.trim();
++            let bit = match key {
++                "version" => 1,
++                "bookname" => 2,
++                "wordcount" => 4,
++                "idxfilesize" => 8,
++                "synwordcount" => 16,
++                "idxoffsetbits" => 32,
++                "sametypesequence" => 64,
++                _ => 0,
++            };
++            if seen & bit != 0 {
++                return Err(malformed("duplicate metadata field"));
++            }
++            seen |= bit;
++            match key {
++                "version" => version = value,
+                 "bookname" => info.name = value.to_string(),
+-                "wordcount" => info.word_count = value.parse().unwrap_or(0),
+-                "synwordcount" => info.syn_count = value.parse().unwrap_or(0),
+-                "idxoffsetbits" => info.offset_bits = if value == "64" { 64 } else { 32 },
+-                "sametypesequence" if !value.is_empty() => info.types = Some(value.to_string()),
++                "wordcount" => {
++                    info.word_count = u32::try_from(number(value)?)
++                        .map_err(|_| malformed("word count overflow"))?
++                }
++                "synwordcount" => {
++                    info.syn_count = u32::try_from(number(value)?)
++                        .map_err(|_| malformed("synonym count overflow"))?
++                }
++                "idxfilesize" => info.index_size = number(value)?,
++                "idxoffsetbits" => {
++                    info.offset_bits = match value {
++                        "32" => 32,
++                        "64" => 64,
++                        _ => return Err(malformed("unsupported index offset width")),
++                    }
++                }
++                "sametypesequence" => {
++                    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_alphabetic()) {
++                        return Err(malformed("invalid definition type sequence"));
++                    }
++                    info.types = Some(value.to_string());
++                }
+                 _ => {}
+             }
+         }
+-        if info.word_count == 0 {
+-            return Err(malformed("no words"));
++        if seen & 15 != 15 || info.name.is_empty() || info.word_count == 0 || info.index_size == 0 {
++            return Err(malformed("missing or empty required metadata"));
++        }
++        if !matches!(version, "2.4.2" | "3.0.0") || (info.offset_bits == 64 && version != "3.0.0") {
++            return Err(malformed("unsupported dictionary version"));
+         }
+         Ok(info)
+     }
+ }
+ 
++fn number(value: &str) -> Result<u64, Error> {
++    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
++        return Err(malformed("invalid metadata number"));
++    }
++    value
++        .parse()
++        .map_err(|_| malformed("metadata number overflow"))
++}
++
+ /// A definition found for a word.
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub struct Definition {
+@@ -156,7 +205,17 @@
+             .strip_suffix(".ifo")
+             .ok_or_else(|| malformed("not an .ifo path"))?;
+         let data = read_small(storage, ifo, 16 * 1024)?;
+-        let info = Info::parse(&String::from_utf8_lossy(&data))?;
++        let text = core::str::from_utf8(&data).map_err(|_| malformed("metadata is not UTF-8"))?;
++        let info = Info::parse(text)?;
++        if storage.size(&format!("{base}.idx"))? != info.index_size {
++            return Err(malformed("index size differs from metadata"));
++        }
++        if info.syn_count == 0
++            && storage.exists(&format!("{base}.syn"))
++            && storage.size(&format!("{base}.syn"))? != 0
++        {
++            return Err(malformed("synonym file without a positive count"));
++        }
+         let idx_tail = if info.offset_bits == 64 { 12 } else { 8 };
+         let idx = Index::new(
+             storage,
+@@ -277,7 +336,7 @@
+     #[test]
+     fn parses_ifo() {
+         let info = Info::parse(
+-            "StarDict's dict ifo file\nversion=2.4.2\nbookname=Test: Wörter\nwordcount=3\nsynwordcount=2\nsametypesequence=h\n",
++            "StarDict's dict ifo file\nversion=2.4.2\nbookname=Test: Wörter\nwordcount=3\nidxfilesize=30\nsynwordcount=2\nsametypesequence=h\n",
+         )
+         .unwrap();
+         assert_eq!(info.name, "Test: Wörter");

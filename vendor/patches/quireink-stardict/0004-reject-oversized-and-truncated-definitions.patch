@@ -1,0 +1,55 @@
+femto patch for quireink-stardict 0.3.0
+Subject: reject oversized or truncated definitions instead of clipping
+
+- lookup: a definition larger than MAX_DEFINITION is an error; upstream
+  silently truncated it.
+- plain .dict reads: a read that hits end of file early is an error
+  (upstream returned a partly zero-filled buffer), and the offset addition
+  is checked.
+- read_small: convert the file size with usize::try_from instead of `as`.
+
+femto prefers a visible lookup error to truncated or zero-padded text.
+
+--- a/src/dict.rs
++++ b/src/dict.rs
+@@ -58,9 +58,15 @@
+                 let mut data = vec![0u8; size];
+                 let mut done = 0;
+                 while done < size {
+-                    let n = storage.read_at(path, offset + done as u64, &mut data[done..])?;
++                    let n = storage.read_at(
++                        path,
++                        offset
++                            .checked_add(done as u64)
++                            .ok_or_else(|| malformed("definition offset overflow"))?,
++                        &mut data[done..],
++                    )?;
+                     if n == 0 {
+-                        break;
++                        return Err(malformed("definition ends early"));
+                     }
+                     done += n;
+                 }
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -272,7 +272,10 @@
+         }
+         let mut definitions = Vec::new();
+         for entry in found.into_iter().take(MAX_RESULTS) {
+-            let size = (entry.size as usize).min(MAX_DEFINITION);
++            let size = entry.size as usize;
++            if size > MAX_DEFINITION {
++                return Err(malformed("definition too large"));
++            }
+             let data = self.dict.read(storage, entry.offset, size)?;
+             definitions.push(Definition {
+                 text: text::decode(&data, self.info.types.as_deref()),
+@@ -303,7 +306,7 @@
+ 
+ /// Reads a whole small file.
+ pub(crate) fn read_small(storage: &dyn Storage, path: &str, max: usize) -> Result<Vec<u8>, Error> {
+-    let size = storage.size(path)? as usize;
++    let size = usize::try_from(storage.size(path)?).map_err(|_| malformed("file too large"))?;
+     if size > max {
+         return Err(malformed("file too large"));
+     }

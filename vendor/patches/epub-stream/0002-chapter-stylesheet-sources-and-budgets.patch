@@ -1,0 +1,456 @@
+femto patch for epub-stream 0.1.0
+Subject: collect linked and embedded chapter CSS in order, with shared limits
+
+Upstream collects only <link rel="stylesheet"> hrefs, ignores <style>
+elements, applies max_css_bytes per stylesheet and max_selectors per
+stylesheet, and silently stops on XML errors.
+
+- parse_chapter_style_sources replaces parse_stylesheet_links[_bytes]. It
+  returns linked and embedded sources in document order, decodes CDATA and
+  XML references in <style>, honours type (text/css) and media (all/screen),
+  caps sources at 256 and embedded bytes at the CSS limit, and reports XML
+  errors.
+- max_css_bytes and max_selectors become chapter-wide totals. Styler tracks
+  accumulated bytes and rules; linked stylesheets are read with the remaining
+  byte budget as a hard cap; css::parse_stylesheet_bounded stops before
+  retaining an excess rule.
+- A failed load clears the partially built cascade and the counters.
+- EpubBook::chapter_stylesheets_with_options and the scratch-buffer variant
+  use the same collector and budget.
+
+femto needs embedded <style> support for real books and bounded total CSS
+memory per chapter on the device.
+
+--- a/src/book.rs
++++ b/src/book.rs
+@@ -22,7 +22,7 @@
+ use crate::metadata::{extract_metadata, EpubMetadata};
+ use crate::navigation::{parse_nav_xhtml, parse_ncx, NavPoint, Navigation};
+ use crate::render_prep::{
+-    parse_font_faces_from_css, parse_stylesheet_links, ChapterStylesheets, EmbeddedFontFace,
++    parse_font_faces_from_css, parse_chapter_style_sources, ChapterStylesheets, EmbeddedFontFace,
+     FontLimits, RenderPrep, RenderPrepOptions, StyleLimits, StyledChapter, StyledEventOrRun,
+     StylesheetSource,
+ };
+@@ -1352,11 +1352,18 @@
+     ) -> Result<ChapterStylesheets, EpubError> {
+         let chapter = self.chapter(index)?;
+         let html = self.chapter_html(index)?;
+-        let links = parse_stylesheet_links(&chapter.href, &html);
++        let links = parse_chapter_style_sources(&chapter.href, html.as_bytes(), limits.max_css_bytes)?;
+         let mut sources = Vec::with_capacity(0);
+ 
+-        for href in links {
+-            let bytes = self.read_resource(&href)?;
++        let mut remaining = limits.max_css_bytes;
++        for source in links {
++            let href = source.href;
++            if let Some(css) = source.css {
++                remaining = remaining.checked_sub(css.len()).ok_or_else(|| EpubError::Parse("Chapter CSS exceeds max_css_bytes".into()))?;
++                sources.push(StylesheetSource { href, css }); continue;
++            }
++            let mut bytes = Vec::new();
++            self.read_resource_into_with_hard_cap(&href, &mut bytes, remaining)?;
+             if bytes.len() > limits.max_css_bytes {
+                 return Err(EpubError::Parse(format!(
+                     "Stylesheet exceeds max_css_bytes ({} > {}) at '{}'",
+@@ -1367,6 +1374,7 @@
+             }
+             let css = String::from_utf8(bytes)
+                 .map_err(|_| EpubError::Parse(format!("Stylesheet is not UTF-8: {}", href)))?;
++            remaining -= css.len();
+             sources.push(StylesheetSource { href, css });
+         }
+ 
+@@ -1399,13 +1407,18 @@
+     ) -> Result<ChapterStylesheets, EpubError> {
+         let chapter = self.chapter(index)?;
+         let html = self.chapter_html(index)?;
+-        let links = parse_stylesheet_links(&chapter.href, &html);
++        let links = parse_chapter_style_sources(&chapter.href, html.as_bytes(), limits.max_css_bytes)?;
+         let mut sources = Vec::with_capacity(links.len());
+ 
+-        for href in links {
++        let mut remaining = limits.max_css_bytes;
++        for source in links {
++            let href = source.href;
++            if let Some(css) = source.css {
++                remaining = remaining.checked_sub(css.len()).ok_or_else(|| EpubError::Parse("Chapter CSS exceeds max_css_bytes".into()))?;
++                sources.push(StylesheetSource { href, css }); continue;
++            }
+             scratch_buf.clear();
+-            self.read_resource_into(&href, scratch_buf)
+-                .map_err(|_| EpubError::Zip(ZipError::FileNotFound))?;
++            self.read_resource_into_with_hard_cap(&href, scratch_buf, remaining)?;
+ 
+             if scratch_buf.len() > limits.max_css_bytes {
+                 return Err(EpubError::LimitExceeded {
+@@ -1419,6 +1432,7 @@
+             let css = String::from_utf8(scratch_buf.clone())
+                 .map_err(|_| EpubError::ChapterNotUtf8 { href: href.clone() })?;
+ 
++            remaining -= css.len();
+             sources.push(StylesheetSource { href, css });
+         }
+ 
+--- a/src/css.rs
++++ b/src/css.rs
+@@ -223,6 +223,11 @@
+ /// Handles the v1 subset: tag selectors, class selectors, tag.class selectors,
+ /// and the supported property set.
+ pub fn parse_stylesheet(css: &str) -> Result<Stylesheet, EpubError> {
++    parse_stylesheet_bounded(css, usize::MAX)
++}
++
++/// Parse at most `max_rules` retained rules, rejecting before an excess push.
++pub(crate) fn parse_stylesheet_bounded(css: &str, max_rules: usize) -> Result<Stylesheet, EpubError> {
+     let mut stylesheet = Stylesheet::new();
+     let mut pos = 0;
+     let bytes = css.as_bytes();
+@@ -259,6 +264,9 @@
+         let style = parse_declarations(declarations)?;
+ 
+         if !style.is_empty() {
++            if stylesheet.rules.len() >= max_rules {
++                return Err(EpubError::LimitExceeded { kind: crate::error::LimitKind::EventCount, actual: stylesheet.rules.len().saturating_add(1), limit: max_rules, path: None });
++            }
+             stylesheet.rules.push(CssRule { selector, style });
+         }
+ 
+--- a/src/render_prep.rs
++++ b/src/render_prep.rs
+@@ -14,7 +14,7 @@
+ 
+ use crate::book::EpubBook;
+ use crate::css::{
+-    parse_inline_style, parse_stylesheet, CssStyle, FontSize, FontStyle, FontWeight, LineHeight,
++    parse_inline_style, parse_stylesheet_bounded, CssStyle, FontSize, FontStyle, FontWeight, LineHeight,
+     Stylesheet,
+ };
+ use crate::error::{EpubError, ErrorLimitContext, ErrorPhase, PhaseError, PhaseErrorContext};
+@@ -22,9 +22,9 @@
+ /// Limits for stylesheet parsing and application.
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub struct StyleLimits {
+-    /// Maximum number of stylesheet rules to process.
++    /// Maximum total retained rules across chapter stylesheets.
+     pub max_selectors: usize,
+-    /// Maximum bytes read for any individual stylesheet.
++    /// Maximum total CSS bytes across chapter stylesheets.
+     pub max_css_bytes: usize,
+     /// Maximum supported list nesting depth (reserved for downstream layout usage).
+     pub max_nesting: usize,
+@@ -120,7 +120,7 @@
+ pub struct MemoryBudget {
+     /// Max bytes allowed for a single heavy entry read (e.g. chapter XHTML).
+     pub max_entry_bytes: usize,
+-    /// Max bytes allowed for a stylesheet payload.
++    /// Max total CSS bytes across chapter stylesheets.
+     pub max_css_bytes: usize,
+     /// Max bytes allowed for a navigation document payload.
+     pub max_nav_bytes: usize,
+@@ -520,6 +520,8 @@
+     config: StyleConfig,
+     memory: MemoryBudget,
+     parsed: Vec<Stylesheet>,
++    css_bytes: usize,
++    rule_count: usize,
+ }
+ 
+ impl Styler {
+@@ -529,6 +531,8 @@
+             config,
+             memory: MemoryBudget::default(),
+             parsed: Vec::with_capacity(0),
++            css_bytes: 0,
++            rule_count: 0,
+         }
+     }
+ 
+@@ -552,55 +556,52 @@
+ 
+     fn clear_stylesheets(&mut self) {
+         self.parsed.clear();
++        self.css_bytes = 0;
++        self.rule_count = 0;
+     }
+ 
+     fn push_stylesheet_source(&mut self, href: &str, css: &str) -> Result<(), RenderPrepError> {
++        let result = self.push_stylesheet_source_inner(href, css);
++        if result.is_err() { self.clear_stylesheets(); }
++        result
++    }
++
++    fn push_stylesheet_source_inner(&mut self, href: &str, css: &str) -> Result<(), RenderPrepError> {
+         let css_limit = min(self.config.limits.max_css_bytes, self.memory.max_css_bytes);
+-        if css.len() > css_limit {
++        if self.parsed.len() >= 256 {
++            return Err(RenderPrepError::new("STYLE_SOURCE_LIMIT", "Chapter stylesheet source limit exceeded"));
++        }
++        let total_bytes = self.css_bytes.saturating_add(css.len());
++        if total_bytes > css_limit {
+             let err = RenderPrepError::new(
+                 "STYLE_CSS_TOO_LARGE",
+                 format!(
+                     "Stylesheet exceeds max_css_bytes ({} > {})",
+-                    css.len(),
++                    total_bytes,
+                     css_limit
+                 ),
+             )
+             .with_phase(ErrorPhase::Style)
+-            .with_limit("max_css_bytes", css.len(), css_limit)
++            .with_limit("max_css_bytes", total_bytes, css_limit)
+             .with_path(href.to_string())
+             .with_source(href.to_string());
+             return Err(err);
+         }
+-        let parsed = parse_stylesheet(css).map_err(|e| {
+-            RenderPrepError::new_with_phase(
+-                ErrorPhase::Style,
+-                "STYLE_PARSE_ERROR",
+-                format!("Failed to parse stylesheet: {}", e),
+-            )
+-            .with_path(href.to_string())
+-            .with_source(href.to_string())
++        let remaining = self.config.limits.max_selectors.saturating_sub(self.rule_count);
++        let parsed = parse_stylesheet_bounded(css, remaining).map_err(|e| {
++            if let EpubError::LimitExceeded { kind: crate::error::LimitKind::EventCount, actual, .. } = e {
++                RenderPrepError::new("STYLE_SELECTOR_LIMIT", "Chapter exceeds max_selectors")
++                    .with_phase(ErrorPhase::Style)
++                    .with_limit("max_selectors", self.rule_count.saturating_add(actual), self.config.limits.max_selectors)
++                    .with_selector(format!("selector_count={}", self.rule_count.saturating_add(actual)))
++                    .with_selector_index(self.config.limits.max_selectors)
++                    .with_path(href.to_string())
++            } else {
++                RenderPrepError::new_with_phase(ErrorPhase::Style, "STYLE_PARSE_ERROR", format!("Failed to parse stylesheet: {}", e)).with_path(href.to_string()).with_source(href.to_string())
++            }
+         })?;
+-        if parsed.len() > self.config.limits.max_selectors {
+-            let err = RenderPrepError::new(
+-                "STYLE_SELECTOR_LIMIT",
+-                format!(
+-                    "Stylesheet exceeds max_selectors ({} > {})",
+-                    parsed.len(),
+-                    self.config.limits.max_selectors
+-                ),
+-            )
+-            .with_phase(ErrorPhase::Style)
+-            .with_limit(
+-                "max_selectors",
+-                parsed.len(),
+-                self.config.limits.max_selectors,
+-            )
+-            .with_selector(format!("selector_count={}", parsed.len()))
+-            .with_selector_index(self.config.limits.max_selectors)
+-            .with_path(href.to_string())
+-            .with_source(href.to_string());
+-            return Err(err);
+-        }
++        self.css_bytes = total_bytes;
++        self.rule_count += parsed.len();
+         self.parsed.push(parsed);
+         Ok(())
+     }
+@@ -1370,16 +1371,21 @@
+         html: &[u8],
+         scratch_buf: &mut Vec<u8>,
+     ) -> Result<(), RenderPrepError> {
+-        let links = parse_stylesheet_links_bytes(chapter_href, html);
+         self.styler.clear_stylesheets();
+         let css_limit = min(
+             self.opts.style.limits.max_css_bytes,
+             self.opts.memory.max_css_bytes,
+         );
++        let sources = parse_chapter_style_sources(chapter_href, html, css_limit).map_err(|e| RenderPrepError::new_with_phase(ErrorPhase::Style, "STYLE_SOURCE_ERROR", e.to_string()).with_chapter_index(chapter_index))?;
+         scratch_buf.clear();
+-        for href in links {
++        for source in sources {
++            let href = source.href;
++            if let Some(css) = source.css {
++                self.styler.push_stylesheet_source(&href, &css).map_err(|e| e.with_chapter_index(chapter_index))?;
++                continue;
++            }
+             scratch_buf.clear();
+-            book.read_resource_into_with_hard_cap(&href, scratch_buf, css_limit)
++            book.read_resource_into_with_hard_cap(&href, scratch_buf, css_limit.saturating_sub(self.styler.css_bytes))
+                 .map_err(|e| {
+                     RenderPrepError::new_with_phase(
+                         ErrorPhase::Parse,
+@@ -2366,65 +2372,84 @@
+     parts.join("/")
+ }
+ 
+-pub(crate) fn parse_stylesheet_links(chapter_href: &str, html: &str) -> Vec<String> {
+-    parse_stylesheet_links_bytes(chapter_href, html.as_bytes())
++pub(crate) struct ChapterStyleSource {
++    pub href: String,
++    pub css: Option<String>,
+ }
+ 
+-pub(crate) fn parse_stylesheet_links_bytes(chapter_href: &str, html_bytes: &[u8]) -> Vec<String> {
+-    let mut out = Vec::with_capacity(0);
+-    let mut reader = Reader::from_reader(html_bytes);
+-    reader.config_mut().trim_text(true);
+-    let mut buf = Vec::with_capacity(0);
+-
++/// Retains source order and bounds total embedded CSS and source descriptors.
++pub(crate) fn parse_chapter_style_sources(chapter_href: &str, html: &[u8], css_limit: usize) -> Result<Vec<ChapterStyleSource>, EpubError> {
++    let mut reader = Reader::from_reader(html);
++    reader.config_mut().trim_text(false);
++    let mut out = Vec::new();
++    let mut active: Option<String> = None;
++    let mut in_style = false;
++    let mut embedded_bytes = 0usize;
+     loop {
+-        match reader.read_event_into(&mut buf) {
+-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+-                let tag = match reader.decoder().decode(e.name().as_ref()) {
+-                    Ok(v) => v.to_string(),
+-                    Err(_) => {
+-                        buf.clear();
+-                        continue;
+-                    }
+-                };
+-                let tag_local = tag.rsplit(':').next().unwrap_or(tag.as_str());
+-                if tag_local != "link" {
+-                    buf.clear();
+-                    continue;
+-                }
++        let event = reader.read_event().map_err(|e| EpubError::Parse(e.to_string()))?;
++        match event {
++            Event::Start(ref e) | Event::Empty(ref e) => {
++                let name = e.local_name();
++                if in_style { return Err(EpubError::Parse("Nested markup in CSS style element".into())); }
++                if name.as_ref() != b"style" && name.as_ref() != b"link" { continue; }
+                 let mut href = None;
+-                let mut rel = None;
+-                for attr in e.attributes().flatten() {
+-                    let key = match reader.decoder().decode(attr.key.as_ref()) {
+-                        Ok(v) => v,
+-                        Err(_) => continue,
+-                    };
+-                    let val = match reader.decoder().decode(&attr.value) {
+-                        Ok(v) => v.to_string(),
+-                        Err(_) => continue,
+-                    };
+-                    if key == "href" {
+-                        href = Some(val);
+-                    } else if key == "rel" {
+-                        rel = Some(val);
++                let mut rel = String::new();
++                let mut enabled = true;
++                for attr in e.attributes() {
++                    let attr = attr.map_err(|e| EpubError::Parse(e.to_string()))?;
++                    let value = attr.decode_and_unescape_value(reader.decoder()).map_err(|e| EpubError::Parse(e.to_string()))?;
++                    match attr.key.as_ref() {
++                        b"href" => href = Some(value.into_owned()),
++                        b"rel" => rel = value.into_owned(),
++                        b"type" => enabled &= value.trim().is_empty() || value.trim().eq_ignore_ascii_case("text/css"),
++                        b"media" => enabled &= value.trim().is_empty() || value.split(',').any(|m| matches!(m.trim(), "all" | "screen")),
++                        _ => {}
+                     }
+                 }
+-                if let (Some(href), Some(rel)) = (href, rel) {
+-                    if rel
+-                        .split_whitespace()
+-                        .any(|v| v.eq_ignore_ascii_case("stylesheet"))
+-                    {
+-                        out.push(resolve_relative(chapter_href, &href));
+-                    }
++                if name.as_ref() == b"style" {
++                    if matches!(event, Event::Start(_)) { in_style = true; if enabled { active = Some(String::new()); } }
++                } else if enabled && rel.split_whitespace().any(|v| v.eq_ignore_ascii_case("stylesheet")) {
++                    if let Some(href) = href { out.push(ChapterStyleSource { href: resolve_relative(chapter_href, &href), css: None }); }
+                 }
+             }
+-            Ok(Event::Eof) => break,
+-            Ok(_) => {}
+-            Err(_) => break,
++            Event::End(e) if e.local_name().as_ref() == b"style" => {
++                if let Some(css) = active.take() {
++                    out.push(ChapterStyleSource { href: format!("{}#embedded-style-{}", chapter_href, out.len()), css: Some(css) });
++                }
++                in_style = false;
++            }
++            Event::Text(e) if active.is_some() => {
++                let text = e.decode().map_err(|e| EpubError::Parse(e.to_string()))?;
++                append_embedded_css(active.as_mut().unwrap(), &text, &mut embedded_bytes, css_limit)?;
++            }
++            Event::CData(e) if active.is_some() => {
++                let text = e.decode().map_err(|e| EpubError::Parse(e.to_string()))?;
++                append_embedded_css(active.as_mut().unwrap(), &text, &mut embedded_bytes, css_limit)?;
++            }
++            Event::GeneralRef(e) if active.is_some() => {
++                let name = e.decode().map_err(|e| EpubError::Parse(e.to_string()))?;
++                let entity = format!("&{};", name);
++                let text = quick_xml::escape::unescape(&entity).map_err(|e| EpubError::Parse(e.to_string()))?;
++                append_embedded_css(active.as_mut().unwrap(), &text, &mut embedded_bytes, css_limit)?;
++            }
++            Event::Eof => { if in_style { return Err(EpubError::Parse("Unclosed CSS style element".into())); } break; }
++            _ => {}
+         }
+-        buf.clear();
++        if out.len() > 256 { return Err(EpubError::Parse("Chapter stylesheet source limit exceeded".into())); }
+     }
++    Ok(out)
++}
+ 
+-    out
++fn append_embedded_css(out: &mut String, text: &str, total: &mut usize, limit: usize) -> Result<(), EpubError> {
++    *total = total.checked_add(text.len()).ok_or_else(|| EpubError::Parse("Embedded CSS size overflow".into()))?;
++    if *total > limit { return Err(EpubError::Parse("Embedded CSS exceeds max_css_bytes".into())); }
++    out.push_str(text);
++    Ok(())
++}
++
++#[cfg(test)]
++fn parse_stylesheet_links(chapter_href: &str, html: &str) -> Vec<String> {
++    parse_chapter_style_sources(chapter_href, html.as_bytes(), 512 * 1024).unwrap().into_iter().filter(|s| s.css.is_none()).map(|s| s.href).collect()
+ }
+ 
+ fn font_src_rank(path: &str) -> u8 {
+@@ -2573,6 +2598,43 @@
+     use super::*;
+ 
+     #[test]
++    fn chapter_css_budgets_accumulate_and_reset_after_failed_loads() {
++        let css = "p { font-weight: bold; }";
++        let sources = ChapterStylesheets { sources: vec![StylesheetSource { href: "a".into(), css: css.into() }, StylesheetSource { href: "b".into(), css: css.into() }] };
++        for (bytes, rules, code) in [(css.len(), 2, "STYLE_CSS_TOO_LARGE"), (css.len()*2, 1, "STYLE_SELECTOR_LIMIT")] {
++            let mut styler = Styler::new(StyleConfig { limits: StyleLimits { max_css_bytes: bytes, max_selectors: rules, ..Default::default() }, ..Default::default() });
++            assert_eq!(styler.load_stylesheets(&sources).unwrap_err().code, code);
++            assert!(styler.parsed.is_empty());
++            assert_eq!((styler.css_bytes, styler.rule_count), (0, 0));
++            styler.load_stylesheets(&ChapterStylesheets { sources: sources.sources[..1].to_vec() }).unwrap();
++            assert_eq!((styler.css_bytes, styler.rule_count), (css.len(), 1));
++        }
++        let mut exact = Styler::new(StyleConfig { limits: StyleLimits { max_css_bytes: css.len()*2, max_selectors: 2, ..Default::default() }, ..Default::default() });
++        exact.load_stylesheets(&sources).unwrap();
++        exact.load_stylesheets(&sources).unwrap();
++        assert_eq!((exact.css_bytes, exact.rule_count), (css.len()*2, 2));
++        let many = ChapterStylesheets { sources: (0..257).map(|_| StylesheetSource { href: "empty".into(), css: String::new() }).collect() };
++        assert_eq!(exact.load_stylesheets(&many).unwrap_err().code, "STYLE_SOURCE_LIMIT");
++        assert!(exact.parsed.is_empty());
++    }
++
++    #[test]
++    fn embedded_styles_preserve_source_order_decoding_and_limits() {
++        let html = br#"<html><head><link rel="stylesheet" href="before.css"/><style><![CDATA[p { text-indent: 2em; }]]> p { font-family: &#34;A&amp;B&#34;; }</style><link rel="stylesheet" href="after.css"/><style media="print">ignored</style><style type="application/json">ignored</style></head></html>"#;
++        let sources = parse_chapter_style_sources("text/chapter.xhtml", html, 1024).unwrap();
++        assert_eq!(sources.len(), 3);
++        assert_eq!(sources[0].href, "text/before.css");
++        assert_eq!(sources[2].href, "text/after.css");
++        assert_eq!(sources[1].css.as_deref(), Some("p { text-indent: 2em; } p { font-family: \"A&B\"; }"));
++        assert!(parse_chapter_style_sources("a", html, 8).is_err());
++        assert!(parse_chapter_style_sources("a", b"<style>abc</style><style>def</style>", 5).is_err());
++        assert!(parse_chapter_style_sources("a", b"<style>abc", 10).is_err());
++        assert!(parse_chapter_style_sources("a", b"<style>&unknown;</style>", 100).is_err());
++        let many = "<link rel='stylesheet' href='a.css'/>".repeat(257);
++        assert!(parse_chapter_style_sources("a", many.as_bytes(), 100).is_err());
++    }
++
++    #[test]
+     fn skip_tag_retains_semantic_elements() {
+         assert!(!should_skip_tag("nav"));
+         assert!(!should_skip_tag("header"));

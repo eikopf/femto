@@ -2,6 +2,8 @@
 
 Cargo.lock pins the resolved dependency graph. flake.lock pins the host development environment. Rust dependencies have been built and tested on the host; ESP-IDF compatibility remains a separate build gate.
 
+Six crates are vendored under `vendor/` with local patches: `epub-stream`, `esp-idf-svc`, `hidreport`, `miniz_oxide`, `quireink-stardict`, and `swash`. [Vendored crates and their patches](../vendor/patches/README.md) lists each patch as a file that applies to the published crate, with its purpose, the evidence for that purpose, and notes on sending it upstream and on re-vendoring. The sections below record why each crate was chosen.
+
 ## Reader
 
 `unicode-normalization` 0.1.26 supplies canonical normalization for library search. The [pinned iterator API](https://docs.rs/unicode-normalization/0.1.26/unicode_normalization/) and downloaded source were inspected before use. Default features are disabled; its `no_std` implementation uses `alloc` through `tinyvec` 1.13.3. Both lockfiles pin these additions. Its Rust 1.36 minimum fits the toolchain, and its tables report Unicode 18.0.0. The package license is `(MIT OR Apache-2.0) AND Unicode-3.0`; the Unicode data notice is retained in [Unicode normalization notices](licenses/unicode-normalization-data.txt). Search normalizes to NFC, applies Rust lowercase conversion, and normalizes again. No normalization code or Unicode table is reimplemented locally. This is canonical substring matching, not full Unicode case folding, compatibility matching, collation, or accent removal. The transformation allocates temporary strings per candidate field and does not retain a second metadata index. Device latency and peak heap use remain unmeasured.

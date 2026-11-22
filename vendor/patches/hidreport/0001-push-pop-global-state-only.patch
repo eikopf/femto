@@ -1,0 +1,51 @@
+femto patch for hidreport 0.6.0
+Subject: parser: Push/Pop save and restore global items only
+
+Stack::push clones the local-item state (usages) as well as the globals, and
+Stack::pop restores both. HID 1.11 section 6.2.2.7 defines Push and Pop as
+operating on the global item state table; local items stay in effect until
+the next Main item. Upstream carries a FIXME saying the clone is probably
+wrong. With the upstream behaviour, usages declared between a Push and a Pop
+are lost at the Pop.
+
+Push and pop the globals only. Also reject a Pop of the initial global state
+before mutating the stack (upstream popped first and checked afterwards).
+
+This patch leaves an empty line where the removed block was, exactly as in
+the vendored source.
+
+Regression test in femto: crates/femto-remote/src/descriptor.rs.
+
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1316,29 +1316,17 @@
+         let current = self.globals.last().unwrap();
+         self.globals.push(*current);
+ 
+-        // FIXME: this clones the Usage vector which is likely to mess us up, I don't
+-        // think they transfer across push/pop
+-        let current = self.locals.last().unwrap().clone();
+-        self.locals.push(current);
+     }
+ 
+     fn pop(&mut self) -> Result<()> {
+         ensure!(
+-            !self.globals.is_empty() && !self.locals.is_empty(),
++            self.globals.len() > 1,
+             ParserError::InvalidData {
+                 offset: 0,
+                 message: "Too many Pops".into(),
+             }
+         );
+         self.globals.pop();
+-        self.locals.pop();
+-        ensure!(
+-            !self.globals.is_empty() && !self.locals.is_empty(),
+-            ParserError::InvalidData {
+-                offset: 0,
+-                message: "Too many Pops, not enough Pushes".into(),
+-            }
+-        );
+         Ok(())
+     }
+ 

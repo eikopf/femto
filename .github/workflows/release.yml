@@ -1,0 +1,39 @@
+# Builds the Picco firmware for a version tag and publishes it as a release.
+# The release is created as a draft, given its assets and then published;
+# with release immutability enabled on the repository, a published release
+# and its tag can no longer change.
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@bb0495a1086c46893eee56f32fd192dfe4a15bb9 # v32.0.0
+        with:
+          extra_nix_config: experimental-features = nix-command flakes
+      # The build runs in a bubblewrap namespace so that paths in the image
+      # do not depend on the checkout location.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Build
+        run: ./scripts/build-picco
+      - name: Check the version against the tag
+        run: |
+          version="$(jq -r .version output/picco-grayscale/femto-picco.json)"
+          test "$version" = "femto-${GITHUB_REF_NAME#v}"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd output/picco-grayscale
+          sha256sum femto-picco.bin
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
+            --verify-tag --title "Femto ${GITHUB_REF_NAME#v}" --generate-notes \
+            femto-picco.bin femto-picco.json
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false

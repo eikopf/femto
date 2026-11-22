@@ -20,8 +20,11 @@ except ValueError as error:
     raise SystemExit(str(error)) from error
 if len(image) > 0xE70000:
     raise SystemExit("Image exceeds the reference Picco app slot")
+# The application description follows the image and first segment headers.
+version = image[48:80].split(b"\0", 1)[0].decode("ascii")
 manifest = {
     "image": path.name,
+    "version": version,
     "sha256": hashlib.sha256(image).hexdigest(),
     "bytes": len(image),
     "chip": "esp32s3",

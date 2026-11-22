@@ -63,3 +63,9 @@ The default build renders four gray levels and writes `output/picco-grayscale`; 
 The build exports an application image and manifest. [Picco firmware](picco-firmware.md) describes variants, device configuration, toolchain pins, and recovery requirements. Physical boot and operation remain unverified.
 
 [Qualification](qualification.md) distinguishes implementation from verified behavior. [Status history](status.md) and evidence files identify the source tested at each checkpoint. [Network diagnostics](diagnostics.md) describes counters and device logging.
+
+## Releases
+
+`./scripts/release X.Y.Z` sets the firmware version in `firmware/picco/Cargo.toml`, its lock file and `sdkconfig.defaults`, runs the full check, commits, tags `vX.Y.Z` and pushes. The Release workflow in `.github/workflows/release.yml` builds the grayscale image from that tag with the pinned Nix toolchain, checks that the image's version matches the tag, and publishes `femto-picco.bin` with its manifest `femto-picco.json`. The manifest carries the version, byte length and SHA-256 that a reader checks before installing.
+
+Releases are immutable: the repository setting is enabled, the workflow uploads the assets to a draft and then publishes it, and a published release's assets and tag cannot be changed afterwards. A mistake is corrected by a new version.

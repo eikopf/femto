@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Tag a release: set the firmware version, commit, tag and push.
+# The Release workflow builds the image from the tag and publishes it.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+version="${1:?usage: scripts/release X.Y.Z}"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'version must be X.Y.Z' >&2; exit 2; }
+[[ "$(git branch --show-current)" == main ]] || { echo 'release from main' >&2; exit 1; }
+[[ -z "$(git status --porcelain)" ]] || { echo 'working tree is not clean' >&2; exit 1; }
+# The reader compares this version with a release's; see firmware/picco/src/update.rs.
+sed -i -E "s/^CONFIG_APP_PROJECT_VER=.*/CONFIG_APP_PROJECT_VER=\"femto-$version\"/" firmware/picco/sdkconfig.defaults
+sed -i -E "0,/^version = .*/s//version = \"$version\"/" firmware/picco/Cargo.toml
+sed -i -E "/^name = \"femto-picco\"$/{n;s/^version = .*/version = \"$version\"/}" firmware/picco/Cargo.lock
+./scripts/check
+git commit -q --allow-empty -am "Release $version"
+git tag -a "v$version" -m "Femto $version"
+git push origin main "v$version"
+echo "Tagged v$version; the Release workflow publishes it."

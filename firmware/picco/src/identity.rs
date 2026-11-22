@@ -20,12 +20,20 @@ impl NvsBackend {
         let partition = crate::nvs::partition()?;
         if !provision {
             // Read-only open requires an existing namespace and cannot create it.
-            let existing = EspDefaultNvs::new(partition.clone(), NAMESPACE, false)
-                .map_err(|e| e.to_string())?;
+            // A namespace that was never written does not exist either.
+            const MISSING: &str = "No tailnet identity yet; create one";
+            let existing =
+                EspDefaultNvs::new(partition.clone(), NAMESPACE, false).map_err(|e| {
+                    let text = e.to_string();
+                    if text.contains("NVS_NOT_FOUND") {
+                        MISSING.into()
+                    } else {
+                        text
+                    }
+                })?;
             if existing.blob_len(KEY).map_err(|e| e.to_string())?.is_none() {
-                return Err("Tailnet identity missing; explicit provisioning required".into());
+                return Err(MISSING.into());
             }
-            drop(existing);
         }
         let nvs = EspDefaultNvs::new(partition, NAMESPACE, true).map_err(|e| e.to_string())?;
         Ok(Self { nvs })

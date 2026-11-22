@@ -292,8 +292,12 @@ enum Kind {
     Feed,
     Description,
     Epub,
-    /// Any content up to the caller's limit.
-    File(usize),
+    /// Any content up to the caller's limit, from an offset the caller
+    /// already holds.
+    File {
+        limit: usize,
+        offset: u64,
+    },
 }
 impl Kind {
     fn limit(self) -> usize {
@@ -301,7 +305,14 @@ impl Kind {
             Self::Feed => MAX_FEED_BYTES,
             Self::Description => 64 * 1024,
             Self::Epub => MAX_EPUB_BYTES,
-            Self::File(limit) => limit,
+            Self::File { limit, .. } => limit,
+        }
+    }
+    /// Bytes of the resource to skip; the rest is requested as a range.
+    fn offset(self) -> u64 {
+        match self {
+            Self::File { offset, .. } => offset,
+            _ => 0,
         }
     }
     fn accept(self) -> &'static str {
@@ -309,11 +320,11 @@ impl Kind {
             Self::Feed => "application/opds+json, application/json, application/atom+xml",
             Self::Description => "application/opensearchdescription+xml, application/xml, text/xml",
             Self::Epub => "application/epub+zip, application/octet-stream",
-            Self::File(_) => "*/*",
+            Self::File { .. } => "*/*",
         }
     }
     fn accepts(self, media: &str) -> bool {
-        matches!(self, Self::File(_))
+        matches!(self, Self::File { .. })
             || self
                 .accept()
                 .split(", ")
@@ -321,14 +332,17 @@ impl Kind {
     }
 }
 
-/// Streams a file of any type and at most `limit` bytes into caller-owned
-/// storage, following redirects. The caller validates the content.
+/// Streams a file of any type into caller-owned storage, following
+/// redirects. With an `offset`, only the bytes from there on are requested
+/// and the server must honour the range. At most `limit` bytes are
+/// received. The caller validates the content.
 pub fn download_file(
     transport: &mut impl Transport,
     source: &str,
     deadline: Instant,
     cancelled: Arc<AtomicBool>,
     limit: usize,
+    offset: u64,
     output: &mut impl Write,
 ) -> Result<Download, Error> {
     receive(
@@ -337,7 +351,7 @@ pub fn download_file(
         deadline,
         cancelled,
         None,
-        Kind::File(limit),
+        Kind::File { limit, offset },
         output,
     )
 }
@@ -429,6 +443,7 @@ fn receive(
     kind: Kind,
     output: &mut impl Write,
 ) -> Result<Download, Error> {
+    let offset = kind.offset();
     let mut url = crate::web_url(None, source)?;
     url.set_fragment(None);
     let mut visited = BTreeSet::new();
@@ -449,6 +464,9 @@ fn receive(
         if let Some(header) = auth.and_then(|auth| auth.header_for(&url)) {
             write!(stream, "Authorization: {header}\r\n")?;
         }
+        if offset > 0 {
+            write!(stream, "Range: bytes={offset}-\r\n")?;
+        }
         stream.write_all(b"\r\n")?;
         stream.flush()?;
         let mut reader = BufReader::new(stream);
@@ -463,7 +481,9 @@ fn receive(
             url.set_fragment(None);
             continue;
         }
-        if head.status != 200 {
+        // A server that ignores the range answers 200 with the whole
+        // resource, which must not be appended to the part already held.
+        if head.status != if offset > 0 { 206 } else { 200 } {
             return Err(Error::Status(head.status));
         }
         let media = head

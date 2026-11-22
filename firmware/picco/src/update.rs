@@ -124,22 +124,44 @@ struct Manifest {
     sha256: String,
 }
 
-fn fetch(name: &str, limit: usize, seconds: u64, output: &mut impl Write) -> Result<(), String> {
+fn fetch(
+    name: &str,
+    limit: usize,
+    offset: u64,
+    seconds: u64,
+    output: &mut impl Write,
+) -> Result<(), http::Error> {
     http::download_file(
         &mut crate::network::Transport,
         &format!("{RELEASE}{name}"),
         Instant::now() + Duration::from_secs(seconds),
         Arc::new(AtomicBool::new(false)),
         limit,
+        offset,
         output,
     )
     .map(|_| ())
-    .map_err(|e| e.to_string())
+}
+
+/// Keeps the radio awake for a transfer. Modem sleep between beacons stalls
+/// a long download on a weak link.
+struct Awake;
+impl Awake {
+    fn new() -> Self {
+        unsafe { sys::esp_wifi_set_ps(sys::wifi_ps_type_t_WIFI_PS_NONE) };
+        Self
+    }
+}
+impl Drop for Awake {
+    fn drop(&mut self) {
+        unsafe { sys::esp_wifi_set_ps(sys::wifi_ps_type_t_WIFI_PS_MIN_MODEM) };
+    }
 }
 
 fn check() -> Result<Manifest, String> {
+    let _awake = Awake::new();
     let mut bytes = Vec::new();
-    fetch("femto-picco.json", 4096, 60, &mut bytes)?;
+    fetch("femto-picco.json", 4096, 0, 60, &mut bytes).map_err(|e| e.to_string())?;
     let manifest: Manifest =
         serde_json::from_slice(&bytes).map_err(|_| "Release manifest is not valid")?;
     if numbers(&manifest.version).is_none()
@@ -151,24 +173,56 @@ fn check() -> Result<Manifest, String> {
     Ok(manifest)
 }
 
+/// Attempts that receive nothing before a download gives up.
+const STALLED_ATTEMPTS: u32 = 4;
+
 /// Downloads the release image and publishes it as the waiting package only
-/// when it is the image the manifest describes.
+/// when it is the image the manifest describes. A broken connection resumes
+/// from the bytes already on the card; a download that gives up leaves them
+/// for the next try, and one that fails verification is deleted.
 fn download(manifest: &Manifest) -> Result<(), String> {
+    let _awake = Awake::new();
     let partial = Path::new(PARTIAL);
-    let received = (|| -> Result<(), String> {
-        fs::create_dir_all(partial.parent().unwrap_or(partial)).map_err(|e| e.to_string())?;
-        let mut file =
-            std::io::BufWriter::new(fs::File::create(partial).map_err(|e| e.to_string())?);
-        fetch("femto-picco.bin", manifest.bytes as usize, 900, &mut file)?;
-        let file = file.into_inner().map_err(|e| e.to_string())?;
+    fs::create_dir_all(partial.parent().unwrap_or(partial)).map_err(|e| e.to_string())?;
+    let held = || fs::metadata(partial).map_or(0, |metadata| metadata.len());
+    let mut stalled = 0;
+    while held() < manifest.bytes {
+        let offset = held();
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(partial)
+            .map_err(|e| e.to_string())?;
+        let result = fetch(
+            "femto-picco.bin",
+            (manifest.bytes - offset) as usize,
+            offset,
+            600,
+            &mut file,
+        );
         file.sync_all().map_err(|e| e.to_string())?;
-        let length = file.metadata().map_err(|e| e.to_string())?.len();
         drop(file);
+        let Err(error) = result else { break };
+        log::warn!("Update download stopped at {} bytes: {error}", held());
+        if matches!(error, http::Error::Status(200)) {
+            // The server sent the whole image; start again without a range.
+            fs::remove_file(partial).map_err(|e| e.to_string())?;
+        } else if held() > offset {
+            stalled = 0;
+        } else {
+            stalled += 1;
+            if stalled == STALLED_ATTEMPTS {
+                return Err(error.to_string());
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    }
+    let verified = (|| -> Result<(), String> {
         let digest =
             femto_reader::hashing::digest(fs::File::open(partial).map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
         let digest: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-        if length != manifest.bytes
+        if held() != manifest.bytes
             || !digest.eq_ignore_ascii_case(&manifest.sha256)
             || version(partial).as_deref() != Some(manifest.version.as_str())
         {
@@ -178,10 +232,10 @@ fn download(manifest: &Manifest) -> Result<(), String> {
         let _ = fs::remove_file(PACKAGE);
         fs::rename(partial, PACKAGE).map_err(|e| e.to_string())
     })();
-    if received.is_err() {
+    if verified.is_err() {
         let _ = fs::remove_file(partial);
     }
-    received
+    verified
 }
 
 enum Step {
@@ -326,7 +380,11 @@ impl Updater {
         self.rescan();
         let error = result.err().and_then(|error| {
             log::warn!("Update: {error}");
-            self.step = Step::Idle;
+            // A failed download can be tried again without another check.
+            self.step = match std::mem::replace(&mut self.step, Step::Idle) {
+                Step::Downloading(release) => Step::Available(release),
+                _ => Step::Idle,
+            };
             (!self.quiet).then_some(error)
         });
         (true, error)

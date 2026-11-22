@@ -337,7 +337,7 @@ fn oversized_or_truncated_downloads_and_storage_failures_are_errors() {
 
 #[test]
 fn file_downloads_accept_any_type_follow_redirects_and_enforce_the_callers_limit() {
-    let download = |responses: Vec<Vec<u8>>, limit| {
+    let download = |responses: Vec<Vec<u8>>, limit, offset| {
         let mut mock = Mock {
             responses: responses.into(),
             ..Default::default()
@@ -349,19 +349,39 @@ fn file_downloads_accept_any_type_follow_redirects_and_enforce_the_callers_limit
             Instant::now() + Duration::from_secs(5),
             Arc::new(AtomicBool::new(false)),
             limit,
+            offset,
             &mut bytes,
         );
-        (result.map(|download| download.source), bytes, mock.urls)
+        let request = mock
+            .requests
+            .last()
+            .map(|sent| sent.lock().unwrap().clone());
+        (
+            result.map(|download| download.source),
+            bytes,
+            mock.urls,
+            String::from_utf8(request.unwrap_or_default()).unwrap(),
+        )
     };
     let redirect =
         b"HTTP/1.1 302 Found\r\nLocation: https://assets.example/image.bin\r\nContent-Length: 0\r\n\r\n";
     let file = b"HTTP/1.1 200 OK\r\nContent-Type: application/x-anything\r\nContent-Length: 5\r\n\r\nimage";
-    let (source, bytes, urls) = download(vec![redirect.to_vec(), file.to_vec()], 5);
+    let (source, bytes, urls, request) = download(vec![redirect.to_vec(), file.to_vec()], 5, 0);
+    assert!(!request.contains("Range:"));
     assert_eq!(source.unwrap(), "https://assets.example/image.bin");
     assert_eq!(bytes, b"image");
     assert_eq!(urls, [SOURCE, "https://assets.example/image.bin"]);
     // One byte over the limit is refused before any of it is stored.
-    let (result, bytes, _) = download(vec![file.to_vec()], 4);
+    let (result, bytes, _, _) = download(vec![file.to_vec()], 4, 0);
     assert!(result.is_err());
+    assert!(bytes.is_empty());
+    // A resumed download asks for the remainder and needs a partial response.
+    let rest = b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 2-4/5\r\nContent-Length: 3\r\n\r\nage";
+    let (result, bytes, _, request) = download(vec![rest.to_vec()], 3, 2);
+    assert!(result.is_ok());
+    assert_eq!(bytes, b"age");
+    assert!(request.contains("\r\nRange: bytes=2-\r\n"));
+    let (result, bytes, _, _) = download(vec![file.to_vec()], 5, 2);
+    assert!(matches!(result, Err(http::Error::Status(200))));
     assert!(bytes.is_empty());
 }

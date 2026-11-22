@@ -281,6 +281,21 @@ Typography size controls, simulator size shortcuts, and device orientation chang
 
 Pending reflow prevents automatic device sleep. Completion saves through the frontend's existing state store, including device journal saves when typography controls remain open. Failed device saves disable further saving and sleep; they do not roll back the already displayed size. Stroke, coverage, hinting, and fractional-position controls remain immediate raster settings. Callers of the synchronous controller reflow and rotation actions retain their synchronous path. Whole-paragraph analysis and final rasterization still have no wall-clock bound. Host tests cover cancellation, incomplete completion, stale navigation and orientation, source-position retention, and pixel equivalence with synchronous reflow in all four orientations. Physical latency and peak allocation remain unqualified.
 
+## Updates
+
+The first installation writes the application slot over USB with `scripts/picco-flash`. After that, the stock recovery application, which femto leaves in the factory slot, installs updates from the SD card. The stock partition table has one application slot, so an application cannot replace itself; recovery does it instead. Nothing is repartitioned.
+
+An update is an application image named `firmware.bin` in the `update` directory of the card. There are two ways to install one:
+
+- Copy the image to `update/firmware.bin` on the card with a card reader. Settings then shows `Install update` with the image's version as its first row.
+- Run `./scripts/picco-update [IMAGE]` with the reader connected over USB. It copies the image to the card, starts the installation, reports recovery's progress and restarts the reader. It takes about 70 seconds for a 7 MB image.
+
+Installing saves the reading state, writes recovery's `update/.ota_pending` marker, selects the factory slot and restarts. Recovery checks the image, writes it to the application slot, removes the package and marker, selects the application slot and shows `Update complete`. Tapping `Restart` there starts the new firmware, which resumes the open book. Recovery refuses to start on battery when the charge is low and keeps the marker until an installation succeeds, so an interrupted installation starts again at the next power-on. If the application slot is ever left unbootable, recovery lists the images in `update` for manual installation, and USB flashing still works.
+
+Femto offers only images whose application version starts with `femto-`. The version comes from `CONFIG_APP_PROJECT_VER` in `sdkconfig.defaults`; Settings shows the running version in its last row. Recovery performs the full image validation.
+
+This path was exercised on one Picco: three installations of a 7,055,136-byte image through recovery, started from the USB console, from the Settings row and from `scripts/picco-update`. Each took 40 seconds in recovery and booted into the reader with the book and page restored. Interrupted installation, low-battery refusal and installation from a card written in a card reader are untested. Recovery's behaviour is inferred from its log output and strings, not from source.
+
 ## Offline update planning
 
 The host planner validates an unsigned candidate image against a complete flash backup without opening a serial port or generating a flash command:

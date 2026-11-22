@@ -38,6 +38,8 @@ pub enum Command {
     List(String),
     Remove(String),
     Reboot,
+    /// Install the firmware package waiting on the card.
+    Update,
 }
 
 /// Accepts relative paths that cannot leave the directory they are joined to.
@@ -64,6 +66,7 @@ fn parse(line: &str) -> Option<Command> {
         ("swipe", "prev") => Command::Swipe(crate::input::Turn::Previous),
         ("frame", "") => Command::Frame,
         ("reboot", "") => Command::Reboot,
+        ("update", "") => Command::Update,
         ("tap", point) => {
             let (x, y) = point.split_once(' ')?;
             Command::Tap {
@@ -187,8 +190,12 @@ mod tests {
     #[test]
     fn arguments_are_bounded_and_paths_stay_relative() {
         assert_eq!(
-            commands("femto power\nfemto swipe prev\n".as_bytes()),
-            [Command::Power, Command::Swipe(crate::input::Turn::Previous)]
+            commands("femto power\nfemto update\nfemto swipe prev\n".as_bytes()),
+            [
+                Command::Power,
+                Command::Update,
+                Command::Swipe(crate::input::Turn::Previous)
+            ]
         );
         assert_eq!(
             commands("femto tap 12 479\nfemto put 5 0000ABCD b\u{fc}cher/a b.epub\n".as_bytes()),

@@ -34,6 +34,7 @@ mod tailnet_menu;
 mod tailnet_rotation;
 mod tailnet_tls;
 mod threads;
+mod update;
 mod wifi;
 
 fn main() {
@@ -222,6 +223,8 @@ fn run() -> Result<(), String> {
         screen.wifi_label()
     ));
     ui.set_sleep_available(journal.is_some());
+    ui.set_firmware(&update::running());
+    ui.set_update(update::waiting());
     let choose_book = !resumed && !library.entries.is_empty();
     ui.set_library(library);
     if screen.storage.is_some() {
@@ -274,6 +277,7 @@ fn run() -> Result<(), String> {
             console.poll()
         };
         let mut chosen = String::new();
+    let mut update_now = false;
         let diagnostic_event = command.and_then(|command| {
             use femto_picco_board::console::Command;
             // Typed text may be a credential.
@@ -322,6 +326,11 @@ fn run() -> Result<(), String> {
                 Command::Reboot => unsafe { esp_idf_svc::sys::esp_restart() },
                 Command::Put { .. } | Command::List(_) | Command::Remove(_) => {
                     console.files(&command);
+                    ui.set_update(update::waiting());
+                    None
+                }
+                Command::Update => {
+                    update_now = true;
                     None
                 }
             }
@@ -638,6 +647,43 @@ fn run() -> Result<(), String> {
             }
         } else {
             busy_since = Some((Instant::now(), false));
+        }
+        if ui.take_update_request() || std::mem::take(&mut update_now) {
+            // Recovery restarts into the new application, which resumes here.
+            if let Some(store) = &mut journal {
+                reader.record_position(
+                    reader
+                        .state
+                        .books
+                        .values()
+                        .map(|book| book.last_opened)
+                        .max()
+                        .unwrap_or(0)
+                        .saturating_add(1),
+                );
+                if let Err(error) = store.save(&reader.state) {
+                    log::warn!("State save before update failed: {error}");
+                }
+            }
+            let levels = if cfg!(feature = "grayscale") { 4 } else { 2 };
+            let lines = [
+                String::new(),
+                "Installing the update.".into(),
+                "Keep the reader charged or plugged in.".into(),
+                "It restarts when it is done.".into(),
+            ];
+            let pixels = reader
+                .render_panel(&lines, levels)
+                .map_err(|e| e.to_string())?;
+            pack_pixels(&pixels, reader.state.rotation, &mut plane)?;
+            screen.present_clean(&plane)?;
+            let error = update::install();
+            log::warn!("Update not started: {error}");
+            ui.set_update(update::waiting());
+            ui.open();
+            ui.show_error(error);
+            render(&mut reader, &ui, &mut plane)?;
+            screen.present(&plane)?;
         }
         let manual_sleep = ui.take_sleep_request();
         let idle_now = idle_epoch.elapsed().as_millis().min(u64::MAX as u128) as u64;

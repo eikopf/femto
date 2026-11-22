@@ -145,6 +145,41 @@ def frame(port, output, rotate):
     print(json.dumps(dict(output=output, bytes=size)))
 
 
+def follow_recovery(path, timeout=300):
+    """Report the stock recovery application's installation until it finishes."""
+    deadline = time.monotonic() + timeout
+    pending = b""
+    while time.monotonic() < deadline:
+        # The port disappears while the device restarts into recovery.
+        try:
+            fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        except OSError:
+            time.sleep(0.1)
+            continue
+        try:
+            tty.setraw(fd)
+            while time.monotonic() < deadline:
+                if not select.select([fd], [], [], 0.2)[0]:
+                    continue
+                data = os.read(fd, 4096)
+                if not data:
+                    break
+                *lines, pending = (pending + data).split(b"\n")
+                for line in lines:
+                    text = line.decode("utf-8", "replace").strip()
+                    if "[SD_OTA]" in text or "[RECOVERY_BOOT]" in text:
+                        print(text, file=sys.stderr, flush=True)
+                    if "install ok" in text:
+                        return
+                    if "install failed" in text or "auto install deferred" in text:
+                        raise RuntimeError(text)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
+    raise TimeoutError("recovery did not report an installation")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port")
@@ -162,6 +197,9 @@ def main():
     upload = commands.add_parser("put", help="copy a file below /sdcard/femto")
     upload.add_argument("source")
     upload.add_argument("destination")
+    commands.add_parser(
+        "update", help="copy a firmware image to the card and install it through recovery"
+    ).add_argument("image")
     commands.add_parser("ls").add_argument("directory", nargs="?", default="")
     commands.add_parser("rm").add_argument("path")
     capture = commands.add_parser("frame", help="save the framebuffer as an upright PNG")
@@ -181,6 +219,11 @@ def main():
     try:
         if args.command == "put":
             put(port, args.source, args.destination)
+        elif args.command == "update":
+            put(port, args.image, "firmware.bin")
+            port.write(b"femto update\n")
+            follow_recovery(path)
+            print(json.dumps(dict(installed=args.image)))
         elif args.command == "ls":
             listing(port, args.directory)
         elif args.command == "rm":

@@ -58,7 +58,7 @@ FEMTO_PICCO_GRAYSCALE=0 ./scripts/build-picco
 ./scripts/picco-flash
 ```
 
-The default build renders four gray levels and writes `output/picco-grayscale`; `FEMTO_PICCO_GRAYSCALE=0` selects the one-bit build in `output/picco`. `picco-flash` writes the default image, or the image given as its argument, to the application slot of a connected Picco.
+The default build renders four gray levels and writes `output/picco-grayscale`; `FEMTO_PICCO_GRAYSCALE=0` selects the one-bit build in `output/picco`. `picco-flash` writes the default image, or the image given as its argument, to the application slot of a connected Picco. A Picco that already runs femto is updated with `./scripts/picco-update` or from its SD card; see [Updates](picco-firmware.md#updates).
 
 The build exports an application image and manifest. [Picco firmware](picco-firmware.md) describes variants, device configuration, toolchain pins, and recovery requirements. Physical boot and operation remain unverified.
 

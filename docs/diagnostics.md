@@ -17,6 +17,7 @@ The USB Serial/JTAG console accepts newline-terminated commands from a physicall
 | `femto power`, `femto swipe next`, `femto swipe prev` | Injects the power button or a swipe |
 | `femto awake` | Suppresses automatic sleep until restart; deep sleep disconnects USB and needs the power button to wake. Automatic sleep is also suppressed while a USB host is connected |
 | `femto reboot` | Restarts the application |
+| `femto update` | Installs the firmware package waiting on the card; see [Updates](picco-firmware.md#updates) |
 
 File commands accept only relative paths without empty, `.` or `..` components, control characters or backslashes, so they cannot leave `/sdcard/femto`. Anyone with USB access can therefore read the directory listing and replace books, fonts and configuration there, which is the same access as removing the card. Uploads are limited to 256 MiB, arrive in 2,048-byte chunks that the device acknowledges individually because the driver drops bytes when its receive ring overflows, and are published by rename only after the CRC-32 matches. A reader poll blocks while a file command runs.
 

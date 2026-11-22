@@ -111,6 +111,7 @@ enum Command {
     Layer,
     Tailnet(TailnetEvent),
     Sleep,
+    Update,
     Rotation(crate::state::Rotation),
     IdleSleep(crate::state::IdleSleep),
     FullRefresh(u8),
@@ -373,6 +374,9 @@ pub struct ReaderUi {
     light_request: bool,
     sleep_available: bool,
     sleep_request: bool,
+    firmware: Option<String>,
+    update: Option<String>,
+    update_request: bool,
     page_buttons_available: bool,
     refresh_available: bool,
     query: String,
@@ -948,6 +952,17 @@ impl ReaderUi {
     }
     pub fn take_sleep_request(&mut self) -> bool {
         std::mem::take(&mut self.sleep_request)
+    }
+    /// Shows the running firmware version in the settings.
+    pub fn set_firmware(&mut self, version: &str) {
+        self.firmware = Some(version.into());
+    }
+    /// Offers installing a firmware update of the given version.
+    pub fn set_update(&mut self, version: Option<String>) {
+        self.update = version;
+    }
+    pub fn take_update_request(&mut self) -> bool {
+        std::mem::take(&mut self.update_request)
     }
 
     /// Updates a read-only root-menu status row without requesting a panel refresh.
@@ -1820,6 +1835,10 @@ impl ReaderUi {
                 self.sleep_request = true;
                 Ok(Effect::Unchanged)
             }
+            Command::Update => {
+                self.update_request = true;
+                Ok(Effect::Unchanged)
+            }
             Command::SwapMenuButtons => {
                 reader.state.swap_menu_buttons = !reader.state.swap_menu_buttons;
                 Ok(Effect::Redraw)
@@ -1992,6 +2011,11 @@ impl ReaderUi {
             .collect(),
             Panel::Settings => std::iter::empty()
                 .chain(
+                    self.update
+                        .iter()
+                        .map(|version| (format!("Install update {version}"), Command::Update)),
+                )
+                .chain(
                     self.device_available
                         .then(|| ("Network and services".into(), Command::DeviceOpen)),
                 )
@@ -2029,6 +2053,11 @@ impl ReaderUi {
                         })
                         .into_iter()
                         .flatten(),
+                )
+                .chain(
+                    self.firmware
+                        .iter()
+                        .map(|version| (format!("Version {version}"), Command::Noop)),
                 )
                 .collect(),
             Panel::Remote => {

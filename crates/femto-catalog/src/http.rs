@@ -292,6 +292,8 @@ enum Kind {
     Feed,
     Description,
     Epub,
+    /// Any content up to the caller's limit.
+    File(usize),
 }
 impl Kind {
     fn limit(self) -> usize {
@@ -299,6 +301,7 @@ impl Kind {
             Self::Feed => MAX_FEED_BYTES,
             Self::Description => 64 * 1024,
             Self::Epub => MAX_EPUB_BYTES,
+            Self::File(limit) => limit,
         }
     }
     fn accept(self) -> &'static str {
@@ -306,13 +309,37 @@ impl Kind {
             Self::Feed => "application/opds+json, application/json, application/atom+xml",
             Self::Description => "application/opensearchdescription+xml, application/xml, text/xml",
             Self::Epub => "application/epub+zip, application/octet-stream",
+            Self::File(_) => "*/*",
         }
     }
     fn accepts(self, media: &str) -> bool {
-        self.accept()
-            .split(", ")
-            .any(|allowed| media.eq_ignore_ascii_case(allowed))
+        matches!(self, Self::File(_))
+            || self
+                .accept()
+                .split(", ")
+                .any(|allowed| media.eq_ignore_ascii_case(allowed))
     }
+}
+
+/// Streams a file of any type and at most `limit` bytes into caller-owned
+/// storage, following redirects. The caller validates the content.
+pub fn download_file(
+    transport: &mut impl Transport,
+    source: &str,
+    deadline: Instant,
+    cancelled: Arc<AtomicBool>,
+    limit: usize,
+    output: &mut impl Write,
+) -> Result<Download, Error> {
+    receive(
+        transport,
+        source,
+        deadline,
+        cancelled,
+        None,
+        Kind::File(limit),
+        output,
+    )
 }
 
 /// Streams into caller-owned temporary storage. The caller must discard partial
@@ -417,7 +444,7 @@ fn receive(
         let accept = kind.accept();
         write!(
             stream,
-            "GET {target} HTTP/1.1\r\nHost: {authority}\r\nAccept: {accept}\r\nAccept-Encoding: identity\r\nConnection: close\r\n"
+            "GET {target} HTTP/1.1\r\nHost: {authority}\r\nUser-Agent: femto\r\nAccept: {accept}\r\nAccept-Encoding: identity\r\nConnection: close\r\n"
         )?;
         if let Some(header) = auth.and_then(|auth| auth.header_for(&url)) {
             write!(stream, "Authorization: {header}\r\n")?;

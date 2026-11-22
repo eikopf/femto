@@ -116,6 +116,7 @@ enum Command {
     Tailnet(TailnetEvent),
     Sleep,
     Update,
+    AutoUpdate,
     Font(Option<usize>),
     CycleGesture(Gesture),
     Rotation(crate::state::Rotation),
@@ -978,6 +979,7 @@ impl ReaderUi {
             },
             Command::SwapPageButtons => Control::Toggle(state.swap_page_buttons),
             Command::SwapMenuButtons => Control::Toggle(state.swap_menu_buttons),
+            Command::AutoUpdate => Control::Toggle(state.check_updates),
             Command::Hinting => Control::Toggle(state.text_raster.hinting),
             Command::Fractional => Control::Toggle(state.text_raster.fractional),
             Command::DeviceRow(index) => match self.device_rows.get(index).map(|row| &row.kind) {
@@ -1056,9 +1058,11 @@ impl ReaderUi {
         let reflow = reader.begin_fonts(fonts, family)?;
         Ok(self.start_reflow(reflow))
     }
-    /// Offers installing a firmware update of the given version.
-    pub fn set_update(&mut self, version: Option<String>) {
-        self.update = version;
+    /// Shows the frontend's firmware update row with this label, for example
+    /// "Check for updates" or "Install update 1.2.0", and the setting for
+    /// automatic checks. Activating the row raises the update request.
+    pub fn set_update(&mut self, label: Option<String>) {
+        self.update = label;
     }
     pub fn take_update_request(&mut self) -> bool {
         std::mem::take(&mut self.update_request)
@@ -1939,6 +1943,10 @@ impl ReaderUi {
                 self.update_request = true;
                 Ok(Effect::Unchanged)
             }
+            Command::AutoUpdate => {
+                reader.state.check_updates = !reader.state.check_updates;
+                Ok(Effect::Redraw)
+            }
             Command::CycleGesture(gesture) => {
                 use crate::state::GestureAction;
                 let action = gesture.action(&mut reader.state.gestures);
@@ -2125,11 +2133,12 @@ impl ReaderUi {
             )
             .collect(),
             Panel::Settings => std::iter::empty()
-                .chain(
-                    self.update
-                        .iter()
-                        .map(|version| (format!("Install update {version}"), Command::Update)),
-                )
+                .chain(self.update.iter().flat_map(|label| {
+                    [
+                        (label.clone(), Command::Update),
+                        ("Check automatically".into(), Command::AutoUpdate),
+                    ]
+                }))
                 .chain(
                     self.device_available
                         .then(|| ("Network and services".into(), Command::DeviceOpen)),

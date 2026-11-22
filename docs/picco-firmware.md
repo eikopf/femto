@@ -303,14 +303,17 @@ Pending reflow prevents automatic device sleep. Completion saves through the fro
 
 The first installation writes the application slot over USB with `scripts/picco-flash`. After that, the stock recovery application, which femto leaves in the factory slot, installs updates from the SD card. The stock partition table has one application slot, so an application cannot replace itself; recovery does it instead. Nothing is repartitioned.
 
-An update is an application image named `firmware.bin` in the `update` directory of the card. There are two ways to install one:
+An update is an application image named `firmware.bin` in the `update` directory of the card. There are three ways to put one there:
 
+- Choose `Check for updates` in Settings with Wi-Fi connected. The reader fetches the manifest of the latest [release](https://github.com/eikopf/femto/releases) over HTTPS and compares its version with its own. When the release is newer the row becomes `Download update` with the version; choosing it downloads the image to the card in the background. The download is published as `update/firmware.bin` only if its length, SHA-256 and embedded version match the manifest; otherwise it is deleted. A failed download starts again from the beginning. `Check automatically` makes the reader perform the check once after each start, as soon as Wi-Fi and the clock are ready; it never downloads by itself, and it shows the available version in the menu's status row.
 - Copy the image to `update/firmware.bin` on the card with a card reader. Settings then shows `Install update` with the image's version as its first row.
 - Run `./scripts/picco-update [IMAGE]` with the reader connected over USB. It copies the image to the card, starts the installation, reports recovery's progress and restarts the reader. It takes about 70 seconds for a 7 MB image.
 
 Installing saves the reading state, writes recovery's `update/.ota_pending` marker, selects the factory slot and restarts. Recovery checks the image, writes it to the application slot, removes the package and marker, selects the application slot and shows `Update complete`. Tapping `Restart` there starts the new firmware, which resumes the open book. Recovery refuses to start on battery when the charge is low and keeps the marker until an installation succeeds, so an interrupted installation starts again at the next power-on. If the application slot is ever left unbootable, recovery lists the images in `update` for manual installation, and USB flashing still works.
 
 Femto offers only images whose application version starts with `femto-`. The version comes from `CONFIG_APP_PROJECT_VER` in `sdkconfig.defaults`; Settings shows the running version in its last row. Recovery performs the full image validation.
+
+Release downloads use `https://github.com/eikopf/femto/releases/latest/download/`, which redirects to GitHub's asset host; every connection verifies its certificate against the built-in bundle and needs a synchronized clock. The manifest and the image come from the same place, so the hash detects a damaged download but not a compromised release. Releases are not signed.
 
 This path was exercised on one Picco: three installations of a 7,055,136-byte image through recovery, started from the USB console, from the Settings row and from `scripts/picco-update`. Each took 40 seconds in recovery and booted into the reader with the book and page restored. Interrupted installation, low-battery refusal and installation from a card written in a card reader are untested. Recovery's behaviour is inferred from its log output and strings, not from source.
 

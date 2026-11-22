@@ -2331,11 +2331,15 @@ fn settings_offer_a_waiting_update_and_show_the_running_version() {
     assert!(ui.choose(&mut reader, "Install update").is_err());
     assert!(ui.choose(&mut reader, "Version").is_err());
     ui.set_firmware("femto-1");
-    ui.set_update(Some("femto-2".into()));
+    ui.set_update(Some("Install update 2".into()));
     go(&mut ui, &mut reader, &["Settings", "Version femto-1"]);
     assert!(!ui.take_update_request());
-    ui.choose(&mut reader, "Install update femto-2").unwrap();
+    ui.choose(&mut reader, "Install update 2").unwrap();
     assert!(ui.take_update_request());
+    assert!(!ui.take_update_request());
+    assert!(!reader.state.check_updates);
+    ui.choose(&mut reader, "Check automatically").unwrap();
+    assert!(reader.state.check_updates);
     assert!(!ui.take_update_request());
 }
 

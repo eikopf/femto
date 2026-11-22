@@ -33,7 +33,7 @@ manifest = {
     "reference_app_offset": "0xE0000",
     "reference_app_size": "0xE70000",
     "hardware_verified": False,
-    "installation_status": "No automatic installer. Verify the actual device partition table and recovery backup before installation.",
+    "installation_status": "Application image for the stock Picco partition table. Back up the device before a first installation; see docs/install.md.",
 }
 path.with_suffix(".json").write_text(json.dumps(manifest, indent=2) + "\n")
 print(json.dumps(manifest, indent=2))

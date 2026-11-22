@@ -205,7 +205,10 @@ fn run() -> Result<(), String> {
     if screen.storage.is_some() {
         ui.set_font_families(femto_reader::fontset::families(std::path::Path::new(FONTS)));
     }
-    ui.set_update(update::waiting());
+    let mut updater = update::Updater::new();
+    // One automatic check per start, once the network and clock allow it.
+    let mut update_checked = false;
+    ui.set_update(Some(updater.label()));
     let choose_book = !resumed && !library.entries.is_empty();
     ui.set_library(library);
     if screen.storage.is_some() {
@@ -313,7 +316,8 @@ fn run() -> Result<(), String> {
                 Command::Reboot => unsafe { esp_idf_svc::sys::esp_restart() },
                 Command::Put { .. } | Command::List(_) | Command::Remove(_) => {
                     console.files(&command);
-                    ui.set_update(update::waiting());
+                    updater.rescan();
+                    ui.set_update(Some(updater.label()));
                     None
                 }
                 Command::Update => {
@@ -340,9 +344,12 @@ fn run() -> Result<(), String> {
         if let Some(event) = event {
             idle.activity(idle_epoch.elapsed().as_millis().min(u64::MAX as u128) as u64);
             ui.set_device_status(&format!(
-                "{} | {}",
+                "{} | {}{}",
                 battery_label(screen.battery()),
-                screen.wifi_label()
+                screen.wifi_label(),
+                updater
+                    .notice()
+                    .map_or_else(String::new, |notice| format!(" | {notice}"))
             ));
             let previous_light = reader.state.frontlight;
             let received = Instant::now();
@@ -659,7 +666,44 @@ fn run() -> Result<(), String> {
         } else {
             busy_since = Some((Instant::now(), false));
         }
-        if ui.take_update_request() || std::mem::take(&mut update_now) {
+        let online = screen.wifi().is_some_and(|wifi| wifi.connected().is_some()) && clock::ready();
+        if reader.state.check_updates && !update_checked && online {
+            update_checked = true;
+            if let Err(error) = updater.check(true) {
+                log::warn!("Update check not started: {error}");
+            }
+            ui.set_update(Some(updater.label()));
+        }
+        let (update_changed, update_error) = updater.poll();
+        if update_changed {
+            ui.set_update(Some(updater.label()));
+            if let Some(error) = update_error {
+                ui.open();
+                ui.show_error(error);
+            }
+            if ui.is_open() {
+                render(&mut reader, &ui, &mut plane)?;
+                screen.present(&plane)?;
+            }
+        }
+        let install = std::mem::take(&mut update_now)
+            || ui.take_update_request()
+                && match updater.activate() {
+                    Ok(update::Activation::Install) => true,
+                    Ok(update::Activation::Started) => {
+                        ui.set_update(Some(updater.label()));
+                        render(&mut reader, &ui, &mut plane)?;
+                        screen.present(&plane)?;
+                        false
+                    }
+                    Err(error) => {
+                        ui.show_error(error);
+                        render(&mut reader, &ui, &mut plane)?;
+                        screen.present(&plane)?;
+                        false
+                    }
+                };
+        if install {
             // Recovery restarts into the new application, which resumes here.
             if let Some(store) = &mut journal {
                 reader.record_position(
@@ -690,7 +734,8 @@ fn run() -> Result<(), String> {
             screen.present_clean(&plane)?;
             let error = update::install();
             log::warn!("Update not started: {error}");
-            ui.set_update(update::waiting());
+            updater.rescan();
+            ui.set_update(Some(updater.label()));
             ui.open();
             ui.show_error(error);
             render(&mut reader, &ui, &mut plane)?;
@@ -709,6 +754,7 @@ fn run() -> Result<(), String> {
                 || ui.is_preview_opening()
                 || ui.is_dictionary_opening()
                 || screen.catalog.is_busy()
+                || updater.is_busy()
                 || kosync.as_ref().is_some_and(|sync| sync.is_busy()),
         );
         // Deep sleep drops the USB connection, so an attached host keeps the

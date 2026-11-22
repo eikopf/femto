@@ -11,6 +11,18 @@ pub(crate) use mbedtls::Hasher;
 #[cfg(not(all(target_os = "espidf", feature = "esp-idf-sha256")))]
 pub(crate) use portable::Hasher;
 
+/// The SHA-256 digest of everything `reader` yields.
+pub fn digest(mut reader: impl io::Read) -> io::Result<[u8; 32]> {
+    let mut hasher = Hasher::new()?;
+    let mut buffer = [0; 8192];
+    loop {
+        match reader.read(&mut buffer)? {
+            0 => return hasher.finish(),
+            count => hasher.update(&buffer[..count])?,
+        }
+    }
+}
+
 #[cfg(not(all(target_os = "espidf", feature = "esp-idf-sha256")))]
 mod portable {
     use super::io;

@@ -250,6 +250,9 @@ pub struct ReaderState {
     pub rotation: Rotation,
     #[serde(default)]
     pub gestures: Gestures,
+    /// Looks for a firmware update when the network comes up.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub check_updates: bool,
     /// Exchanges the directions of a device's two page buttons.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub swap_page_buttons: bool,
@@ -275,6 +278,7 @@ impl Default for ReaderState {
             idle_sleep: IdleSleep::default(),
             rotation: Rotation::default(),
             gestures: Gestures::default(),
+            check_updates: false,
             swap_page_buttons: false,
             swap_menu_buttons: false,
             full_refresh_interval: default_full_refresh_interval(),

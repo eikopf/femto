@@ -334,3 +334,34 @@ fn oversized_or_truncated_downloads_and_storage_failures_are_errors() {
         matches!(http::download_epub(&mut mock, SOURCE, Instant::now() + Duration::from_secs(5), Arc::new(AtomicBool::new(false)), None, &mut FailedDisk), Err(http::Error::Io(error)) if error.to_string() == "disk failed")
     );
 }
+
+#[test]
+fn file_downloads_accept_any_type_follow_redirects_and_enforce_the_callers_limit() {
+    let download = |responses: Vec<Vec<u8>>, limit| {
+        let mut mock = Mock {
+            responses: responses.into(),
+            ..Default::default()
+        };
+        let mut bytes = Vec::new();
+        let result = http::download_file(
+            &mut mock,
+            SOURCE,
+            Instant::now() + Duration::from_secs(5),
+            Arc::new(AtomicBool::new(false)),
+            limit,
+            &mut bytes,
+        );
+        (result.map(|download| download.source), bytes, mock.urls)
+    };
+    let redirect =
+        b"HTTP/1.1 302 Found\r\nLocation: https://assets.example/image.bin\r\nContent-Length: 0\r\n\r\n";
+    let file = b"HTTP/1.1 200 OK\r\nContent-Type: application/x-anything\r\nContent-Length: 5\r\n\r\nimage";
+    let (source, bytes, urls) = download(vec![redirect.to_vec(), file.to_vec()], 5);
+    assert_eq!(source.unwrap(), "https://assets.example/image.bin");
+    assert_eq!(bytes, b"image");
+    assert_eq!(urls, [SOURCE, "https://assets.example/image.bin"]);
+    // One byte over the limit is refused before any of it is stored.
+    let (result, bytes, _) = download(vec![file.to_vec()], 4);
+    assert!(result.is_err());
+    assert!(bytes.is_empty());
+}

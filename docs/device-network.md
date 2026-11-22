@@ -222,11 +222,24 @@ Reads stage at most 1024 bytes and copy them into the caller's buffer only after
 
 Host tests exercise an encrypted HTTP exchange from worker threads, reuse of the shared runtime, deferred abort during a nested operation, idempotent cleanup, lock contention through timeout, poisoned locks, and cancellation after a read without exposing bytes. Device runtime tests deny application operations after shutdown. The Xtensa build checks the portable stream and runtime driver. The reader manager and catalog worker share this driver for selected catalog HTTP origins. Device TLS over application TCP is compiled and integrated for the catalog worker. Physical TLS qualification remains unfinished.
 
+## Physical tailnet test
+
+On 2026-11-22 one Picco joined a Tailscale tailnet of nine other devices with the coordinator `controlplane.tailscale.com` and no auth key: it showed the approval link, and after approval in a browser `Connect existing identity` completed registration. Over a direct WireGuard path on the same LAN it browsed an OPDS catalog on a Linux peer running the official client (a 170 KiB feed in about four seconds), downloaded an EPUB of about 1 MiB in 27 seconds, and uploaded a KOReader reading position. Opening the catalog after a restart, including starting the session, took 18 seconds.
+
+The test found four defects that the Headscale fixture does not exercise, all fixed:
+
+- Tailscale's first map response lists peers under `PeersChanged`, not `Peers`. The coordinator rejected that as a delta inside a full map.
+- Tailscale sets `MachineAuthorized` on the local node only. Requiring it on peers left every peer unusable, and a request waited out its deadline without sending a packet. An absent flag now permits a peer; an explicit `false` still denies it.
+- The eight-packet input queue kept packets that no open flow or bound socket would ever consume, such as late segments of a closed connection. It filled after one large feed and every later connection timed out. A full queue now evicts its oldest unclaimed packet.
+- Modem sleep on a weak link (about -74 dBm) lost enough inbound packets to time out the coordinator name lookup. The radio stays awake while a session is open or other network work is in flight.
+
+A relayed (DERP) path, HTTPS to a peer, sleep with a session open, node-key renewal, a session lasting hours, and memory use with a session open were not tested on the device. While a session that had failed was still open, two firmware pushes over the USB console timed out; they succeeded after `Disconnect`. The cause is not known.
+
 ## Catalog tailnet routing
 
 An optional `/sdcard/femto/catalog-tailnet-origins` file selects tailnet transport for at most sixteen HTTP(S) origins, one per line. The file must be regular, UTF-8, and at most 8192 bytes. Blank lines and surrounding whitespace are ignored. Origins cannot contain credentials, query strings, fragments, or paths other than `/`. The existing origin parser normalizes hostnames and default ports. Missing configuration leaves catalog requests on LAN transport; malformed configuration disables the catalog menu. Configuration is read at startup.
 
-For a catalog at `http://books.example.ts.net:8080/opds`, the route file contains `http://books.example.ts.net:8080`. The URL in `catalog.url` still includes `/opds`. Connect the Tailnet menu first, then open Catalog. Each connection, including a redirect or acquisition connection, selects transport by its exact scheme, hostname, and port. Unlisted origins use LAN. A selected tailnet origin never falls back to LAN after failure.
+For a catalog at `http://books.example.ts.net:8080/opds`, the route file contains `http://books.example.ts.net:8080`. The URL in `catalog.url` still includes `/opds`. The reader opens a tailnet session with its existing identity when a service routed through the tailnet is used, so the Tailnet menu is needed only to create the identity, approve it, or disconnect. A request made while the session is still starting waits for it within the request deadline. Each connection, including a redirect or acquisition connection, selects transport by its exact scheme, hostname, and port. Unlisted origins use LAN. A selected tailnet origin never falls back to LAN after failure.
 
 The device tailnet adapter routes HTTP and HTTPS over encrypted WireGuard/DERP TCP. Peer names resolve only through the authenticated coordinator map; numeric addresses are rejected. HTTPS uses the callback-based Mbed TLS adapter with the same peer name for certificate verification and SNI. There is no HTTPS downgrade. Existing catalog Basic authentication rules still require `allow_http: true` for HTTP credentials, including this transport. LAN HTTPS retains its platform certificate checks.
 

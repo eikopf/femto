@@ -243,6 +243,19 @@ fn renewal_blocks_connection_until_its_worker_has_joined() {
 }
 
 #[test]
+fn a_routed_service_opens_one_session_without_showing_the_panel() {
+    let dir = configuration();
+    let mut manager = tailnet_menu::Manager::new(dir.path().join("tailnet.json"));
+    let ui = ReaderUi::default();
+    manager.ensure().unwrap();
+    manager.ensure().unwrap();
+    assert_eq!(STATE.with_borrow(|s| (s.starts, s.opened)), (1, 1));
+    assert!(manager.driver().is_some());
+    assert!(!ui.is_tailnet_open());
+    STATE.with_borrow_mut(|s| s.joined = true);
+    assert!(manager.close_and_wait(Duration::ZERO));
+}
+#[test]
 fn explicit_actions_preserve_runtime_until_shutdown_finishes() {
     let dir = configuration();
     let mut manager = tailnet_menu::Manager::new(dir.path().join("tailnet.json"));

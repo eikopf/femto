@@ -134,6 +134,9 @@ impl Kosync {
     pub fn load() -> Self {
         load(Self::KEY)
     }
+    pub fn uses_tailnet(&self) -> bool {
+        self.route == "tailnet"
+    }
     pub fn settings(&self) -> Result<femto_kosync::config::Settings, String> {
         femto_kosync::config::Settings::from_json(&bytes(self)).map_err(|e| e.to_string())
     }
@@ -216,6 +219,9 @@ impl Catalog {
         femto_catalog::http::Url::parse(&self.url)
             .ok()
             .map(|url| url.origin().ascii_serialization())
+    }
+    pub fn uses_tailnet(&self) -> bool {
+        !self.tailnet_origins.is_empty()
     }
     /// The catalog menu for these settings; `None` without an address.
     pub fn menu(&self) -> Result<Option<crate::catalog::CatalogMenu>, String> {

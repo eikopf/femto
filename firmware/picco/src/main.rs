@@ -175,7 +175,14 @@ fn run() -> Result<(), String> {
             }
         }
     }
-    let mut catalog = match services::Catalog::load().menu() {
+    let catalog_settings = services::Catalog::load();
+    let sync_settings = services::Kosync::load();
+    // A service routed through the tailnet opens the session when it is used.
+    let (catalog_tailnet, sync_tailnet) = (
+        catalog_settings.uses_tailnet(),
+        sync_settings.uses_tailnet(),
+    );
+    let mut catalog = match catalog_settings.menu() {
         Ok(catalog) => catalog,
         Err(error) => {
             log::warn!("Catalog unavailable: {error}");
@@ -184,7 +191,7 @@ fn run() -> Result<(), String> {
     };
     ui.set_catalog_available(catalog.is_some());
     // Sync is offered once an account is set; an incomplete draft is not an error.
-    let mut kosync = services::Kosync::load()
+    let mut kosync = sync_settings
         .settings()
         .ok()
         .map(femto_kosync::session::Session::new);
@@ -414,6 +421,9 @@ fn run() -> Result<(), String> {
             }
             if let Some(event) = ui.take_catalog_event() {
                 if let Some(catalog) = &mut catalog {
+                    if catalog_tailnet && let Err(error) = screen.tailnet.ensure() {
+                        ui.show_error(error);
+                    }
                     let driver = screen.tailnet.driver().map(|driver| driver.downgrade());
                     catalog.set_transport_factory(std::sync::Arc::new(move |origins| {
                         let refs: Vec<_> = origins.iter().map(String::as_str).collect();
@@ -433,6 +443,9 @@ fn run() -> Result<(), String> {
                 }
             }
             if let (Some(event), Some(sync)) = (ui.take_kosync_event(), kosync.as_mut()) {
+                if sync_tailnet && let Err(error) = screen.tailnet.ensure() {
+                    ui.show_error(error);
+                }
                 let driver = screen.tailnet.driver().map(|driver| driver.downgrade());
                 let transport = std::sync::Arc::new(move |origins: &[String]| {
                     let refs: Vec<_> = origins.iter().map(String::as_str).collect();

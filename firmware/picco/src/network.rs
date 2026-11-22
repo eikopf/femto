@@ -227,11 +227,21 @@ fn tls_error(error: sys::EspError) -> io::Error {
         io::Error::other(format!("TLS operation failed: {error}"))
     }
 }
+/// A failure on an established session is a lost connection: the peer was
+/// authenticated by the handshake, and a retry authenticates it again.
+fn session_error(error: sys::EspError) -> io::Error {
+    let error = tls_error(error);
+    if error.kind() == io::ErrorKind::WouldBlock {
+        return error;
+    }
+    log::warn!("{error}");
+    io::Error::new(io::ErrorKind::ConnectionReset, error)
+}
 struct Tls(EspTls<Adopted>);
 impl Read for Tls {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         crate::clock::require_ready()?;
-        let count = self.0.read(buffer).map_err(tls_error)?;
+        let count = self.0.read(buffer).map_err(session_error)?;
         crate::clock::require_ready()?;
         match count {
             // ESP-TLS combines close_notify and raw TCP EOF. Reject ambiguous EOF;
@@ -247,7 +257,7 @@ impl Read for Tls {
 impl Write for Tls {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         crate::clock::require_ready()?;
-        let count = self.0.write(buffer).map_err(tls_error)?;
+        let count = self.0.write(buffer).map_err(session_error)?;
         crate::clock::require_ready()?;
         Ok(count)
     }

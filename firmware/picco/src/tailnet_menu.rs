@@ -71,6 +71,15 @@ impl Manager {
         ui.set_tailnet_status(&self.rows);
         result
     }
+    /// Opens a session for a service routed through the tailnet when none
+    /// is open or closing, without showing the Tailnet panel. A request made
+    /// right away waits for the session within its own deadline.
+    pub fn ensure(&mut self) -> Result<(), String> {
+        if self.stopping || self.runtime.is_some() || self.rotation.is_some() {
+            return Ok(());
+        }
+        self.start(false)
+    }
     fn start(&mut self, provision: bool) -> Result<(), String> {
         if self.runtime.is_some() || self.rotation.is_some() {
             return Err("Disconnect the current tailnet session first".into());

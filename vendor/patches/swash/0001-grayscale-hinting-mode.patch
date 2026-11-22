@@ -1,0 +1,34 @@
+femto patch for swash 0.2.6
+Subject: scale: hint for grayscale instead of horizontal LCD subpixels
+
+The scaler's Skrifa hinting mode is a private constant:
+HintingMode::Smooth { lcd_subpixel: Some(LcdLayout::Horizontal), .. }.
+The public scaler API has a hinting on/off switch but no way to choose the
+mode.
+
+Set lcd_subpixel: None (and drop the now unused LcdLayout import). Smooth
+hinting and preserve_linear_metrics are unchanged.
+
+femto renders to an e-paper panel with one coverage value per pixel and no
+RGB subpixels, so LCD-targeted hinting is the wrong mode for it.
+
+--- a/src/scale/hinting_cache.rs
++++ b/src/scale/hinting_cache.rs
+@@ -2,7 +2,7 @@
+ use skrifa::{
+     instance::{NormalizedCoord, Size},
+     outline::{
+-        HintingInstance, HintingMode, LcdLayout, OutlineGlyphCollection, OutlineGlyphFormat,
++        HintingInstance, HintingMode, OutlineGlyphCollection, OutlineGlyphFormat,
+     },
+ };
+ 
+@@ -25,7 +25,7 @@
+ }
+ 
+ const HINTING_MODE: HintingMode = HintingMode::Smooth {
+-    lcd_subpixel: Some(LcdLayout::Horizontal),
++    lcd_subpixel: None,
+     preserve_linear_metrics: true,
+ };
+ 

@@ -1,0 +1,31 @@
+femto patch for esp-idf-svc 0.53.0
+Subject: fs/fatfs: build drive paths as "N:" instead of a raw drive byte
+
+Fatfs::drive_path_from returns [drive, 0]: the drive number as a raw byte.
+For drive 0 that is an empty string, and for other drives it is a control
+character rather than the FatFs logical-drive prefix "0:" .. "9:". The path
+is passed to f_mount in src/io.rs.
+
+Return "<digit>:\0" and assert the drive number is below 10.
+
+femto needs this together with 0005 so that f_mount addresses the intended
+volume. Host regression in femto: tests/firmware/test_fat_drive.py.
+
+--- a/src/fs/fatfs.rs
++++ b/src/fs/fatfs.rs
+@@ -209,11 +209,12 @@
+         Ok(MountedFatfs { fs: self, fatfs })
+     }
+ 
+-    pub(crate) fn drive_path_from(drive: u8) -> [core::ffi::c_char; 2] {
+-        [drive as _, 0]
++    pub(crate) fn drive_path_from(drive: u8) -> [core::ffi::c_char; 3] {
++        assert!(drive < 10);
++        [(b'0' + drive) as _, b':' as _, 0]
+     }
+ 
+-    pub(crate) fn drive_path(&self) -> [core::ffi::c_char; 2] {
++    pub(crate) fn drive_path(&self) -> [core::ffi::c_char; 3] {
+         Self::drive_path_from(self.drive)
+     }
+ }

@@ -1,0 +1,70 @@
+femto patch for miniz_oxide 0.9.1
+Subject: inflate/stream: box the decompressor and dictionary in InflateState
+
+With the "with-alloc" feature, InflateState holds Box<DecompressorOxide> and
+Box<[u8; TINFL_LZ_DICT_SIZE]> (32 KiB) instead of inline values. The
+dictionary is allocated through a Vec. Reset fills the existing dictionary
+instead of assigning a new array. Without "with-alloc" the layout is
+unchanged.
+
+Same motivation as 0001: bounded stack use on femto's 64 KiB worker stacks.
+The decompressor field is initialised with Box::default(); whether that
+avoids a stack temporary in every build profile has not been verified here.
+
+--- a/src/inflate/stream.rs
++++ b/src/inflate/stream.rs
+@@ -38,7 +38,7 @@
+     #[inline]
+     fn reset(&self, state: &mut InflateState) {
+         MinReset.reset(state);
+-        state.dict = [0; TINFL_LZ_DICT_SIZE];
++        state.dict.fill(0);
+     }
+ }
+ 
+@@ -60,6 +60,9 @@
+ #[derive(Clone)]
+ pub struct InflateState {
+     /// Inner decompressor struct
++    #[cfg(feature = "with-alloc")]
++    decomp: Box<DecompressorOxide>,
++    #[cfg(not(feature = "with-alloc"))]
+     decomp: DecompressorOxide,
+ 
+     /// Buffer of input bytes for matches.
+@@ -67,6 +70,9 @@
+     /// Cursor-like class.
+     /// We may also look into whether we need to keep a buffer here, or just one in the
+     /// decompressor struct.
++    #[cfg(feature = "with-alloc")]
++    dict: Box<[u8; TINFL_LZ_DICT_SIZE]>,
++    #[cfg(not(feature = "with-alloc"))]
+     dict: [u8; TINFL_LZ_DICT_SIZE],
+     /// Where in the buffer are we currently at?
+     dict_ofs: usize,
+@@ -85,7 +91,16 @@
+ impl Default for InflateState {
+     fn default() -> Self {
+         InflateState {
++            #[cfg(feature = "with-alloc")]
++            decomp: Box::default(),
++            #[cfg(not(feature = "with-alloc"))]
+             decomp: DecompressorOxide::default(),
++            #[cfg(feature = "with-alloc")]
++            dict: alloc::vec![0; TINFL_LZ_DICT_SIZE]
++                .into_boxed_slice()
++                .try_into()
++                .expect("dictionary length"),
++            #[cfg(not(feature = "with-alloc"))]
+             dict: [0; TINFL_LZ_DICT_SIZE],
+             dict_ofs: 0,
+             dict_avail: 0,
+@@ -308,7 +323,7 @@
+         let status = decompress(
+             &mut state.decomp,
+             next_in,
+-            &mut state.dict,
++            &mut state.dict[..],
+             state.dict_ofs,
+             decomp_flags,
+         );

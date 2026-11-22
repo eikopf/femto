@@ -1,0 +1,83 @@
+femto patch for epub-stream 0.1.0
+Subject: stream styled events for any XHTML resource, not only spine items
+
+Add RenderPrep::prepare_resource_with and EpubBook::resource_events, which
+take an OPF-relative href instead of a spine index. chapter_events now
+resolves the spine item's href and calls resource_events. The resource is
+read with the max_entry_bytes hard cap; stylesheets and images resolve
+against the resource path.
+
+femto renders manifest-declared XHTML documents that are outside the spine
+through the same styled-event path as chapters (docs/dependencies.md).
+
+Independent of 0002 in behaviour; it applies after 0002 only because both
+touch neighbouring lines.
+
+--- a/src/book.rs
++++ b/src/book.rs
+@@ -1570,6 +1570,20 @@
+         &mut self,
+         index: usize,
+         opts: ChapterEventsOptions,
++        on_item: F,
++    ) -> Result<usize, EpubError>
++    where
++        F: FnMut(StyledEventOrRun) -> Result<(), EpubError>,
++    {
++        let href = self.chapter(index)?.href;
++        self.resource_events(&href, opts, on_item)
++    }
++
++    /// Stream an OPF-relative XHTML resource using the chapter budgets and styling path.
++    pub fn resource_events<F>(
++        &mut self,
++        href: &str,
++        opts: ChapterEventsOptions,
+         mut on_item: F,
+     ) -> Result<usize, EpubError>
+     where
+@@ -1580,7 +1594,7 @@
+         let mut callback_error: Option<EpubError> = None;
+         let mut hit_cap = false;
+ 
+-        prep.prepare_chapter_with(self, index, |item| {
++        prep.prepare_resource_with(self, href, |item| {
+             if callback_error.is_some() || hit_cap {
+                 return;
+             }
+--- a/src/render_prep.rs
++++ b/src/render_prep.rs
+@@ -1521,6 +1521,33 @@
+         })
+     }
+ 
++    /// Prepare an OPF-relative XHTML resource, including documents outside the spine.
++    pub fn prepare_resource_with<R: std::io::Read + std::io::Seek, F: FnMut(StyledEventOrRun)>(
++        &mut self,
++        book: &mut EpubBook<R>,
++        href: &str,
++        mut on_item: F,
++    ) -> Result<(), RenderPrepError> {
++        let mut html = Vec::new();
++        book.read_resource_into_with_hard_cap(href, &mut html, self.opts.memory.max_entry_bytes)
++            .map_err(|e| {
++                RenderPrepError::new_with_phase(
++                    ErrorPhase::Parse,
++                    "BOOK_RESOURCE_READ",
++                    e.to_string(),
++                )
++                .with_path(href.to_string())
++            })?;
++        self.apply_chapter_stylesheets_with_budget(book, usize::MAX, href, &html)?;
++        let image_dimensions = self.collect_intrinsic_image_dimensions(book, href, &html);
++        let font_resolver = &self.font_resolver;
++        self.styler.style_chapter_bytes_with(&html, |item| {
++            let item = resolve_item_assets_for_chapter(href, Some(&image_dimensions), item);
++            let (item, _) = resolve_item_with_font(font_resolver, item);
++            on_item(item);
++        })
++    }
++
+     /// Prepare a chapter from caller-provided XHTML bytes and stream each styled item.
+     ///
+     /// This avoids re-reading chapter bytes from the ZIP archive and is intended for

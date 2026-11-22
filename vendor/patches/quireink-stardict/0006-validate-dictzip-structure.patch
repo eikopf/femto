@@ -1,0 +1,258 @@
+femto patch for quireink-stardict 0.3.0
+Subject: validate dictzip header, chunk table, footer and chunk sizes
+
+- Reject gzip headers with reserved flag bits set.
+- Check the RA subfield: version 1, non-zero chunk length and count, table
+  length matching the count, no empty chunks.
+- Bound the optional name/comment header strings to 16 KiB.
+- Read the gzip footer; require the compressed payload to fit in the file
+  and the uncompressed size (ISIZE) to agree with the chunk count.
+- Reads must lie inside the declared uncompressed size; offset arithmetic is
+  checked.
+- Every selected chunk is inflated completely and must produce exactly its
+  declared size (the sink can no longer stop inflation early).
+
+The gzip CRC is still not verified.
+
+The test fixture generator (tests/lookup.rs) is changed to match what real
+dictzip files look like and what the checks now require: one deflate stream
+with a full flush per chunk, followed by a gzip trailer. It uses flate2 and
+crc32fast as new dev-dependencies (pinned in the normalised Cargo.toml;
+Cargo.toml.orig is not touched, matching the vendored tree).
+
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -60,6 +60,14 @@
+ [dependencies.quireink-platform]
+ version = "0.3.0"
+ 
++[dev-dependencies.flate2]
++version = "=1.1.11"
++default-features = false
++features = ["rust_backend"]
++
++[dev-dependencies.crc32fast]
++version = "=1.5.4"
++
+ [dev-dependencies.miniz_oxide]
+ version = "0.9.1"
+ features = ["with-alloc"]
+--- a/src/dict.rs
++++ b/src/dict.rs
+@@ -32,6 +32,7 @@
+ pub(crate) struct Dictzip {
+     path: String,
+     chunk_len: u64,
++    uncompressed: u64,
+     /// Where the deflate data starts.
+     data: u64,
+     /// Start of each chunk relative to `data`, and the end of the last.
+@@ -92,7 +93,7 @@
+             return Err(malformed("not a gzip file"));
+         }
+         let flags = head[3];
+-        if flags & 4 == 0 {
++        if flags & 4 == 0 || flags & 0xe0 != 0 {
+             return Err(malformed("gzip without dictzip chunks"));
+         }
+         let extra_len = u16_at(&head, 10).unwrap_or(0) as usize;
+@@ -114,11 +115,22 @@
+         let table = table.ok_or_else(|| malformed("gzip without dictzip chunks"))?;
+         let chunk_len = u16_at(table, 2).ok_or_else(|| malformed("dictzip table"))?;
+         let count = u16_at(table, 4).ok_or_else(|| malformed("dictzip table"))? as usize;
++        if u16_at(table, 0) != Some(1)
++            || count == 0
++            || chunk_len == 0
++            || table.len() != 6 + 2 * count
++        {
++            return Err(malformed("dictzip table"));
++        }
+         let mut chunks = Vec::with_capacity(count + 1);
+         let mut start = 0;
+         chunks.push(0);
+         for i in 0..count {
+-            start += u16_at(table, 6 + 2 * i).ok_or_else(|| malformed("dictzip table"))?;
++            let size = u16_at(table, 6 + 2 * i).ok_or_else(|| malformed("dictzip table"))?;
++            if size == 0 {
++                return Err(malformed("empty dictzip chunk"));
++            }
++            start += size;
+             chunks.push(start);
+         }
+         // The deflate data follows the optional name, comment and CRC.
+@@ -131,19 +143,36 @@
+         if flags & 2 != 0 {
+             data += 2;
+         }
+-        if chunk_len == 0 {
+-            return Err(malformed("dictzip table"));
++        let file_size = storage.size(&path)?;
++        if data + start + 8 > file_size {
++            return Err(malformed("dictzip payload cut short"));
++        }
++        let mut footer = [0u8; 8];
++        if storage.read_at(&path, file_size - 8, &mut footer)? != 8 {
++            return Err(malformed("dictzip footer cut short"));
++        }
++        let uncompressed = u64::from(u32::from_le_bytes([
++            footer[4], footer[5], footer[6], footer[7],
++        ]));
++        if uncompressed == 0 || uncompressed.div_ceil(chunk_len) != count as u64 {
++            return Err(malformed("dictzip uncompressed size"));
+         }
+         Ok(Dictzip {
+             path,
+             chunk_len,
++            uncompressed,
+             data,
+             chunks,
+         })
+     }
+ 
+     fn read(&self, storage: &dyn Storage, offset: u64, size: usize) -> Result<Vec<u8>, Error> {
+-        let end = offset + size as u64;
++        let end = offset
++            .checked_add(size as u64)
++            .ok_or_else(|| malformed("definition offset overflow"))?;
++        if end > self.uncompressed {
++            return Err(malformed("definition outside dictzip data"));
++        }
+         let mut out = Vec::new();
+         out.try_reserve_exact(size)
+             .map_err(|_| Error::OutOfMemory)?;
+@@ -162,19 +191,21 @@
+                 if lo < hi {
+                     out.extend_from_slice(&bytes[(lo - from) as usize..(hi - from) as usize]);
+                 }
+-                to < end
+             })?;
+         }
++        if out.len() != size {
++            return Err(malformed("definition ends early"));
++        }
+         Ok(out)
+     }
+ 
+     /// Inflates chunk `chunk`, passing its bytes to `sink` with their
+-    /// position in the chunk; the sink returns `false` to stop.
++    /// position in the chunk. The complete selected chunk is validated.
+     fn inflate(
+         &self,
+         storage: &dyn Storage,
+         chunk: usize,
+-        sink: &mut dyn FnMut(u64, &[u8]) -> bool,
++        sink: &mut dyn FnMut(u64, &[u8]),
+     ) -> Result<(), Error> {
+         let mut offset = self.data + self.chunks[chunk];
+         let mut remaining = self.chunks[chunk + 1] - self.chunks[chunk];
+@@ -182,6 +213,9 @@
+         let mut window = vec![0u8; WINDOW];
+         let mut input = vec![0u8; INPUT];
+         let (mut start, mut stop, mut position, mut produced) = (0usize, 0usize, 0usize, 0u64);
++        let expected = self
++            .chunk_len
++            .min(self.uncompressed - chunk as u64 * self.chunk_len);
+         loop {
+             if start == stop && remaining > 0 {
+                 let n = (remaining as usize).min(INPUT);
+@@ -206,28 +240,34 @@
+             );
+             start += consumed;
+             if written > 0 {
+-                if !sink(produced, &window[position..position + written]) {
+-                    return Ok(());
++                if produced + written as u64 > expected {
++                    return Err(malformed("dictzip chunk expands beyond declared size"));
+                 }
++                sink(produced, &window[position..position + written]);
+                 produced += written as u64;
+             }
+             position = (position + written) & (WINDOW - 1);
+             match status {
+-                TINFLStatus::Done => return Ok(()),
++                TINFLStatus::Done => break,
+                 TINFLStatus::HasMoreOutput => {}
+                 // The end of the chunk.
+-                TINFLStatus::NeedsMoreInput if remaining == 0 && start == stop => return Ok(()),
++                TINFLStatus::NeedsMoreInput if remaining == 0 && start == stop => break,
+                 TINFLStatus::NeedsMoreInput => {}
+                 _ => return Err(malformed("corrupt dictzip data")),
+             }
+         }
++        if produced != expected {
++            return Err(malformed("dictzip chunk ends early"));
++        }
++        Ok(())
+     }
+ }
+ 
+ /// The offset after the NUL-terminated string at `at`.
+ fn skip_string(storage: &dyn Storage, path: &str, mut at: u64) -> Result<u64, Error> {
+     let mut buf = [0u8; 256];
+-    loop {
++    let end = at + 16 * 1024;
++    while at < end {
+         let n = storage.read_at(path, at, &mut buf)?;
+         if n == 0 {
+             return Err(malformed("gzip header cut short"));
+@@ -237,4 +277,5 @@
+         }
+         at += n as u64;
+     }
++    Err(malformed("gzip header string too long"))
+ }
+--- a/tests/lookup.rs
++++ b/tests/lookup.rs
+@@ -61,12 +61,32 @@
+ }
+ 
+ /// A dictzip file: gzip header with the `RA` chunk table, then each chunk
+-/// compressed on its own.
++/// separated by a full flush within one deflate stream, followed by a gzip trailer.
+ fn dictzip(data: &[u8], chunk: usize) -> Vec<u8> {
+-    let parts: Vec<Vec<u8>> = data
+-        .chunks(chunk)
+-        .map(|c| miniz_oxide::deflate::compress_to_vec(c, 6))
+-        .collect();
++    use flate2::{Compress, Compression, FlushCompress, Status};
++    use std::io::Read;
++    let mut compressor = Compress::new(Compression::new(6), false);
++    let mut parts = Vec::new();
++    for input in data.chunks(chunk) {
++        let mut part = Vec::with_capacity(65536);
++        let before = compressor.total_in();
++        assert_eq!(
++            compressor
++                .compress_vec(input, &mut part, FlushCompress::Full)
++                .unwrap(),
++            Status::Ok
++        );
++        assert_eq!(compressor.total_in() - before, input.len() as u64);
++        assert!(part.len() < 65536);
++        parts.push(part);
++    }
++    let mut finish = Vec::with_capacity(65536);
++    assert_eq!(
++        compressor
++            .compress_vec(&[], &mut finish, FlushCompress::Finish)
++            .unwrap(),
++        Status::StreamEnd
++    );
+     let mut table = Vec::new();
+     table.extend_from_slice(&1u16.to_le_bytes());
+     table.extend_from_slice(&(chunk as u16).to_le_bytes());
+@@ -84,6 +104,14 @@
+     for part in parts {
+         file.extend_from_slice(&part);
+     }
++    file.extend_from_slice(&finish);
++    file.extend_from_slice(&crc32fast::hash(data).to_le_bytes());
++    file.extend_from_slice(&(data.len() as u32).to_le_bytes());
++    let mut decoded = Vec::new();
++    flate2::read::GzDecoder::new(file.as_slice())
++        .read_to_end(&mut decoded)
++        .unwrap();
++    assert_eq!(decoded, data);
+     file
+ }
+ 

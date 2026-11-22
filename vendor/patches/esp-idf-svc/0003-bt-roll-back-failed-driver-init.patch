@@ -1,0 +1,116 @@
+femto patch for esp-idf-svc 0.53.0
+Subject: bt: release initialised stages when BtDriver initialisation fails
+
+BtDriver::init runs controller init, controller enable, bluedroid init and
+bluedroid enable with `?` after each step. A failure after the first step
+returns the error and leaves the earlier stages initialised, so a later
+retry finds the stack occupied.
+
+Add a drop guard (BtInitRollback) created after esp_bt_controller_init
+succeeds:
+- controller enable fails: deinitialise the controller;
+- bluedroid enable fails: disable/deinitialise bluedroid, then the
+  controller, checking the SDK status before each call;
+- bluedroid init fails: do nothing except log that a restart is required.
+  ESP-IDF 5.5.2 can leave internal tasks behind in that case without setting
+  its public initialised status, and esp_bluedroid_deinit rejects that state.
+Cleanup errors are logged and stop the rollback; the original error is still
+what init returns. On success the guard is disarmed.
+
+femto needs this so the remote-input service can retry Bluetooth start-up
+after a transient failure. Host regression in femto:
+tests/firmware/test_bt_init.py (models the SDK; does not run it).
+
+--- a/src/bt.rs
++++ b/src/bt.rs
+@@ -6,7 +6,7 @@
+ use alloc::boxed::Box;
+ use alloc::sync::Arc;
+ 
+-use ::log::info;
++use ::log::{info, warn};
+ 
+ use num_enum::TryFromPrimitive;
+ 
+@@ -935,15 +935,23 @@
+ 
+         info!("Init bluetooth controller");
+         esp!(unsafe { esp_bt_controller_init(&mut bt_cfg) })?;
++        let mut rollback = BtInitRollback {
++            host_started: false,
++            host_initialized: false,
++            committed: false,
++        };
+ 
+         info!("Enable bluetooth controller");
+         esp!(unsafe { esp_bt_controller_enable(M::mode()) })?;
+ 
+         info!("Init bluedroid");
++        rollback.host_started = true;
+         esp!(unsafe { esp_bluedroid_init() })?;
++        rollback.host_initialized = true;
+ 
+         info!("Enable bluedroid");
+         esp!(unsafe { esp_bluedroid_enable() })?;
++        rollback.committed = true;
+ 
+         Ok(())
+     }
+@@ -962,6 +970,57 @@
+     }
+ }
+ 
++// Owns only a successfully initialized controller. A failed host init can leave
++// internal tasks behind without a public initialized status in ESP-IDF 5.5.2.
++struct BtInitRollback {
++    host_started: bool,
++    host_initialized: bool,
++    committed: bool,
++}
++
++impl Drop for BtInitRollback {
++    fn drop(&mut self) {
++        if self.committed {
++            return;
++        }
++        if self.host_started && !self.host_initialized {
++            warn!("Bluetooth host initialization left uncertain SDK state; restart required");
++            return;
++        }
++        if self.host_initialized {
++            let status = unsafe { esp_bluedroid_get_status() };
++            if status == esp_bluedroid_status_t_ESP_BLUEDROID_STATUS_ENABLED {
++                if let Err(error) = esp!(unsafe { esp_bluedroid_disable() }) {
++                    warn!("Bluetooth rollback could not disable host: {error}; restart required");
++                    return;
++                }
++            } else if status != esp_bluedroid_status_t_ESP_BLUEDROID_STATUS_INITIALIZED {
++                warn!("Bluetooth rollback found unexpected host state; restart required");
++                return;
++            }
++            if let Err(error) = esp!(unsafe { esp_bluedroid_deinit() }) {
++                warn!("Bluetooth rollback could not deinitialize host: {error}; restart required");
++                return;
++            }
++        }
++        let status = unsafe { esp_bt_controller_get_status() };
++        if status == esp_bt_controller_status_t_ESP_BT_CONTROLLER_STATUS_ENABLED {
++            if let Err(error) = esp!(unsafe { esp_bt_controller_disable() }) {
++                warn!("Bluetooth rollback could not disable controller: {error}; restart required");
++                return;
++            }
++        } else if status != esp_bt_controller_status_t_ESP_BT_CONTROLLER_STATUS_INITED {
++            warn!("Bluetooth rollback found unexpected controller state; restart required");
++            return;
++        }
++        if let Err(error) = esp!(unsafe { esp_bt_controller_deinit() }) {
++            warn!(
++                "Bluetooth rollback could not deinitialize controller: {error}; restart required"
++            );
++        }
++    }
++}
++
+ impl<M> Drop for BtDriver<'_, M>
+ where
+     M: BtMode,

@@ -1,0 +1,1803 @@
+femto patch for epub-stream 0.1.0
+Subject: carry more CSS and XHTML semantics through the styled event stream
+
+This patch is NOT a single concern. It is the remainder of femto's changes
+to src/css.rs and src/render_prep.rs after 0001-0003 are removed. The
+changes below were made over time in the same functions (CssStyle,
+parse_declarations, Styler::style_chapter_bytes_with,
+resolve_context_style, element_ctx_from_start) and often on the same lines,
+so they could not be separated mechanically. It needs to be split by hand
+before any of it is proposed upstream. Contents:
+
+ 1. white-space: CSS property with inheritance; a streaming normaliser that
+    shares collapse state across runs, entities and CDATA, keeps U+00A0,
+    normalises CR/CRLF; <pre> defaults to pre and emits paragraph events;
+    code/kbd/samp no longer imply preservation. Replaces
+    normalize_plain_text_whitespace, which trimmed spaces at text-node
+    boundaries and so removed spaces around inline elements.
+ 2. Anchors and links: Anchor, LinkStart, LinkEnd items from id/xml:id/name
+    and <a href>; attribute values unescaped and capped at 4096 bytes.
+ 3. Notes: NoteReferenceStart for epub:type=noteref / role=doc-noteref
+    links; NoteBodyStart/NoteBodyEnd around epub:type footnote/endnote and
+    role doc-footnote/doc-endnote elements. Uses NsReader so the epub:type
+    namespace is resolved rather than matched by prefix.
+ 4. Language: inherited lang / xml:lang on StyledRun (xml:lang wins; an
+    empty value clears inheritance; malformed tags are an error).
+ 5. hyphens property with inheritance.
+ 6. text-align: start/end/inherit values; alignment taken from the
+    containing block, not from inline elements.
+ 7. direction property and the XHTML dir attribute, block-level.
+ 8. tab-size property (number, px, em), em resolved at the declaring element.
+ 9. text-indent property (px, em, %), em resolved at the declaring element.
+10. Lists: ListStart/ListEnd, list-style-type, ol type/start/reversed and
+    li value/type, including a bounded pre-pass that counts items of
+    reversed lists.
+11. Images: width, height, min-*/max-* (px, %, auto/none) carried on
+    StyledImage without inheritance; intrinsic-dimension back-fill is
+    skipped when CSS dimensions or minima are present.
+12. display property (inline/block/none/inherit), reported only through
+    SourceElement.
+13. Source tracking (RenderPrepOptions::track_source,
+    Styler::with_source_tracking): TextSource token ranges and per-character
+    offsets on runs, SourceElement items, StyledImage::source_offset. Used by
+    femto to map reading positions to KOReader XPointers.
+
+All of these add public fields or enum variants, so each is a breaking API
+change for epub-stream. Tests for most of these are included in the same files.
+femto's reasons are recorded in docs/dependencies.md, docs/typography.md,
+docs/navigation.md and docs/koreader-sync.md.
+
+--- a/src/book.rs
++++ b/src/book.rs
+@@ -2896,7 +2896,14 @@
+                     RenderPrepTrace::Event => panic!("run item should produce run trace context"),
+                 }
+             }
+-            StyledEventOrRun::Event(_) => {
++            StyledEventOrRun::Event(_)
++            | StyledEventOrRun::SourceElement(_)
++            | StyledEventOrRun::NoteBodyStart
++            | StyledEventOrRun::NoteBodyEnd
++            | StyledEventOrRun::Anchor(_)
++            | StyledEventOrRun::LinkStart(_)
++            | StyledEventOrRun::NoteReferenceStart(_)
++            | StyledEventOrRun::LinkEnd => {
+                 assert!(matches!(trace, RenderPrepTrace::Event));
+             }
+             StyledEventOrRun::Image(_) => {
+--- a/src/css.rs
++++ b/src/css.rs
+@@ -57,6 +57,63 @@
+     Italic,
+ }
+ 
++/// First-line indentation. Negative and hanging indents are not supported.
++#[derive(Clone, Copy, Debug, PartialEq)]
++pub enum TextIndent {
++    /// Physical pixel length.
++    Px(f32),
++    /// Font-relative length.
++    Em(f32),
++    /// Percentage of the text column.
++    Percent(f32),
++    /// Parent computed value.
++    Inherit,
++}
++
++/// Tab interval in space advances or CSS lengths.
++#[derive(Clone, Copy, Debug, PartialEq)]
++pub enum TabSize {
++    /// Multiple of the declaring element's font size.
++    Em(f32),
++    /// Multiple of the containing block's space advance.
++    Spaces(f32),
++    /// Absolute CSS pixels.
++    Px(f32),
++    /// Resolve against the parent element.
++    Inherit,
++}
++
++/// Whitespace processing and wrapping declarations.
++#[derive(Clone, Copy, Debug, PartialEq, Default)]
++pub enum WhiteSpace {
++    /// Collapse spaces and segment breaks.
++    #[default]
++    Normal,
++    /// Collapse whitespace and suppress soft wrapping.
++    NoWrap,
++    /// Preserve whitespace and suppress soft wrapping.
++    Pre,
++    /// Preserve whitespace with soft wrapping.
++    PreWrap,
++    /// Preserve segment breaks and collapse spaces.
++    PreLine,
++    /// Resolve against the parent element.
++    Inherit,
++}
++
++/// Paragraph base direction. Auto is supplied by XHTML dir, not CSS.
++#[derive(Clone, Copy, Debug, PartialEq)]
++pub enum Direction {
++    /// Left-to-right base embedding level.
++    Ltr,
++    /// Right-to-left base embedding level.
++    Rtl,
++    /// Automatic base direction from XHTML markup.
++    Auto,
++    /// Inherit the parent direction.
++    Inherit,
++}
++
+ /// Text alignment
+ #[derive(Clone, Copy, Debug, PartialEq, Default)]
+ #[non_exhaustive]
+@@ -70,14 +127,104 @@
+     Right,
+     /// Justified
+     Justify,
++    /// Logical paragraph start.
++    Start,
++    /// Logical paragraph end.
++    End,
++    /// Inherited value, including unset.
++    Inherit,
++}
++
++/// Hyphenation declaration. Inherit also represents the inherited unset value.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Hyphens {
++    /// Disable explicit and automatic hyphenation.
++    None,
++    /// Permit only explicit hyphenation opportunities.
++    Manual,
++    /// Permit explicit and dictionary opportunities.
++    Auto,
++    /// Resolve against the parent element.
++    Inherit,
++}
++
++/// Supported inherited list marker styles.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum ListStyleType {
++    /// Filled round bullet.
++    Disc,
++    /// Open round bullet.
++    Circle,
++    /// Square bullet.
++    Square,
++    /// Decimal digits.
++    Decimal,
++    /// Lowercase Latin letters.
++    LowerAlpha,
++    /// Uppercase Latin letters.
++    UpperAlpha,
++    /// Lowercase Roman numerals.
++    LowerRoman,
++    /// Uppercase Roman numerals.
++    UpperRoman,
++    /// Suppress the marker.
++    None,
++    /// Resolve against the parent element.
++    Inherit,
++}
++
++/// Image dimension or maximum in the supported paged-layout subset.
++#[derive(Clone, Copy, Debug, PartialEq)]
++pub enum ImageLimit {
++    /// Automatic dimension, or no author maximum.
++    None,
++    /// Nonnegative CSS pixel limit.
++    Px(f32),
++    /// Nonnegative percentage of the containing content box.
++    Percent(f32),
++}
++
++/// Display classes used when constructing source text nodes.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Display {
++    /// Inline formatting.
++    Inline,
++    /// Block, table, list-item or inline-block formatting.
++    Block,
++    /// Hidden element.
++    None,
++    /// Explicit inheritance from the parent element.
++    Inherit,
+ }
+ 
+-/// A set of CSS property values
+-///
+ /// All fields are optional — `None` means "not specified" (inherit from parent
+ /// or use default).
+ #[derive(Clone, Debug, Default, PartialEq)]
+ pub struct CssStyle {
++    /// Author display category, retained for source-position interoperability.
++    pub display: Option<Display>,
++    /// Non-inherited image width; ImageLimit::None means auto.
++    pub width: Option<ImageLimit>,
++    /// Non-inherited image height; ImageLimit::None means auto.
++    pub height: Option<ImageLimit>,
++    /// Non-inherited image width constraint.
++    pub max_width: Option<ImageLimit>,
++    /// Non-inherited image height constraint.
++    pub max_height: Option<ImageLimit>,
++    /// Non-inherited minimum image width; None resolves to zero.
++    pub min_width: Option<ImageLimit>,
++    /// Non-inherited minimum image height; None resolves to zero.
++    pub min_height: Option<ImageLimit>,
++    /// Inherited list marker style.
++    pub list_style_type: Option<ListStyleType>,
++    /// Inherited first-line indentation.
++    pub text_indent: Option<TextIndent>,
++    /// Inherited tab interval.
++    pub tab_size: Option<TabSize>,
++    /// Whitespace declaration, inherited when absent.
++    pub white_space: Option<WhiteSpace>,
++    /// Optional hyphenation policy.
++    pub hyphens: Option<Hyphens>,
+     /// Font size
+     pub font_size: Option<FontSize>,
+     /// Font family name
+@@ -88,6 +235,8 @@
+     pub font_style: Option<FontStyle>,
+     /// Text alignment
+     pub text_align: Option<TextAlign>,
++    /// Declared base direction, inherited when absent.
++    pub direction: Option<Direction>,
+     /// Line height
+     pub line_height: Option<LineHeight>,
+     /// Letter spacing in pixels
+@@ -106,7 +255,8 @@
+ 
+     /// Check if any property is set
+     pub fn is_empty(&self) -> bool {
+-        self.font_size.is_none()
++        self.display.is_none() && self.width.is_none() && self.height.is_none() && self.max_width.is_none() && self.max_height.is_none() && self.min_width.is_none() && self.min_height.is_none() && self.list_style_type.is_none() && self.text_indent.is_none() && self.tab_size.is_none() && self.white_space.is_none() && self.direction.is_none() && self.hyphens.is_none()
++            && self.font_size.is_none()
+             && self.font_family.is_none()
+             && self.font_weight.is_none()
+             && self.font_style.is_none()
+@@ -119,6 +269,19 @@
+ 
+     /// Merge another style into this one (other's values take precedence)
+     pub fn merge(&mut self, other: &CssStyle) {
++        if other.width.is_some() { self.width = other.width; }
++        if other.height.is_some() { self.height = other.height; }
++        if other.max_width.is_some() { self.max_width = other.max_width; }
++        if other.max_height.is_some() { self.max_height = other.max_height; }
++        if other.min_width.is_some() { self.min_width = other.min_width; }
++        if other.min_height.is_some() { self.min_height = other.min_height; }
++        if other.list_style_type.is_some() { self.list_style_type = other.list_style_type; }
++        if other.text_indent.is_some() { self.text_indent = other.text_indent; }
++        if other.tab_size.is_some() { self.tab_size = other.tab_size; }
++        if other.white_space.is_some() { self.white_space = other.white_space; }
++        if other.display.is_some() { self.display = other.display; }
++        if other.direction.is_some() { self.direction = other.direction; }
++        if other.hyphens.is_some() { self.hyphens = other.hyphens; }
+         if other.font_size.is_some() {
+             self.font_size = other.font_size;
+         }
+@@ -350,6 +513,119 @@
+         let value = decl[colon_pos + 1..].trim();
+ 
+         match property.as_str() {
++            "width" | "height" | "max-width" | "max-height" | "min-width" | "min-height" => {
++                let dimension = property == "width" || property == "height";
++                let minimum = property.starts_with("min-");
++                let value = value.to_ascii_lowercase();
++                let parsed = match value.as_str() {
++                    "initial" | "unset" => Some(if minimum { ImageLimit::Px(0.0) } else { ImageLimit::None }),
++                    "auto" if dimension => Some(ImageLimit::None),
++                    "none" if !dimension && !minimum => Some(ImageLimit::None),
++                    "0" => Some(ImageLimit::Px(0.0)),
++                    _ => ["px", "%"].into_iter().find_map(|unit| {
++                        let number = value.strip_suffix(unit)?.parse::<f32>().ok()?;
++                        if !number.is_finite() || number < 0.0 { return None; }
++                        Some(if unit == "%" { ImageLimit::Percent(number) } else { ImageLimit::Px(number) })
++                    }),
++                };
++                if parsed.is_some() {
++                    if property == "width" { style.width = parsed; }
++                    else if property == "height" { style.height = parsed; }
++                    else if property == "max-width" { style.max_width = parsed; }
++                    else if property == "max-height" { style.max_height = parsed; }
++                    else if property == "min-width" { style.min_width = parsed; }
++                    else { style.min_height = parsed; }
++                }
++            }
++            "list-style-type" => {
++                let parsed = match value.to_ascii_lowercase().as_str() {
++                    "disc" | "initial" => Some(ListStyleType::Disc),
++                    "circle" => Some(ListStyleType::Circle),
++                    "square" => Some(ListStyleType::Square),
++                    "decimal" => Some(ListStyleType::Decimal),
++                    "lower-alpha" | "lower-latin" => Some(ListStyleType::LowerAlpha),
++                    "upper-alpha" | "upper-latin" => Some(ListStyleType::UpperAlpha),
++                    "lower-roman" => Some(ListStyleType::LowerRoman),
++                    "upper-roman" => Some(ListStyleType::UpperRoman),
++                    "none" => Some(ListStyleType::None),
++                    "inherit" | "unset" => Some(ListStyleType::Inherit),
++                    _ => None,
++                };
++                if parsed.is_some() { style.list_style_type = parsed; }
++            }
++            "text-indent" => {
++                let value = value.to_ascii_lowercase();
++                let parsed = match value.as_str() {
++                    "inherit" | "unset" => Some(TextIndent::Inherit),
++                    "initial" | "0" => Some(TextIndent::Px(0.0)),
++                    _ => ["px", "em", "%"].into_iter().find_map(|unit| {
++                        let number = value.strip_suffix(unit)?.parse::<f32>().ok()?;
++                        if !number.is_finite() { return None; }
++                        Some(match unit { "em" => TextIndent::Em(number), "%" => TextIndent::Percent(number), _ => TextIndent::Px(number) })
++                    }),
++                };
++                if parsed.is_some() { style.text_indent = parsed; }
++            }
++            "tab-size" => {
++                let value = value.to_ascii_lowercase();
++                let parsed = match value.as_str() {
++                    "inherit" | "unset" => Some(TabSize::Inherit),
++                    "initial" => Some(TabSize::Spaces(8.0)),
++                    _ => {
++                        let (number, unit) = if let Some(n) = value.strip_suffix("px") { (n, "px") }
++                            else if let Some(n) = value.strip_suffix("em") { (n, "em") }
++                            else { (value.as_str(), "") };
++                        number.parse::<f32>().ok()
++                            .filter(|n| n.is_finite() && *n >= 0.0)
++                            .map(|n| match unit { "px" => TabSize::Px(n), "em" => TabSize::Em(n), _ => TabSize::Spaces(n) })
++                    }
++                };
++                if parsed.is_some() { style.tab_size = parsed; }
++            }
++            "white-space" => {
++                let mode = match value.to_ascii_lowercase().as_str() {
++                    "normal" | "initial" => Some(WhiteSpace::Normal),
++                    "nowrap" => Some(WhiteSpace::NoWrap),
++                    "pre" => Some(WhiteSpace::Pre),
++                    "pre-wrap" => Some(WhiteSpace::PreWrap),
++                    "pre-line" => Some(WhiteSpace::PreLine),
++                    "inherit" | "unset" => Some(WhiteSpace::Inherit),
++                    _ => None,
++                };
++                if mode.is_some() { style.white_space = mode; }
++            }
++            "display" => {
++                let display = match value.to_ascii_lowercase().as_str() {
++                    "inline" | "initial" | "unset" => Some(Display::Inline),
++                    "none" => Some(Display::None),
++                    "inherit" => Some(Display::Inherit),
++                    "block" | "inline-block" | "list-item" | "table" | "inline-table"
++                    | "table-row-group" | "table-header-group" | "table-footer-group"
++                    | "table-row" | "table-cell" | "table-column" | "table-column-group"
++                    | "table-caption" => Some(Display::Block),
++                    _ => None,
++                };
++                if display.is_some() { style.display = display; }
++            }
++            "direction" => {
++                let direction = match value.to_ascii_lowercase().as_str() {
++                    "ltr" | "initial" => Some(Direction::Ltr),
++                    "rtl" => Some(Direction::Rtl),
++                    "inherit" | "unset" => Some(Direction::Inherit),
++                    _ => None,
++                };
++                if direction.is_some() { style.direction = direction; }
++            }
++            "hyphens" => {
++                let policy = match value.to_ascii_lowercase().as_str() {
++                    "none" => Some(Hyphens::None),
++                    "manual" | "initial" => Some(Hyphens::Manual),
++                    "auto" => Some(Hyphens::Auto),
++                    "inherit" | "unset" => Some(Hyphens::Inherit),
++                    _ => None,
++                };
++                if policy.is_some() { style.hyphens = policy; }
++            }
+             "font-size" => {
+                 style.font_size = parse_font_size(value);
+             }
+@@ -380,6 +656,9 @@
+                     "center" => Some(TextAlign::Center),
+                     "right" => Some(TextAlign::Right),
+                     "justify" => Some(TextAlign::Justify),
++                    "start" | "initial" => Some(TextAlign::Start),
++                    "end" => Some(TextAlign::End),
++                    "inherit" | "unset" => Some(TextAlign::Inherit),
+                     _ => None,
+                 };
+             }
+@@ -465,6 +744,62 @@
+ 
+ #[cfg(test)]
+ mod tests {
++    #[test]
++    fn image_dimensions_parse_auto_and_reject_invalid_overrides() {
++        for (value, expected) in [("0", ImageLimit::Px(0.0)), ("1.5px", ImageLimit::Px(1.5)),
++            ("25%", ImageLimit::Percent(25.0)), ("auto", ImageLimit::None),
++            ("initial", ImageLimit::None), ("unset", ImageLimit::None)] {
++            let style = parse_inline_style(&alloc::format!("width: {}; height: {}", value, value)).unwrap();
++            assert_eq!(style.width, Some(expected));
++            assert_eq!(style.height, Some(expected));
++            assert!(!style.is_empty());
++        }
++        for value in ["-1px", "NaNpx", "inf%", "12", "none", "inherit", "calc(50%)", "1em"] {
++            let style = parse_inline_style(&alloc::format!("width:7px; height:9px; width:{}; height:{}", value, value)).unwrap();
++            assert_eq!(style.width, Some(ImageLimit::Px(7.0)));
++            assert_eq!(style.height, Some(ImageLimit::Px(9.0)));
++        }
++    }
++
++    #[test]
++    fn image_minimums_parse_and_invalid_overrides_preserve_cascade() {
++        for (value, expected) in [("0", ImageLimit::Px(0.0)), ("1.5px", ImageLimit::Px(1.5)),
++            ("50%", ImageLimit::Percent(50.0)), ("initial", ImageLimit::Px(0.0)), ("unset", ImageLimit::Px(0.0))] {
++            let style = parse_inline_style(&alloc::format!("min-width:{};min-height:{}", value, value)).unwrap();
++            assert_eq!(style.min_width, Some(expected));
++            assert_eq!(style.min_height, Some(expected));
++            assert!(!style.is_empty());
++        }
++        for value in ["-1px", "-1%", "NaNpx", "inf%", "12", "auto", "none", "inherit", "calc(50%)", "1em"] {
++            let style = parse_inline_style(&alloc::format!("min-width:7px;min-width:{}", value)).unwrap();
++            assert_eq!(style.min_width, Some(ImageLimit::Px(7.0)), "{}", value);
++        }
++        let mut style = parse_inline_style("min-width:50%;min-height:90px").unwrap();
++        style.merge(&parse_inline_style("min-width:unset").unwrap());
++        assert_eq!(style.min_width, Some(ImageLimit::Px(0.0)));
++        assert_eq!(style.min_height, Some(ImageLimit::Px(90.0)));
++    }
++
++    #[test]
++    fn image_limits_parse_reset_and_ignore_invalid_overrides() {
++        for (value, expected) in [("0", ImageLimit::Px(0.0)), ("1.5px", ImageLimit::Px(1.5)),
++            ("50%", ImageLimit::Percent(50.0)), ("none", ImageLimit::None),
++            ("initial", ImageLimit::None), ("unset", ImageLimit::None)] {
++            let style = parse_inline_style(&alloc::format!("max-width: {}; max-height: {}", value, value)).unwrap();
++            assert_eq!(style.max_width, Some(expected));
++            assert_eq!(style.max_height, Some(expected));
++            assert!(!style.is_empty());
++        }
++        for value in ["-1px", "-1%", "NaNpx", "inf%", "12", "auto", "inherit", "calc(50%)", "1em"] {
++            let style = parse_inline_style(&alloc::format!("max-width: 7px; max-width: {}", value)).unwrap();
++            assert_eq!(style.max_width, Some(ImageLimit::Px(7.0)), "{}", value);
++        }
++        let mut style = parse_inline_style("max-width: 50%; max-height: 90px").unwrap();
++        style.merge(&parse_inline_style("max-width: none").unwrap());
++        assert_eq!(style.max_width, Some(ImageLimit::None));
++        assert_eq!(style.max_height, Some(ImageLimit::Px(90.0)));
++    }
++
+     use super::*;
+ 
+     // -- CssStyle tests ---
+@@ -487,11 +822,15 @@
+     #[test]
+     fn test_css_style_merge() {
+         let mut base = CssStyle {
++            list_style_type: None,
++            display: None,
+             font_weight: Some(FontWeight::Bold),
+             text_align: Some(TextAlign::Left),
+             ..Default::default()
+         };
+         let overlay = CssStyle {
++            list_style_type: None,
++            display: None,
+             text_align: Some(TextAlign::Center),
+             font_size: Some(FontSize::Px(16.0)),
+             ..Default::default()
+@@ -603,6 +942,39 @@
+     }
+ 
+     #[test]
++    fn list_style_type_parses_inherits_and_preserves_prior_valid_values() {
++        for (value, expected) in [
++            ("disc", ListStyleType::Disc), ("CIRCLE", ListStyleType::Circle),
++            ("square", ListStyleType::Square), ("decimal", ListStyleType::Decimal),
++            ("lower-latin", ListStyleType::LowerAlpha), ("upper-alpha", ListStyleType::UpperAlpha),
++            ("lower-roman", ListStyleType::LowerRoman), ("upper-roman", ListStyleType::UpperRoman),
++            ("none", ListStyleType::None), ("inherit", ListStyleType::Inherit),
++            ("unset", ListStyleType::Inherit), ("initial", ListStyleType::Disc),
++        ] {
++            let style = parse_inline_style(&alloc::format!("list-style-type: {}", value)).unwrap();
++            assert!(!style.is_empty());
++            assert_eq!(style.list_style_type, Some(expected));
++            let mut merged = CssStyle::new();
++            merged.merge(&style);
++            assert_eq!(merged.list_style_type, Some(expected));
++        }
++        for value in ["custom-counter", "url(marker.png)", "'x'", "disc inside", ""] {
++            let style = parse_inline_style(&alloc::format!("list-style-type: square; list-style-type: {}", value)).unwrap();
++            assert_eq!(style.list_style_type, Some(ListStyleType::Square));
++        }
++    }
++
++    #[test]
++    fn text_indent_values_and_invalid_declarations() {
++        for (value, expected) in [("-2em", TextIndent::Em(-2.0)), ("-12px", TextIndent::Px(-12.0)), ("-5%", TextIndent::Percent(-5.0)), ("2em", TextIndent::Em(2.0)), ("12px", TextIndent::Px(12.0)), ("5%", TextIndent::Percent(5.0)), ("initial", TextIndent::Px(0.0)), ("unset", TextIndent::Inherit), ("inherit", TextIndent::Inherit)] {
++            assert_eq!(parse_inline_style(&alloc::format!("text-indent: {}", value)).unwrap().text_indent, Some(expected));
++        }
++        for value in ["--2px", "NaNpx", "infem", "2 px", "2", "2em hanging", "each-line", "calc(2px + 1em)"] {
++            assert_eq!(parse_inline_style(&alloc::format!("text-indent: 4px; text-indent: {}", value)).unwrap().text_indent, Some(TextIndent::Px(4.0)));
++        }
++    }
++
++    #[test]
+     fn test_parse_text_align_values() {
+         for (value, expected) in [
+             ("left", TextAlign::Left),
+@@ -625,6 +997,25 @@
+     }
+ 
+     #[test]
++    fn tab_size_values_and_invalid_declarations() {
++        for (value, expected) in [
++            ("0", TabSize::Spaces(0.0)), ("2.5", TabSize::Spaces(2.5)),
++            ("40PX", TabSize::Px(40.0)), ("0px", TabSize::Px(0.0)),
++            ("2EM", TabSize::Em(2.0)), ("0em", TabSize::Em(0.0)), ("1.5em", TabSize::Em(1.5)),
++            ("initial", TabSize::Spaces(8.0)), ("inherit", TabSize::Inherit),
++            ("unset", TabSize::Inherit),
++        ] {
++            let style = parse_inline_style(&format!("tab-size: {value}")).unwrap();
++            assert_eq!(style.tab_size, Some(expected));
++            assert!(!style.is_empty());
++        }
++        for value in ["-1", "-2px", "NaN", "inf", "1e99", "-2em", "1e99em", "2rem", "20%", "4 px", "auto"] {
++            let style = parse_inline_style(&format!("tab-size: 3; tab-size: {value}")).unwrap();
++            assert_eq!(style.tab_size, Some(TabSize::Spaces(3.0)), "{value}");
++        }
++    }
++
++    #[test]
+     fn test_parse_inline_style() {
+         let style = parse_inline_style("font-weight: bold; font-size: 14px").unwrap();
+         assert_eq!(style.font_weight, Some(FontWeight::Bold));
+@@ -850,8 +1241,14 @@
+     #[test]
+     fn test_css_style_merge_both_sides_same_property() {
+         let mut base = CssStyle {
++            list_style_type: None,
++            display: None,
+             font_weight: Some(FontWeight::Bold),
+             font_style: Some(FontStyle::Normal),
++            direction: Some(Direction::Ltr),
++            white_space: Some(WhiteSpace::Pre),
++            text_indent: Some(TextIndent::Px(4.0)),
++            tab_size: Some(TabSize::Spaces(4.0)),
+             text_align: Some(TextAlign::Left),
+             margin_top: Some(10.0),
+             font_size: Some(FontSize::Px(16.0)),
+@@ -859,10 +1256,23 @@
+             line_height: Some(LineHeight::Px(20.0)),
+             letter_spacing: Some(0.5),
+             margin_bottom: Some(5.0),
++            hyphens: None,
++            width: None,
++            height: None,
++            max_width: None,
++            max_height: None,
++            min_width: None,
++            min_height: None,
+         };
+         let overlay = CssStyle {
++            list_style_type: None,
++            display: None,
+             font_weight: Some(FontWeight::Normal),
+             font_style: Some(FontStyle::Italic),
++            direction: Some(Direction::Rtl),
++            white_space: Some(WhiteSpace::Normal),
++            text_indent: Some(TextIndent::Em(2.0)),
++            tab_size: Some(TabSize::Px(32.0)),
+             text_align: Some(TextAlign::Center),
+             margin_top: Some(20.0),
+             font_size: Some(FontSize::Em(1.5)),
+@@ -870,10 +1280,21 @@
+             line_height: Some(LineHeight::Multiplier(1.5)),
+             letter_spacing: Some(2.0),
+             margin_bottom: Some(15.0),
++            hyphens: None,
++            width: None,
++            height: None,
++            max_width: None,
++            max_height: None,
++            min_width: None,
++            min_height: None,
+         };
+         base.merge(&overlay);
+ 
+         // All values should be overridden by overlay
++        assert_eq!(base.direction, Some(Direction::Rtl));
++        assert_eq!(base.white_space, Some(WhiteSpace::Normal));
++        assert_eq!(base.text_indent, Some(TextIndent::Em(2.0)));
++        assert_eq!(base.tab_size, Some(TabSize::Px(32.0)));
+         assert_eq!(base.font_weight, Some(FontWeight::Normal));
+         assert_eq!(base.font_style, Some(FontStyle::Italic));
+         assert_eq!(base.text_align, Some(TextAlign::Center));
+@@ -888,6 +1309,8 @@
+     #[test]
+     fn test_css_style_merge_overlay_none_preserves_base() {
+         let mut base = CssStyle {
++            list_style_type: None,
++            display: None,
+             font_weight: Some(FontWeight::Bold),
+             font_size: Some(FontSize::Px(16.0)),
+             ..Default::default()
+--- a/src/render_prep.rs
++++ b/src/render_prep.rs
+@@ -9,7 +9,8 @@
+ use core::cmp::min;
+ use core::fmt;
+ use quick_xml::events::Event;
+-use quick_xml::reader::Reader;
++use quick_xml::reader::{Reader, NsReader};
++use quick_xml::name::ResolveResult;
+ use std::collections::{BTreeMap, BTreeSet};
+ 
+ use crate::book::EpubBook;
+@@ -105,6 +106,8 @@
+ /// Render-prep orchestration options.
+ #[derive(Clone, Copy, Debug, Default, PartialEq)]
+ pub struct RenderPrepOptions {
++    /// Retain source token ranges and decoded character offsets for position adapters.
++    pub track_source: bool,
+     /// Stylesheet parsing and resolution options.
+     pub style: StyleConfig,
+     /// Font registration limits.
+@@ -414,6 +417,18 @@
+ /// Cascaded and normalized text style for rendering.
+ #[derive(Clone, Debug, PartialEq)]
+ pub struct ComputedTextStyle {
++    /// Containing block indentation; em values are relative to the reader base size.
++    pub text_indent: Option<crate::css::TextIndent>,
++    /// Resolved tab interval.
++    pub tab_size: Option<crate::css::TabSize>,
++    /// Resolved whitespace processing mode.
++    pub white_space: crate::css::WhiteSpace,
++    /// Alignment of the containing block, independent of inline declarations.
++    pub text_align: Option<crate::css::TextAlign>,
++    /// Base direction of the containing block.
++    pub direction: Option<crate::css::Direction>,
++    /// Resolved author hyphenation policy; None leaves the reader default.
++    pub hyphens: Option<crate::css::Hyphens>,
+     /// Ordered family preference stack.
+     pub family_stack: Vec<String>,
+     /// Numeric weight.
+@@ -433,6 +448,10 @@
+ /// Styled text run.
+ #[derive(Clone, Debug, PartialEq)]
+ pub struct StyledRun {
++    /// Absent for generated text and when source tracking is disabled.
++    pub source: Option<TextSource>,
++    /// Inherited language; an empty value explicitly clears the language.
++    pub language: Option<String>,
+     /// Run text payload.
+     pub text: String,
+     /// Computed style for this run.
+@@ -443,9 +462,33 @@
+     pub resolved_family: String,
+ }
+ 
+-/// Styled inline image payload.
++/// Provenance of a run in the original XHTML resource.
+ #[derive(Clone, Debug, PartialEq, Eq)]
++pub struct TextSource {
++    /// Raw XML token byte range, including entity or CDATA delimiters.
++    pub token: core::ops::Range<usize>,
++    /// Decoded token character index for each output character, plus an end boundary.
++    /// Offsets count Unicode scalar values, not UTF-8 bytes or UTF-16 code units.
++    pub characters: Vec<usize>,
++}
++
++/// Styled inline image payload.
++#[derive(Clone, Debug, PartialEq)]
+ pub struct StyledImage {
++    /// Opening tag byte offset, present only during source tracking.
++    pub source_offset: Option<usize>,
++    /// Cascaded, non-inherited author dimensions.
++    pub width: Option<crate::css::ImageLimit>,
++    /// Cascaded, non-inherited author dimensions.
++    pub height: Option<crate::css::ImageLimit>,
++    /// Cascaded, non-inherited author image constraints.
++    pub max_width: Option<crate::css::ImageLimit>,
++    /// Cascaded, non-inherited author image constraints.
++    pub max_height: Option<crate::css::ImageLimit>,
++    /// Non-inherited minimum image width; None resolves to zero.
++    pub min_width: Option<crate::css::ImageLimit>,
++    /// Non-inherited minimum image height; None resolves to zero.
++    pub min_height: Option<crate::css::ImageLimit>,
+     /// OPF-relative image href.
+     pub src: String,
+     /// Optional caption/alt text.
+@@ -458,9 +501,41 @@
+     pub in_figure: bool,
+ }
+ 
++/// Supported numbering hints from HTML list attributes.
++#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
++pub enum ListNumberStyle {
++    /// Decimal digits.
++    #[default]
++    Decimal,
++    /// Lowercase Latin alphabetic sequence.
++    LowerAlpha,
++    /// Uppercase Latin alphabetic sequence.
++    UpperAlpha,
++    /// Lowercase Roman numerals.
++    LowerRoman,
++    /// Uppercase Roman numerals.
++    UpperRoman,
++}
++
+ /// Structured block/layout events.
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub enum StyledEvent {
++    /// Computed CSS marker style for the current list item.
++    ListItemStyle(crate::css::ListStyleType),
++    /// Start of an ordered (true) or unordered list.
++    ListStart(bool),
++    /// Explicit starting number for the current ordered list.
++    ListStartAt(i32),
++    /// Descending order with a default start from direct child item count.
++    ListReversed(u32),
++    /// Explicit number for the current list item.
++    ListItemValue(i32),
++    /// Numbering style for the current list.
++    ListNumberStyle(ListNumberStyle),
++    /// Numbering style for the current item only.
++    ListItemNumberStyle(ListNumberStyle),
++    /// End of the current list.
++    ListEnd,
+     /// Paragraph starts.
+     ParagraphStart,
+     /// Paragraph ends.
+@@ -480,6 +555,20 @@
+ /// Stream item for styled output.
+ #[derive(Clone, Debug, PartialEq)]
+ pub enum StyledEventOrRun {
++    /// Element style metadata emitted only during source tracking.
++    SourceElement(SourceElement),
++    /// Start of an explicitly marked footnote or endnote body.
++    NoteBodyStart,
++    /// End of an explicitly marked note body.
++    NoteBodyEnd,
++    /// Element target retained for reader navigation.
++    Anchor(String),
++    /// Raw document-relative hyperlink target.
++    LinkStart(String),
++    /// Hyperlink marked as a footnote or endnote reference.
++    NoteReferenceStart(String),
++    /// End of hyperlink text.
++    LinkEnd,
+     /// Structural event.
+     Event(StyledEvent),
+     /// Styled text run.
+@@ -488,6 +577,17 @@
+     Image(StyledImage),
+ }
+ 
++/// Element start offset and styles that affect DOM text-node construction.
++#[derive(Clone, Debug, PartialEq)]
++pub struct SourceElement {
++    /// Byte offset of the opening tag in the XHTML resource.
++    pub offset: usize,
++    /// Cascaded whitespace mode, including inheritance.
++    pub white_space: crate::css::WhiteSpace,
++    /// Author display override; absent values use the element's default.
++    pub display: Option<crate::css::Display>,
++}
++
+ /// Styled chapter output.
+ #[derive(Clone, Debug, Default, PartialEq)]
+ pub struct StyledChapter {
+@@ -517,6 +617,7 @@
+ /// Lightweight style system with CSS cascade resolution.
+ #[derive(Clone, Debug)]
+ pub struct Styler {
++    track_source: bool,
+     config: StyleConfig,
+     memory: MemoryBudget,
+     parsed: Vec<Stylesheet>,
+@@ -529,6 +630,7 @@
+     pub fn new(config: StyleConfig) -> Self {
+         Self {
+             config,
++            track_source: false,
+             memory: MemoryBudget::default(),
+             parsed: Vec::with_capacity(0),
+             css_bytes: 0,
+@@ -536,6 +638,12 @@
+         }
+     }
+ 
++    /// Enable source provenance without changing text or style output.
++    pub fn with_source_tracking(mut self, enabled: bool) -> Self {
++        self.track_source = enabled;
++        self
++    }
++
+     /// Override hard memory budget used in style paths.
+     pub fn with_memory_budget(mut self, memory: MemoryBudget) -> Self {
+         self.memory = memory;
+@@ -639,7 +747,22 @@
+     where
+         F: FnMut(StyledEventOrRun),
+     {
+-        let mut reader = Reader::from_reader(html_bytes);
++        let reversed = reversed_list_counts(html_bytes)?;
++        let mut whitespace = WhitespaceNormalizer::default();
++        let mut on_item = |mut item: StyledEventOrRun| {
++            match &mut item {
++                StyledEventOrRun::Run(run) => {
++                    run.text = whitespace.mapped_text(&run.text, run.style.white_space, run.source.as_mut().map(|source| &mut source.characters));
++                    if run.text.is_empty() { return; }
++                }
++                StyledEventOrRun::Event(_) | StyledEventOrRun::Image(_) => {
++                    whitespace = WhitespaceNormalizer::default();
++                }
++                _ => {}
++            }
++            on_item(item);
++        };
++        let mut reader = NsReader::from_reader(html_bytes);
+         reader.config_mut().trim_text(false);
+         let mut buf = Vec::with_capacity(0);
+         let mut stack: Vec<ElementCtx> = Vec::with_capacity(0);
+@@ -647,6 +770,7 @@
+         let mut table_row_cells: Vec<usize> = Vec::with_capacity(0);
+ 
+         loop {
++            let token_start = reader.buffer_position() as usize;
+             match reader.read_event_into(&mut buf) {
+                 Ok(Event::Start(e)) => {
+                     let tag = decode_tag_name(&reader, e.name().as_ref())?;
+@@ -659,11 +783,15 @@
+                         buf.clear();
+                         continue;
+                     }
+-                    let ctx =
++                    let mut ctx =
+                         element_ctx_from_start(&reader, &e, self.memory.max_inline_style_bytes)?;
++                    ctx.note_body = is_note_body(&reader, &e)?;
+                     if matches!(ctx.tag.as_str(), "img" | "image") {
+                         let in_figure = stack.iter().any(|parent| parent.tag == "figure");
+-                        emit_image_event(&ctx, in_figure, &mut on_item);
++                        emit_navigation(&reader, &e, &mut on_item)?;
++                        let mut image_style = self.resolve_tag_style(&ctx.tag, &ctx.classes);
++                        if let Some(inline) = &ctx.inline_style { image_style.merge(inline); }
++                        emit_image_event(&ctx, in_figure, &image_style, self.track_source.then_some(token_start), &mut on_item);
+                         buf.clear();
+                         continue;
+                     }
+@@ -677,6 +805,11 @@
+                                 let style =
+                                     self.compute_style(resolved, role, bold_tag, italic_tag);
+                                 on_item(StyledEventOrRun::Run(StyledRun {
++                                    source: None,
++                                    language: stack
++                                        .iter()
++                                        .rev()
++                                        .find_map(|ctx| ctx.language.clone()),
+                                     text: " | ".to_string(),
+                                     style,
+                                     font_id: 0,
+@@ -687,7 +820,14 @@
+                         }
+                     }
+                     emit_start_event(&ctx.tag, &mut on_item);
++                    if let Some(count) = reversed.get(&reader.buffer_position()) {
++                        on_item(StyledEventOrRun::Event(StyledEvent::ListReversed(*count)));
++                    }
++                    emit_navigation(&reader, &e, &mut on_item)?;
++                    if ctx.note_body { on_item(StyledEventOrRun::NoteBodyStart); }
+                     stack.push(ctx);
++                    self.emit_source_element(token_start, &stack, &mut on_item);
++                    self.emit_list_style(&stack, &mut on_item);
+                 }
+                 Ok(Event::Empty(e)) => {
+                     let tag = decode_tag_name(&reader, e.name().as_ref())?;
+@@ -695,11 +835,15 @@
+                         buf.clear();
+                         continue;
+                     }
+-                    let ctx =
++                    let mut ctx =
+                         element_ctx_from_start(&reader, &e, self.memory.max_inline_style_bytes)?;
++                    ctx.note_body = is_note_body(&reader, &e)?;
+                     if matches!(ctx.tag.as_str(), "img" | "image") {
+                         let in_figure = stack.iter().any(|parent| parent.tag == "figure");
+-                        emit_image_event(&ctx, in_figure, &mut on_item);
++                        emit_navigation(&reader, &e, &mut on_item)?;
++                        let mut image_style = self.resolve_tag_style(&ctx.tag, &ctx.classes);
++                        if let Some(inline) = &ctx.inline_style { image_style.merge(inline); }
++                        emit_image_event(&ctx, in_figure, &image_style, self.track_source.then_some(token_start), &mut on_item);
+                         buf.clear();
+                         continue;
+                     }
+@@ -711,6 +855,11 @@
+                                 let style =
+                                     self.compute_style(resolved, role, bold_tag, italic_tag);
+                                 on_item(StyledEventOrRun::Run(StyledRun {
++                                    source: None,
++                                    language: stack
++                                        .iter()
++                                        .rev()
++                                        .find_map(|ctx| ctx.language.clone()),
+                                     text: " | ".to_string(),
+                                     style,
+                                     font_id: 0,
+@@ -721,10 +870,23 @@
+                         }
+                     }
+                     emit_start_event(&ctx.tag, &mut on_item);
++                    if let Some(count) = reversed.get(&reader.buffer_position()) {
++                        on_item(StyledEventOrRun::Event(StyledEvent::ListReversed(*count)));
++                    }
++                    emit_navigation(&reader, &e, &mut on_item)?;
++                    if ctx.note_body { on_item(StyledEventOrRun::NoteBodyStart); }
++                    stack.push(ctx.clone());
++                    self.emit_source_element(token_start, &stack, &mut on_item);
++                    self.emit_list_style(&stack, &mut on_item);
++                    stack.pop();
+                     if ctx.tag == "br" {
+                         on_item(StyledEventOrRun::Event(StyledEvent::LineBreak));
+                     }
++                    if ctx.tag == "a" {
++                        on_item(StyledEventOrRun::LinkEnd);
++                    }
+                     emit_end_event(&ctx.tag, &mut on_item);
++                    if ctx.note_body { on_item(StyledEventOrRun::NoteBodyEnd); }
+                 }
+                 Ok(Event::End(e)) => {
+                     let tag = decode_tag_name(&reader, e.name().as_ref())?;
+@@ -737,12 +899,16 @@
+                         buf.clear();
+                         continue;
+                     }
++                    if tag == "a" {
++                        on_item(StyledEventOrRun::LinkEnd);
++                    }
+                     emit_end_event(&tag, &mut on_item);
+                     if tag == "tr" {
+                         table_row_cells.pop();
+                     }
+                     if let Some(last) = stack.last() {
+                         if last.tag == tag {
++                            if last.note_body { on_item(StyledEventOrRun::NoteBodyEnd); }
+                             stack.pop();
+                         }
+                     }
+@@ -764,8 +930,7 @@
+                             .with_token_offset(reader_token_offset(&reader))
+                         })?
+                         .to_string();
+-                    let preserve_ws = is_preformatted_context(&stack);
+-                    let normalized = normalize_plain_text_whitespace(&text, preserve_ws);
++                    let normalized = text;
+                     if normalized.is_empty() {
+                         buf.clear();
+                         continue;
+@@ -773,6 +938,11 @@
+                     let (resolved, role, bold_tag, italic_tag) = self.resolve_context_style(&stack);
+                     let style = self.compute_style(resolved, role, bold_tag, italic_tag);
+                     on_item(StyledEventOrRun::Run(StyledRun {
++                        source: self.track_source.then(|| TextSource {
++                            token: token_start..reader.buffer_position() as usize,
++                            characters: Vec::new(),
++                        }),
++                        language: stack.iter().rev().find_map(|ctx| ctx.language.clone()),
+                         text: normalized,
+                         style,
+                         font_id: 0,
+@@ -797,8 +967,7 @@
+                             .with_token_offset(reader_token_offset(&reader))
+                         })?
+                         .to_string();
+-                    let preserve_ws = is_preformatted_context(&stack);
+-                    let normalized = normalize_plain_text_whitespace(&text, preserve_ws);
++                    let normalized = text;
+                     if normalized.is_empty() {
+                         buf.clear();
+                         continue;
+@@ -806,6 +975,11 @@
+                     let (resolved, role, bold_tag, italic_tag) = self.resolve_context_style(&stack);
+                     let style = self.compute_style(resolved, role, bold_tag, italic_tag);
+                     on_item(StyledEventOrRun::Run(StyledRun {
++                        source: self.track_source.then(|| TextSource {
++                            token: token_start..reader.buffer_position() as usize,
++                            characters: Vec::new(),
++                        }),
++                        language: stack.iter().rev().find_map(|ctx| ctx.language.clone()),
+                         text: normalized,
+                         style,
+                         font_id: 0,
+@@ -838,8 +1012,7 @@
+                             .with_token_offset(reader_token_offset(&reader))
+                         })?
+                         .to_string();
+-                    let preserve_ws = is_preformatted_context(&stack);
+-                    let normalized = normalize_plain_text_whitespace(&resolved_entity, preserve_ws);
++                    let normalized = resolved_entity;
+                     if normalized.is_empty() {
+                         buf.clear();
+                         continue;
+@@ -847,6 +1020,11 @@
+                     let (resolved, role, bold_tag, italic_tag) = self.resolve_context_style(&stack);
+                     let style = self.compute_style(resolved, role, bold_tag, italic_tag);
+                     on_item(StyledEventOrRun::Run(StyledRun {
++                        source: self.track_source.then(|| TextSource {
++                            token: token_start..reader.buffer_position() as usize,
++                            characters: Vec::new(),
++                        }),
++                        language: stack.iter().rev().find_map(|ctx| ctx.language.clone()),
+                         text: normalized,
+                         style,
+                         font_id: 0,
+@@ -871,6 +1049,19 @@
+         Ok(())
+     }
+ 
++    fn emit_source_element<F: FnMut(StyledEventOrRun)>(&self, offset: usize, stack: &[ElementCtx], output: &mut F) {
++        if !self.track_source { return; }
++        let ctx = stack.last().unwrap();
++        let mut own = self.resolve_tag_style(&ctx.tag, &ctx.classes);
++        if let Some(inline) = &ctx.inline_style { own.merge(inline); }
++        let (resolved, _, _, _) = self.resolve_context_style(stack);
++        output(StyledEventOrRun::SourceElement(SourceElement {
++            offset,
++            white_space: resolved.white_space.unwrap_or_default(),
++            display: own.display,
++        }));
++    }
++
+     fn resolve_tag_style(&self, tag: &str, classes: &[String]) -> CssStyle {
+         let class_refs: Vec<&str> = classes.iter().map(String::as_str).collect();
+         let mut style = CssStyle::new();
+@@ -941,6 +1132,12 @@
+         let letter_spacing = resolved.letter_spacing.unwrap_or(0.0);
+ 
+         ComputedTextStyle {
++            white_space: resolved.white_space.unwrap_or_default(),
++            text_indent: resolved.text_indent,
++            tab_size: resolved.tab_size,
++            text_align: resolved.text_align,
++            direction: resolved.direction,
++            hyphens: resolved.hyphens,
+             family_stack,
+             weight: final_weight,
+             italic: final_italic,
+@@ -951,16 +1148,87 @@
+         }
+     }
+ 
++    fn emit_list_style<F: FnMut(StyledEventOrRun)>(&self, stack: &[ElementCtx], on_item: &mut F) {
++        if stack.last().is_some_and(|ctx| ctx.tag == "li") {
++            let (style, _, _, _) = self.resolve_context_style(stack);
++            on_item(StyledEventOrRun::Event(StyledEvent::ListItemStyle(style.list_style_type.unwrap_or(crate::css::ListStyleType::Disc))));
++        }
++    }
++
+     fn resolve_context_style(&self, stack: &[ElementCtx]) -> (CssStyle, BlockRole, bool, bool) {
+         let mut merged = CssStyle::new();
+         let mut role = BlockRole::Body;
++        let mut block_align = None;
++        let mut block_indent = None;
++        let mut block_direction = None;
+         let mut bold_tag = false;
+         let mut italic_tag = false;
+ 
++        let mut ordered_list = false;
+         for ctx in stack {
+-            merged.merge(&self.resolve_tag_style(&ctx.tag, &ctx.classes));
+-            if let Some(inline) = &ctx.inline_style {
+-                merged.merge(inline);
++            if ctx.tag == "ol" { ordered_list = true; }
++            if ctx.tag == "ul" { ordered_list = false; }
++            let parent_list_style = merged.list_style_type;
++            if ctx.tag == "ol" { merged.list_style_type = Some(crate::css::ListStyleType::Decimal); }
++            if ctx.tag == "ul" { merged.list_style_type = Some(crate::css::ListStyleType::Disc); }
++            if ordered_list && ctx.list_style_hint.is_some() { merged.list_style_type = ctx.list_style_hint; }
++            let parent_indent = merged.text_indent;
++            let parent_tab_size = merged.tab_size;
++            let parent_white_space = merged.white_space;
++            if ctx.tag == "pre" { merged.white_space = Some(crate::css::WhiteSpace::Pre); }
++            let parent_align = merged.text_align;
++            let parent_direction = merged.direction;
++            if ctx.direction.is_some() { merged.direction = ctx.direction; }
++            let parent_hyphens = merged.hyphens;
++            let mut declaration = self.resolve_tag_style(&ctx.tag, &ctx.classes);
++            if let Some(inline) = &ctx.inline_style { declaration.merge(inline); }
++            merged.merge(&declaration);
++            if merged.list_style_type == Some(crate::css::ListStyleType::Inherit) { merged.list_style_type = parent_list_style; }
++            merged.text_indent = match declaration.text_indent {
++                Some(crate::css::TextIndent::Em(em)) => {
++                    let size = self.compute_style(merged.clone(), role_from_tag(&ctx.tag).unwrap_or(role), false, false).size_px;
++                    Some(crate::css::TextIndent::Em(em * size / self.config.hints.base_font_size_px))
++                }
++                Some(crate::css::TextIndent::Inherit) | None => parent_indent,
++                value => value,
++            };
++            if merged.direction == Some(crate::css::Direction::Inherit) { merged.direction = parent_direction; }
++            merged.tab_size = match declaration.tab_size {
++                Some(crate::css::TabSize::Em(em)) => {
++                    let size = self.compute_style(merged.clone(), role_from_tag(&ctx.tag).unwrap_or(role), false, false).size_px;
++                    Some(crate::css::TabSize::Em(em * size / self.config.hints.base_font_size_px))
++                }
++                Some(crate::css::TabSize::Inherit) | None => parent_tab_size,
++                value => value,
++            };
++            if merged.white_space == Some(crate::css::WhiteSpace::Inherit) {
++                merged.white_space = parent_white_space;
++            }
++            if merged.hyphens == Some(crate::css::Hyphens::Inherit) {
++                merged.hyphens = parent_hyphens;
++            }
++            if merged.text_align == Some(crate::css::TextAlign::Inherit) {
++                merged.text_align = parent_align;
++            }
++            if role_from_tag(&ctx.tag).is_some()
++                || matches!(
++                    ctx.tag.as_str(),
++                    "html"
++                        | "body"
++                        | "section"
++                        | "article"
++                        | "blockquote"
++                        | "pre"
++                        | "figure"
++                        | "table"
++                        | "tr"
++                        | "td"
++                        | "th"
++                )
++            {
++                block_indent = merged.text_indent;
++                block_align = merged.text_align;
++                block_direction = merged.direction;
+             }
+             if matches!(ctx.tag.as_str(), "strong" | "b") {
+                 bold_tag = true;
+@@ -971,6 +1239,9 @@
+             role = role_from_tag(&ctx.tag).unwrap_or(role);
+         }
+ 
++        merged.text_indent = block_indent;
++        merged.text_align = block_align;
++        merged.direction = block_direction;
+         (merged, role, bold_tag, italic_tag)
+     }
+ }
+@@ -1270,7 +1541,7 @@
+ impl RenderPrep {
+     /// Create a render-prep engine.
+     pub fn new(opts: RenderPrepOptions) -> Self {
+-        let styler = Styler::new(opts.style).with_memory_budget(opts.memory);
++        let styler = Styler::new(opts.style).with_memory_budget(opts.memory).with_source_tracking(opts.track_source);
+         let font_resolver = FontResolver::new(FontPolicy::default()).with_limits(opts.fonts);
+         Self {
+             opts,
+@@ -1717,6 +1988,10 @@
+ 
+ #[derive(Clone, Debug, Default)]
+ struct ElementCtx {
++    note_body: bool,
++    list_style_hint: Option<crate::css::ListStyleType>,
++    direction: Option<crate::css::Direction>,
++    language: Option<String>,
+     tag: String,
+     classes: Vec<String>,
+     inline_style: Option<CssStyle>,
+@@ -1766,6 +2041,10 @@
+     max_inline_style_bytes: usize,
+ ) -> Result<ElementCtx, RenderPrepError> {
+     let tag = decode_tag_name(reader, e.name().as_ref())?;
++    let mut list_style_hint = None;
++    let mut language = None;
++    let mut xml_language = None;
++    let mut direction = None;
+     let mut classes = Vec::with_capacity(0);
+     let mut inline_style = None;
+     let mut img_src: Option<String> = None;
+@@ -1781,7 +2060,39 @@
+             Ok(v) => v.to_string(),
+             Err(_) => continue,
+         };
+-        if key == "class" {
++        if key == "type" && matches!(tag.as_str(), "ol" | "li") {
++            use crate::css::ListStyleType as L;
++            let value = attr.decode_and_unescape_value(reader.decoder()).map_err(|e| RenderPrepError::new("LIST_ATTRIBUTE", e.to_string()))?;
++            list_style_hint = match value.as_ref() { "1" => Some(L::Decimal), "a" => Some(L::LowerAlpha), "A" => Some(L::UpperAlpha), "i" => Some(L::LowerRoman), "I" => Some(L::UpperRoman), _ => None };
++        } else if key == "dir" {
++            let value = attr.decode_and_unescape_value(reader.decoder()).map_err(|e| RenderPrepError::new("DIR_ATTRIBUTE",e.to_string()))?;
++            direction = match value.as_ref() {
++                value if value.eq_ignore_ascii_case("ltr") => Some(crate::css::Direction::Ltr), value if value.eq_ignore_ascii_case("rtl") => Some(crate::css::Direction::Rtl),
++                value if value.eq_ignore_ascii_case("auto") => Some(crate::css::Direction::Auto), _ => None,
++            };
++        } else if key == "lang" || key == "xml:lang" {
++            let value = attr
++                .decode_and_unescape_value(reader.decoder())
++                .map_err(|error| RenderPrepError::new("LANG_ATTRIBUTE", error.to_string()))?;
++            if value.len() > 63
++                || (!value.is_empty()
++                    && value.split('-').any(|part| {
++                        part.is_empty()
++                            || part.len() > 8
++                            || !part.bytes().all(|b| b.is_ascii_alphanumeric())
++                    }))
++            {
++                return Err(RenderPrepError::new(
++                    "LANG_ATTRIBUTE",
++                    "Invalid or oversized language tag",
++                ));
++            }
++            if key == "xml:lang" {
++                xml_language = Some(value.to_ascii_lowercase());
++            } else {
++                language = Some(value.to_ascii_lowercase());
++            }
++        } else if key == "class" {
+             classes = val
+                 .split_whitespace()
+                 .map(|v| v.trim().to_string())
+@@ -1845,6 +2156,10 @@
+         }
+     }
+     Ok(ElementCtx {
++        note_body: false,
++        list_style_hint,
++        direction,
++        language: xml_language.or(language),
+         tag,
+         classes,
+         inline_style,
+@@ -1867,6 +2182,8 @@
+ fn emit_image_event<F: FnMut(StyledEventOrRun)>(
+     ctx: &ElementCtx,
+     in_figure: bool,
++    style: &CssStyle,
++    source_offset: Option<usize>,
+     on_item: &mut F,
+ ) {
+     if !matches!(ctx.tag.as_str(), "img" | "image") {
+@@ -1876,17 +2193,168 @@
+         return;
+     };
+     on_item(StyledEventOrRun::Image(StyledImage {
++        source_offset,
+         src,
+         alt: ctx.img_alt.clone().unwrap_or_default(),
++        width: style.width,
++        height: style.height,
++        max_width: style.max_width,
++        max_height: style.max_height,
++        min_width: style.min_width,
++        min_height: style.min_height,
+         width_px: ctx.img_width_px,
+         height_px: ctx.img_height_px,
+         in_figure,
+     }));
+ }
+ 
++fn reversed_list_counts(html: &[u8]) -> Result<BTreeMap<u64, u32>, RenderPrepError> {
++    let mut counts = BTreeMap::new();
++    if !html.windows(8).any(|bytes| bytes == b"reversed") { return Ok(counts); }
++    let mut reader = Reader::from_reader(html);
++    let mut depth = 0usize;
++    let mut skipped = None;
++    let mut lists: Vec<(usize, u64, u32)> = Vec::new();
++    loop {
++        let event = reader.read_event().map_err(|e| RenderPrepError::new("LIST_XML", e.to_string()))?;
++        match event {
++            Event::Start(ref element) | Event::Empty(ref element) => {
++                let empty = matches!(event, Event::Empty(_));
++                let tag = decode_tag_name(&reader, element.name().as_ref())?;
++                if skipped.is_none() && should_skip_tag(&tag) && !empty { skipped = Some(depth); }
++                if skipped.is_none() {
++                    if tag == "li" {
++                        if let Some((parent, _, count)) = lists.last_mut() {
++                            if depth == *parent + 1 {
++                                if *count >= 16_384 { return Err(RenderPrepError::new("LIST_COUNT_LIMIT", "List item count limit exceeded")); }
++                                *count += 1;
++                            }
++                        }
++                    }
++                    if tag == "ol" && element.attributes().flatten().any(|attr| attr.key.as_ref() == b"reversed") {
++                        if lists.len() >= 16 || counts.len() >= 1024 { return Err(RenderPrepError::new("LIST_COUNT_LIMIT", "Reversed list limit exceeded")); }
++                        if empty { counts.insert(reader.buffer_position(), 0); }
++                        else { lists.push((depth, reader.buffer_position(), 0)); }
++                    }
++                }
++                if !empty { depth += 1; }
++            }
++            Event::End(_) => {
++                depth = depth.saturating_sub(1);
++                if skipped == Some(depth) { skipped = None; }
++                if lists.last().is_some_and(|(start, _, _)| *start == depth) {
++                    let (_, offset, count) = lists.pop().unwrap();
++                    if counts.len() >= 1024 { return Err(RenderPrepError::new("LIST_COUNT_LIMIT", "Reversed list limit exceeded")); }
++                    counts.insert(offset, count);
++                }
++            }
++            Event::Eof => {
++                if !lists.is_empty() { return Err(RenderPrepError::new("LIST_XML", "Unclosed reversed list")); }
++                break;
++            }
++            _ => {}
++        }
++    }
++    Ok(counts)
++}
++
++fn is_note_body(reader: &NsReader<&[u8]>, element: &quick_xml::events::BytesStart<'_>) -> Result<bool, RenderPrepError> {
++    let mut marked = false;
++    for attr in element.attributes() {
++        let attr = attr.map_err(|e| RenderPrepError::new("NOTE_ATTRIBUTE", e.to_string()))?;
++        let (namespace, local) = reader.resolver().resolve_attribute(attr.key);
++        let epub_type = local.as_ref() == b"type"
++            && matches!(namespace, ResolveResult::Bound(uri) if uri.as_ref() == b"http://www.idpf.org/2007/ops");
++        let role = attr.key.as_ref() == b"role";
++        if !epub_type && !role { continue; }
++        let value = attr.decode_and_unescape_value(reader.decoder()).map_err(|e| RenderPrepError::new("NOTE_ATTRIBUTE", e.to_string()))?;
++        if value.len() > 4096 { return Err(RenderPrepError::new("NOTE_ATTRIBUTE_LIMIT", "Note attribute exceeds 4096 bytes")); }
++        marked |= value.split_ascii_whitespace().any(|token|
++            (epub_type && matches!(token, "footnote" | "endnote"))
++            || (role && matches!(token, "doc-footnote" | "doc-endnote")));
++    }
++    Ok(marked)
++}
++
++fn emit_navigation<F: FnMut(StyledEventOrRun)>(
++    reader: &NsReader<&[u8]>,
++    element: &quick_xml::events::BytesStart<'_>,
++    on_item: &mut F,
++) -> Result<(), RenderPrepError> {
++    let tag = decode_tag_name(reader, element.name().as_ref())?;
++    let mut href = None;
++    let mut noteref = false;
++    for attribute in element.attributes().flatten() {
++        let key = attribute.key.as_ref();
++        let (namespace, local) = reader.resolver().resolve_attribute(attribute.key);
++        let epub_type = local.as_ref() == b"type"
++            && matches!(namespace, ResolveResult::Bound(uri) if uri.as_ref() == b"http://www.idpf.org/2007/ops");
++        if tag == "a" && (epub_type || key == b"role") {
++            let value = attribute.decode_and_unescape_value(reader.decoder())
++                .map_err(|error| RenderPrepError::new("NAV_ATTRIBUTE", error.to_string()))?;
++            if value.len() > 4096 {
++                return Err(RenderPrepError::new("NAV_ATTRIBUTE_LIMIT", "Navigation attribute exceeds 4096 bytes"));
++            }
++            noteref |= value.split_ascii_whitespace().any(|token|
++                (epub_type && token == "noteref") || (key == b"role" && token == "doc-noteref"));
++            continue;
++        }
++        if (tag == "ol" || tag == "li") && key == b"type" {
++            let value = attribute.decode_and_unescape_value(reader.decoder())
++                .map_err(|error| RenderPrepError::new("LIST_ATTRIBUTE", error.to_string()))?;
++            if value.len() > 4096 { return Err(RenderPrepError::new("LIST_ATTRIBUTE_LIMIT", "List attribute exceeds 4096 bytes")); }
++            let style = match value.as_ref() {
++                "1" => Some(ListNumberStyle::Decimal),
++                "a" => Some(ListNumberStyle::LowerAlpha),
++                "A" => Some(ListNumberStyle::UpperAlpha),
++                "i" => Some(ListNumberStyle::LowerRoman),
++                "I" => Some(ListNumberStyle::UpperRoman),
++                _ => None,
++            };
++            if let Some(style) = style {
++                on_item(StyledEventOrRun::Event(if tag == "ol" { StyledEvent::ListNumberStyle(style) } else { StyledEvent::ListItemNumberStyle(style) }));
++            }
++            continue;
++        }
++        if (tag == "ol" && key == b"start") || (tag == "li" && key == b"value") {
++            let value = attribute.decode_and_unescape_value(reader.decoder())
++                .map_err(|error| RenderPrepError::new("LIST_ATTRIBUTE", error.to_string()))?;
++            if value.len() > 4096 { return Err(RenderPrepError::new("LIST_ATTRIBUTE_LIMIT", "List attribute exceeds 4096 bytes")); }
++            if let Ok(number) = value.trim_matches(|c: char| c.is_ascii_whitespace()).parse::<i32>() {
++                on_item(StyledEventOrRun::Event(if tag == "ol" { StyledEvent::ListStartAt(number) } else { StyledEvent::ListItemValue(number) }));
++            }
++            continue;
++        }
++        if key != b"id" && key != b"xml:id" && !(tag == "a" && (key == b"name" || key == b"href")) {
++            continue;
++        }
++        let value = attribute
++            .decode_and_unescape_value(reader.decoder())
++            .map_err(|error| RenderPrepError::new("NAV_ATTRIBUTE", error.to_string()))?
++            .into_owned();
++        if value.len() > 4096 {
++            return Err(RenderPrepError::new(
++                "NAV_ATTRIBUTE_LIMIT",
++                "Navigation attribute exceeds 4096 bytes",
++            ));
++        }
++        if key == b"href" {
++            href = Some(value);
++        } else if !value.is_empty() {
++            on_item(StyledEventOrRun::Anchor(value));
++        }
++    }
++    if let Some(href) = href {
++        on_item(if noteref { StyledEventOrRun::NoteReferenceStart(href) }
++            else { StyledEventOrRun::LinkStart(href) });
++    }
++    Ok(())
++}
++
+ fn emit_start_event<F: FnMut(StyledEventOrRun)>(tag: &str, on_item: &mut F) {
+     match tag {
+-        "p" | "div" | "figure" | "figcaption" | "table" | "tr" => {
++        "ol" | "ul" => on_item(StyledEventOrRun::Event(StyledEvent::ListStart(tag == "ol"))),
++        "p" | "div" | "pre" | "figure" | "figcaption" | "table" | "tr" => {
+             on_item(StyledEventOrRun::Event(StyledEvent::ParagraphStart))
+         }
+         "li" => on_item(StyledEventOrRun::Event(StyledEvent::ListItemStart)),
+@@ -1902,7 +2370,8 @@
+ 
+ fn emit_end_event<F: FnMut(StyledEventOrRun)>(tag: &str, on_item: &mut F) {
+     match tag {
+-        "p" | "div" | "figure" | "figcaption" | "table" | "tr" => {
++        "ol" | "ul" => on_item(StyledEventOrRun::Event(StyledEvent::ListEnd)),
++        "p" | "div" | "pre" | "figure" | "figcaption" | "table" | "tr" => {
+             on_item(StyledEventOrRun::Event(StyledEvent::ParagraphEnd))
+         }
+         "li" => on_item(StyledEventOrRun::Event(StyledEvent::ListItemEnd)),
+@@ -1918,7 +2387,7 @@
+ 
+ fn role_from_tag(tag: &str) -> Option<BlockRole> {
+     match tag {
+-        "p" | "div" => Some(BlockRole::Paragraph),
++        "p" | "div" | "pre" => Some(BlockRole::Paragraph),
+         "li" => Some(BlockRole::ListItem),
+         "figcaption" => Some(BlockRole::FigureCaption),
+         "h1" => Some(BlockRole::Heading(1)),
+@@ -1935,36 +2404,49 @@
+     matches!(tag, "script" | "style" | "head" | "noscript")
+ }
+ 
+-fn is_preformatted_context(stack: &[ElementCtx]) -> bool {
+-    stack.iter().any(|ctx| {
+-        matches!(
+-            ctx.tag.as_str(),
+-            "pre" | "code" | "kbd" | "samp" | "textarea"
+-        )
+-    })
+-}
+-
+-fn normalize_plain_text_whitespace(text: &str, preserve: bool) -> String {
+-    if preserve {
+-        return text.to_string();
+-    }
+-    let mut result = String::with_capacity(text.len());
+-    let mut prev_space = true;
+-    for ch in text.chars() {
+-        if ch.is_whitespace() {
+-            if !prev_space {
+-                result.push(' ');
+-                prev_space = true;
++#[derive(Default)]
++struct WhitespaceNormalizer {
++    space: bool,
++    cr: bool,
++}
++
++impl WhitespaceNormalizer {
++    #[cfg(test)]
++    fn text(&mut self, text: &str, mode: crate::css::WhiteSpace) -> String {
++        self.mapped_text(text, mode, None)
++    }
++    fn mapped_text(&mut self, text: &str, mode: crate::css::WhiteSpace, mut mapping: Option<&mut Vec<usize>>) -> String {
++        use crate::css::WhiteSpace;
++        let preserve = matches!(mode, WhiteSpace::Pre | WhiteSpace::PreWrap);
++        let breaks = preserve || mode == WhiteSpace::PreLine;
++        let mut result = String::with_capacity(text.len());
++        for (index, ch) in text.chars().enumerate() {
++            let before = result.len();
++            // XML line endings can cross text, entity, and CDATA boundaries.
++            if ch == '\n' && self.cr { self.cr = false; continue; }
++            self.cr = ch == '\r';
++            let ch = if self.cr { '\n' } else { ch };
++            if preserve {
++                result.push(ch);
++                // Preserved spaces do not consume a following collapsible space.
++                self.space = false;
++            } else if ch == '\n' && breaks {
++                result.push(ch);
++                self.space = true;
++            } else if matches!(ch, ' ' | '\t' | '\n' | '\u{000c}') {
++                if !self.space { result.push(' '); }
++                self.space = true;
++            } else {
++                result.push(ch);
++                self.space = false;
++            }
++            if result.len() != before {
++                if let Some(mapping) = &mut mapping { mapping.push(index); }
+             }
+-        } else {
+-            result.push(ch);
+-            prev_space = false;
+         }
++        if let Some(mapping) = &mut mapping { mapping.push(text.chars().count()); }
++        result
+     }
+-    if result.ends_with(' ') {
+-        result.pop();
+-    }
+-    result
+ }
+ 
+ fn normalize_family(family: &str) -> String {
+@@ -1999,6 +2481,13 @@
+         }
+         StyledEventOrRun::Event(event) => (StyledEventOrRun::Event(event), RenderPrepTrace::Event),
+         StyledEventOrRun::Image(image) => (StyledEventOrRun::Image(image), RenderPrepTrace::Event),
++        item @ (StyledEventOrRun::NoteBodyStart
++        | StyledEventOrRun::NoteBodyEnd
++        | StyledEventOrRun::Anchor(_)
++        | StyledEventOrRun::LinkStart(_)
++        | StyledEventOrRun::NoteReferenceStart(_)
++        | StyledEventOrRun::LinkEnd
++        | StyledEventOrRun::SourceElement(_)) => (item, RenderPrepTrace::Event),
+     }
+ }
+ 
+@@ -2009,6 +2498,11 @@
+ ) -> StyledEventOrRun {
+     if let StyledEventOrRun::Image(image) = &mut item {
+         image.src = resolve_relative(chapter_href, &image.src);
++        if image.width.is_some() || image.height.is_some()
++            || image.min_width.is_some() || image.min_height.is_some() {
++            // Preserve absent HTML hints so the paged layout can resolve CSS auto.
++            return item;
++        }
+         if let Some(dimensions) = image_dimensions {
+             let key = resource_path_without_fragment(&image.src);
+             if let Some((intrinsic_w, intrinsic_h)) = dimensions.get(key).copied() {
+@@ -2622,9 +3116,40 @@
+ 
+ #[cfg(test)]
+ mod tests {
++    #[test]
++    fn image_limits_cascade_without_implicit_parent_inheritance() {
++        use crate::css::ImageLimit;
++        let mut styler = Styler::new(StyleConfig::default());
++        styler.push_stylesheet_source("first", "img { max-height: 80px } .small { max-width: 50% }").unwrap();
++        styler.push_stylesheet_source("second", ".small { max-width: 25% }").unwrap();
++        let chapter = styler.style_chapter(r#"<div style="max-width: 1px; max-height: 1px"><img src="a" class="small"/><img src="b" class="small" style="max-width: 10px"></img><img src="c" class="small" style="max-width: none"/><img src="d"/></div>"#).unwrap();
++        let images: Vec<_> = chapter.iter().filter_map(|item| match item {
++            StyledEventOrRun::Image(image) => Some(image), _ => None,
++        }).collect();
++        assert_eq!(images.len(), 4);
++        assert_eq!(images.iter().map(|image| image.max_width).collect::<Vec<_>>(),
++            [Some(ImageLimit::Percent(25.0)), Some(ImageLimit::Px(10.0)), Some(ImageLimit::None), None]);
++        assert!(images.iter().all(|image| image.max_height == Some(ImageLimit::Px(80.0))));
++    }
++
+     use super::*;
+ 
+     #[test]
++    fn reversed_list_prepass_is_bounded_and_ignores_skipped_content() {
++        assert!(reversed_list_counts(b"<head><ol reversed=''><li/></ol></head>").unwrap().is_empty());
++        let html = "<ol reversed=''>".repeat(17) + &"</ol>".repeat(17);
++        assert!(reversed_list_counts(html.as_bytes()).is_err());
++        let html = "<ol reversed=''>".to_string() + &"<li/>".repeat(16_385) + "</ol>";
++        assert!(reversed_list_counts(html.as_bytes()).is_err());
++        let html = "<ol reversed=''/>".repeat(1025);
++        assert!(reversed_list_counts(html.as_bytes()).is_err());
++        assert!(reversed_list_counts(b"<ol reversed=''><li/>").is_err());
++        let html = b"<ol reversed=''><li/><ol><li/><li/></ol><li/></ol>";
++        let counts = reversed_list_counts(html).unwrap();
++        assert_eq!(counts.values().copied().collect::<Vec<_>>(), vec![2]);
++    }
++
++    #[test]
+     fn chapter_css_budgets_accumulate_and_reset_after_failed_loads() {
+         let css = "p { font-weight: bold; }";
+         let sources = ChapterStylesheets { sources: vec![StylesheetSource { href: "a".into(), css: css.into() }, StylesheetSource { href: "b".into(), css: css.into() }] };
+@@ -2671,10 +3196,42 @@
+     }
+ 
+     #[test]
++    fn whitespace_cascade_resolves_each_element_and_retains_wrap_modes() {
++        use crate::css::WhiteSpace::*;
++        let mut styler = Styler::new(StyleConfig::default());
++        styler.load_stylesheets(&ChapterStylesheets {
++            sources: vec![StylesheetSource {
++                href: "main.css".into(),
++                css: "body { white-space: pre-wrap } .normal { white-space: normal }".into(),
++            }],
++        }).unwrap();
++        let chapter = styler.style_chapter(r#"<body><p>A</p><pre>B</pre><pre class="normal">C</pre><p style="white-space: initial">D</p><p class="normal" style="white-space: inherit">E</p><p style="white-space: unset">F</p><p style="white-space: pre-line">G</p><p style="white-space: nowrap">H</p><p style="white-space: normal; white-space: invalid">I</p><p><span style="white-space: normal">J</span>K</p></body>"#).unwrap();
++        let modes: Vec<_> = chapter.runs().map(|r| r.style.white_space).collect();
++        assert_eq!(modes, vec![PreWrap, Pre, Normal, Normal, PreWrap, PreWrap, PreLine, NoWrap, Normal, Normal, PreWrap]);
++    }
++
++    #[test]
++    fn whitespace_stream_keeps_nonbreaking_spaces_and_normalizes_line_endings() {
++        use crate::css::WhiteSpace::*;
++        let mut normalizer = WhitespaceNormalizer::default();
++        assert_eq!(normalizer.text("a ", Normal), "a ");
++        assert_eq!(normalizer.text(" \t", Normal), "");
++        assert_eq!(normalizer.text("\u{a0} b", Normal), "\u{a0} b");
++        let mut normalizer = WhitespaceNormalizer::default();
++        assert_eq!(normalizer.text("a\r", PreWrap), "a\n");
++        assert_eq!(normalizer.text("\n  b\r\nc", PreWrap), "  b\nc");
++        assert_eq!(normalizer.text("  ", Pre), "  ");
++        assert_eq!(normalizer.text(" x", Normal), " x");
++        let mut normalizer = WhitespaceNormalizer::default();
++        assert_eq!(normalizer.text("a\n", PreLine), "a\n");
++        assert_eq!(normalizer.text("  b\n\n  c", PreLine), "b\n\nc");
++    }
++
++    #[test]
+     fn normalize_whitespace_preserves_preformatted_context() {
+         let s = "a\n  b\t c";
+-        assert_eq!(normalize_plain_text_whitespace(s, true), s);
+-        assert_eq!(normalize_plain_text_whitespace(s, false), "a b c");
++        assert_eq!(WhitespaceNormalizer::default().text(s, crate::css::WhiteSpace::Pre), s);
++        assert_eq!(WhitespaceNormalizer::default().text(s, crate::css::WhiteSpace::Normal), "a b c");
+     }
+ 
+     #[test]
+@@ -2803,8 +3360,15 @@
+         let mut map = BTreeMap::new();
+         map.insert("images/cover.jpg".to_string(), (600u16, 900u16));
+         let item = StyledEventOrRun::Image(StyledImage {
++            source_offset: None,
+             src: "../images/cover.jpg".to_string(),
+             alt: String::new(),
++            width: None,
++            height: None,
++            max_width: None,
++            max_height: None,
++            min_width: None,
++            min_height: None,
+             width_px: None,
+             height_px: Some(300),
+             in_figure: false,
+@@ -3155,6 +3719,12 @@
+     fn font_resolver_trace_reports_fallback_chain() {
+         let resolver = FontResolver::new(FontPolicy::serif_default());
+         let style = ComputedTextStyle {
++            text_indent: None,
++            text_align: None,
++            direction: None,
++            white_space: crate::css::WhiteSpace::Normal,
++            tab_size: None,
++            hyphens: None,
+             family_stack: vec!["A".to_string(), "B".to_string()],
+             weight: 400,
+             italic: false,
+@@ -3193,6 +3763,12 @@
+             .register_epub_fonts(faces, |_href| Ok(vec![1, 2, 3]))
+             .expect("register should succeed");
+         let style = ComputedTextStyle {
++            text_indent: None,
++            text_align: None,
++            direction: None,
++            white_space: crate::css::WhiteSpace::Normal,
++            tab_size: None,
++            hyphens: None,
+             family_stack: vec!["Literata".to_string()],
+             weight: 680,
+             italic: true,
+@@ -3210,6 +3786,12 @@
+     fn font_resolver_reports_missing_glyph_risk_for_non_ascii_fallback() {
+         let resolver = FontResolver::new(FontPolicy::serif_default());
+         let style = ComputedTextStyle {
++            text_indent: None,
++            text_align: None,
++            direction: None,
++            white_space: crate::css::WhiteSpace::Normal,
++            tab_size: None,
++            hyphens: None,
+             family_stack: vec!["NoSuchFamily".to_string()],
+             weight: 400,
+             italic: false,
+@@ -3243,6 +3825,12 @@
+             .register_epub_fonts(vec![face.clone(), face], |_href| Ok(vec![1, 2, 3]))
+             .expect("register should succeed");
+         let style = ComputedTextStyle {
++            text_indent: None,
++            text_align: None,
++            direction: None,
++            white_space: crate::css::WhiteSpace::Normal,
++            tab_size: None,
++            hyphens: None,
+             family_stack: vec!["Literata".to_string()],
+             weight: 400,
+             italic: false,
+@@ -3306,4 +3894,96 @@
+         assert!(prep.is_ok());
+         assert_eq!(called.get(), 1);
+     }
++    #[test]
++    fn navigation_note_semantics_are_order_independent_and_bounded() {
++        fn events(attributes: &str) -> Result<Vec<StyledEventOrRun>, RenderPrepError> {
++            let xml = format!("<a xmlns:epub='http://www.idpf.org/2007/ops' {attributes}/>");
++            let mut reader = NsReader::from_str(&xml);
++            let mut events = Vec::new();
++            if let Event::Empty(element) = reader.read_event().unwrap() {
++                emit_navigation(&reader, &element, &mut |event| events.push(event))?;
++            } else { panic!("expected empty anchor"); }
++            Ok(events)
++        }
++        for attributes in [
++            "href='#note' epub:type='other noteref'",
++            "epub:type='noteref' href='#note'",
++            "role='doc-noteref' href='#note'",
++            "href='#note' role='doc-noteref'",
++            "xmlns:n='http://www.idpf.org/2007/ops' n:type='noteref' href='#note'",
++        ] {
++            assert!(matches!(&events(attributes).unwrap()[..], [StyledEventOrRun::NoteReferenceStart(href)] if href == "#note"));
++        }
++        assert!(events("role='doc-noteref'").unwrap().is_empty());
++        for key in ["role", "epub:type"] {
++            assert!(events(&format!("href='#note' {key}='{}'", "x".repeat(4097))).is_err());
++        }
++    }
++
++    #[test]
++    fn note_body_events_preserve_nesting_and_resolve_semantic_namespaces() {
++        let styler = Styler::new(StyleConfig::default());
++        let mut events = Vec::new();
++        styler.style_chapter_bytes_with(br#"<html xmlns:n="http://www.idpf.org/2007/ops"><body>
++          <section n:type="endnotes"><aside n:type="other endnote"><p>outer
++          <span role="doc-footnote">inner</span></p></aside></section>
++          <aside role="doc-endnote"/><aside xmlns:n="urn:wrong" n:type="footnote">ordinary</aside>
++          <aside type="footnote">ordinary</aside><aside n:type="footnotes">group</aside>
++        </body></html>"#, |item| match item {
++            StyledEventOrRun::NoteBodyStart => events.push(true),
++            StyledEventOrRun::NoteBodyEnd => events.push(false),
++            _ => {},
++        }).unwrap();
++        assert_eq!(events, [true, true, false, false, true, false]);
++        let oversized = format!("<p role='{}'>note</p>", "x".repeat(4097));
++        assert!(styler.style_chapter_bytes_with(oversized.as_bytes(), |_| {}).is_err());
++    }
++
++}
++
++#[cfg(test)]
++mod source_tracking_tests {
++    use super::*;
++
++    #[test]
++    fn source_tokens_and_unicode_offsets_survive_whitespace_normalization() {
++        let html = "<html><body><p>A \t <em> B😀</em>&amp; C<![CDATA[\r\nD]]></p></body></html>";
++        let styler = Styler::new(StyleConfig::default());
++        let plain = styler.style_chapter(html).unwrap();
++        let tracked = styler.with_source_tracking(true).style_chapter(html).unwrap();
++        let mut pairs = Vec::new();
++        for item in &tracked.items {
++            if let StyledEventOrRun::Run(run) = item {
++                let source = run.source.as_ref().unwrap();
++                assert_eq!(source.characters.len(), run.text.chars().count() + 1);
++                pairs.push((&html[source.token.clone()], run.text.as_str(), source.characters.clone()));
++            }
++        }
++        assert_eq!(pairs, vec![
++            ("A \t ", "A ", vec![0, 1, 4]),
++            (" B😀", "B😀", vec![1, 2, 3]),
++            ("&amp;", "&", vec![0, 1]),
++            (" C", " C", vec![0, 1, 2]),
++            ("<![CDATA[\r\nD]]>", " D", vec![0, 2, 3]),
++        ]);
++        let mut without_source = tracked.items;
++        without_source.retain(|item| !matches!(item, StyledEventOrRun::SourceElement(_)));
++        for item in &mut without_source {
++            if let StyledEventOrRun::Run(run) = item { run.source = None; }
++        }
++        assert_eq!(without_source, plain.items);
++    }
++
++    #[test]
++    fn preserved_newlines_and_generated_table_separators_have_correct_provenance() {
++        let styler = Styler::new(StyleConfig::default()).with_source_tracking(true);
++        let chapter = styler.style_chapter("<body><pre>A\r\n😀</pre><table><tr><td>a</td><td>b</td></tr></table></body>").unwrap();
++        let runs: Vec<_> = chapter.items.iter().filter_map(|item| match item {
++            StyledEventOrRun::Run(run) => Some(run), _ => None,
++        }).collect();
++        assert_eq!(runs[0].text, "A\n😀");
++        assert_eq!(runs[0].source.as_ref().unwrap().characters, [0, 1, 3, 4]);
++        let separator = runs.iter().find(|run| run.text == " | ").unwrap();
++        assert!(separator.source.is_none());
++    }
+ }

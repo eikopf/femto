@@ -1,0 +1,43 @@
+femto patch for miniz_oxide 0.9.1
+Subject: inflate/core: keep the Huffman tables on the heap with "with-alloc"
+
+DecompressorOxide stores its three Huffman tables inline. With the
+"with-alloc" feature, store them as Box<[HuffmanTable; MAX_HUFF_TABLES]> and
+build them through a Vec so the array is not first constructed on the stack.
+Without "with-alloc" the field and its initialiser are unchanged.
+
+femto opens EPUB archives on a worker thread with a 64 KiB stack; the inline
+decompressor state produced stack frames too large for it. Table sizes and
+decoding behaviour are unchanged.
+
+--- a/src/inflate/core.rs
++++ b/src/inflate/core.rs
+@@ -288,6 +288,9 @@
+     /// Buffer of input data.
+     bit_buf: BitBuffer,
+     /// Huffman tables.
++    #[cfg(feature = "with-alloc")]
++    tables: crate::alloc::boxed::Box<[HuffmanTable; MAX_HUFF_TABLES]>,
++    #[cfg(not(feature = "with-alloc"))]
+     tables: [HuffmanTable; MAX_HUFF_TABLES],
+ 
+     #[cfg_attr(feature = "serde", serde(with = "BigArray"))]
+@@ -416,6 +419,18 @@
+             table_sizes: [0; MAX_HUFF_TABLES],
+             bit_buf: 0,
+             // TODO:(oyvindln) Check that copies here are optimized out in release mode.
++            #[cfg(feature = "with-alloc")]
++            tables: {
++                let mut tables = crate::alloc::vec::Vec::with_capacity(MAX_HUFF_TABLES);
++                for _ in 0..MAX_HUFF_TABLES {
++                    tables.push(HuffmanTable::new());
++                }
++                tables
++                    .into_boxed_slice()
++                    .try_into()
++                    .unwrap_or_else(|_| unreachable!("table count"))
++            },
++            #[cfg(not(feature = "with-alloc"))]
+             tables: [
+                 HuffmanTable::new(),
+                 HuffmanTable::new(),

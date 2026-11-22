@@ -1,0 +1,176 @@
+femto patch for quireink-stardict 0.3.0
+Subject: validate definition field framing and encoding
+
+text::decode now returns Result:
+- field type bytes must be ASCII letters;
+- non-final text fields must be NUL-terminated, a final text field may not
+  contain data after its terminator, and binary fields must have a complete
+  size prefix and payload (the size addition is checked);
+- text fields must be valid UTF-8 (upstream decoded lossily);
+- decoded text is capped at 64 KiB;
+- fields are processed one at a time instead of being collected first.
+
+Dictionary::lookup propagates the error.
+
+Motivation as for 0002-0004. This is not a complete hostile-input audit.
+
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -278,7 +278,7 @@
+             }
+             let data = self.dict.read(storage, entry.offset, size)?;
+             definitions.push(Definition {
+-                text: text::decode(&data, self.info.types.as_deref()),
++                text: text::decode(&data, self.info.types.as_deref())?,
+                 word: entry.word,
+             });
+         }
+--- a/src/text.rs
++++ b/src/text.rs
+@@ -5,70 +5,88 @@
+ 
+ /// The text of a definition's fields, typed by `types` (the dictionary's
+ /// `sametypesequence`) or by a type byte before each field.
+-pub(crate) fn decode(data: &[u8], types: Option<&str>) -> String {
+-    let mut fields: Vec<(u8, &[u8])> = Vec::new();
++pub(crate) fn decode(data: &[u8], types: Option<&str>) -> Result<String, crate::Error> {
+     let mut rest = data;
++    let mut text = String::new();
+     match types {
+         Some(types) => {
+-            let types = types.as_bytes();
+-            for (i, &kind) in types.iter().enumerate() {
+-                let last = i + 1 == types.len();
+-                let (field, after) = split_field(rest, kind, last);
+-                fields.push((kind, field));
++            if types.is_empty() {
++                return Err(crate::malformed("empty definition type sequence"));
++            }
++            for (i, kind) in types.bytes().enumerate() {
++                let (field, after) = split_field(rest, kind, i + 1 == types.len())?;
++                append_field(&mut text, kind, field)?;
+                 rest = after;
+             }
+         }
+         None => {
+             while let Some((&kind, after)) = rest.split_first() {
+-                let (field, after) = split_field(after, kind, false);
+-                fields.push((kind, field));
++                let (field, after) = split_field(after, kind, false)?;
++                append_field(&mut text, kind, field)?;
+                 rest = after;
+             }
+         }
+     }
+-    let mut text = String::new();
+-    for (kind, field) in fields {
+-        let field = String::from_utf8_lossy(field);
+-        let part = match kind {
+-            b'h' | b'g' | b'x' | b'k' | b'w' | b'r' => to_plain_text(&field),
+-            b't' => alloc::format!("[{}]", field.trim()),
+-            b'm' | b'l' | b'y' => field.trim().into(),
+-            // Binary data (sounds, pictures) and unknown types.
+-            _ => continue,
+-        };
+-        if part.is_empty() {
+-            continue;
+-        }
+-        if !text.is_empty() {
+-            text.push('\n');
+-        }
+-        text.push_str(&part);
++    Ok(text)
++}
++
++fn append_field(text: &mut String, kind: u8, field: &[u8]) -> Result<(), crate::Error> {
++    if kind.is_ascii_uppercase() {
++        return Ok(());
+     }
+-    text
++    let field =
++        core::str::from_utf8(field).map_err(|_| crate::malformed("definition is not UTF-8"))?;
++    let part = match kind {
++        b'h' | b'g' | b'x' | b'k' | b'w' | b'r' => to_plain_text(field),
++        b't' => alloc::format!("[{}]", field.trim()),
++        b'm' | b'l' | b'y' => field.trim().into(),
++        _ => return Ok(()),
++    };
++    if part.is_empty() {
++        return Ok(());
++    }
++    let separator = usize::from(!text.is_empty());
++    if part.len() > (64usize * 1024).saturating_sub(text.len() + separator) {
++        return Err(crate::malformed("decoded definition too large"));
++    }
++    if separator != 0 {
++        text.push('\n');
++    }
++    text.push_str(&part);
++    Ok(())
+ }
+ 
+-/// One field: text up to a NUL byte (or the rest, for the last field),
+-/// binary data with a 4-byte size before it.
+-fn split_field(data: &[u8], kind: u8, last: bool) -> (&[u8], &[u8]) {
++/// Every non-final text field is NUL-terminated; binary fields have a big-endian size.
++fn split_field(data: &[u8], kind: u8, last: bool) -> Result<(&[u8], &[u8]), crate::Error> {
++    if !kind.is_ascii_alphabetic() {
++        return Err(crate::malformed("invalid definition field type"));
++    }
+     if kind.is_ascii_uppercase() {
+         if last {
+-            return (data, &[]);
++            return Ok((data, &[]));
+         }
+-        let Some(size) = data.get(..4) else {
+-            return (&[], &[]);
+-        };
++        let size = data
++            .get(..4)
++            .ok_or_else(|| crate::malformed("binary field size missing"))?;
+         let size = u32::from_be_bytes([size[0], size[1], size[2], size[3]]) as usize;
+-        let end = (4 + size).min(data.len());
+-        return (&data[4..end], &data[end..]);
++        let end = size
++            .checked_add(4)
++            .filter(|end| *end <= data.len())
++            .ok_or_else(|| crate::malformed("binary field cut short"))?;
++        return Ok((&data[4..end], &data[end..]));
+     }
+     if last {
+-        let end = data.iter().position(|&b| b == 0).unwrap_or(data.len());
+-        return (&data[..end], &[]);
+-    }
+-    match data.iter().position(|&b| b == 0) {
+-        Some(end) => (&data[..end], &data[end + 1..]),
+-        None => (data, &[]),
+-    }
++        let field = data.strip_suffix(&[0]).unwrap_or(data);
++        if field.contains(&0) {
++            return Err(crate::malformed("data after final text field"));
++        }
++        return Ok((field, &[]));
++    }
++    let end = data
++        .iter()
++        .position(|b| *b == 0)
++        .ok_or_else(|| crate::malformed("text field terminator missing"))?;
++    Ok((&data[..end], &data[end + 1..]))
+ }
+ 
+ /// Plain text from simple markup (HTML, XDXF, Pango): tags are dropped,
+@@ -181,9 +199,12 @@
+ 
+     #[test]
+     fn fields_by_type() {
+-        assert_eq!(decode(b"tone\0<b>Ton</b>", Some("th")), "[tone]\nTon");
+         assert_eq!(
+-            decode(b"mfirst\0hsecond<br>line\0", None),
++            decode(b"tone\0<b>Ton</b>", Some("th")).unwrap(),
++            "[tone]\nTon"
++        );
++        assert_eq!(
++            decode(b"mfirst\0hsecond<br>line\0", None).unwrap(),
+             "first\nsecond\nline"
+         );
+     }

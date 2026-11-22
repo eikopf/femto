@@ -1,0 +1,33 @@
+femto patch for esp-idf-svc 0.53.0
+Subject: io/vfs: mount FAT volumes immediately and propagate failure
+
+MountedFatfs::mount calls f_mount(handle, path, 0) (deferred mount, marked
+TODO upstream) and ignores the result. An unreadable or unsupported volume
+therefore "mounts" successfully and fails later on first file access.
+
+Call f_mount with opt = 1 so FatFs checks the volume now. On failure, log
+the FRESULT, unmount, unregister the VFS path and return ESP_FAIL. The
+volume is never formatted.
+
+femto needs this to report unsupported SD cards before exposing device
+storage. Use together with 0004 (the drive path passed to f_mount).
+
+--- a/src/io.rs
++++ b/src/io.rs
+@@ -159,8 +159,14 @@
+                 }
+             })?;
+ 
+-            unsafe {
+-                sys::f_mount(handle, drive_path.as_ptr(), 0); // TODO
++            let result = unsafe { sys::f_mount(handle, drive_path.as_ptr(), 1) };
++            if result != sys::FRESULT_FR_OK {
++                log::warn!("FAT mount failed: {result}");
++                unsafe {
++                    sys::f_mount(core::ptr::null_mut(), drive_path.as_ptr(), 0);
++                    sys::esp_vfs_fat_unregister_path(path.as_ptr());
++                }
++                return Err(sys::EspError::from_infallible::<{ sys::ESP_FAIL }>());
+             }
+ 
+             let drive = fatfs.borrow_mut().drive();

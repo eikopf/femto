@@ -237,7 +237,7 @@ Release 0.1.3, installed through the on-device update, repeated the catalog test
 
 Joining after a restart logs one ESP-IDF task watchdog warning: back-to-back TLS handshakes for the coordinator and relay keep CPU 0 busy for longer than the watchdog period. The warning does not restart the reader, and joining completes.
 
-A relayed (DERP) path, HTTPS to a peer, node-key renewal and a session lasting hours were not tested on the device. While a session that had failed was still open, two firmware pushes over the USB console timed out; they succeeded after `Disconnect`. The cause is not known.
+A relayed (DERP) path, HTTPS to a peer, node-key renewal and a session lasting hours were not tested on the device. While a session that had failed was still open, two firmware pushes over the USB console timed out, both exactly at a chunk boundary: the reader waited for a chunk that the host never sent. The likely cause is a log line from another thread breaking the acknowledgement apart, which was not reproduced. The reader now repeats an acknowledgement every second until its chunk begins to arrive; a push with three acknowledgements deliberately ignored completed.
 
 ## Catalog tailnet routing
 

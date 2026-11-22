@@ -9,6 +9,8 @@ use std::{
 /// File commands are confined to the device data directory.
 const ROOT: &str = "/sdcard/femto";
 const CHUNK_TIMEOUT_MS: u32 = 5000;
+/// How often an unanswered acknowledgement is repeated.
+const ACK_REPEAT_MS: u32 = 1000;
 
 pub struct Console {
     parser: Parser,
@@ -102,7 +104,10 @@ fn list(directory: &Path) -> Result<(), String> {
 }
 
 /// Stop-and-wait transfer: the driver drops bytes when its ring overflows,
-/// so the host sends one chunk per acknowledgement.
+/// so the host sends one chunk per acknowledgement. Log lines from other
+/// threads can break an acknowledgement apart on the wire, so it is
+/// repeated while the chunk it asks for has not begun to arrive. A broken
+/// one can only name an earlier offset, which the host ignores.
 fn put(len: u32, crc: u32, path: &Path) -> Result<(), String> {
     let mut partial = path.as_os_str().to_owned();
     partial.push(".part");
@@ -114,14 +119,19 @@ fn put(len: u32, crc: u32, path: &Path) -> Result<(), String> {
         let mut file = fs::File::create(&partial).map_err(|e| e.to_string())?;
         let mut chunk = [0u8; CHUNK_BYTES];
         let (mut total, mut sum) = (0u32, 0u32);
-        log::info!("USB put: ack 0");
         while total < len {
             let wanted = ((len - total) as usize).min(CHUNK_BYTES);
             let mut filled = 0;
             let started = std::time::Instant::now();
+            let mut asked = None;
             while filled < wanted {
-                if started.elapsed().as_millis() > CHUNK_TIMEOUT_MS.into() {
+                let waited = started.elapsed().as_millis() as u32;
+                if waited > CHUNK_TIMEOUT_MS {
                     return Err(format!("timeout after {} bytes", total as usize + filled));
+                }
+                if filled == 0 && asked != Some(waited / ACK_REPEAT_MS) {
+                    asked = Some(waited / ACK_REPEAT_MS);
+                    log::info!("USB put: ack {total}");
                 }
                 filled += unsafe {
                     sys::usb_serial_jtag_read_bytes(
@@ -135,7 +145,6 @@ fn put(len: u32, crc: u32, path: &Path) -> Result<(), String> {
                 .map_err(|e| e.to_string())?;
             sum = crc32(sum, &chunk[..wanted]);
             total += wanted as u32;
-            log::info!("USB put: ack {total}");
         }
         if sum != crc {
             return Err(format!("checksum {sum:08x} does not match"));

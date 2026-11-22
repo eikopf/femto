@@ -12,6 +12,8 @@ import tty
 import zlib
 
 CHUNK_BYTES = 2048
+# Offsets whose first acknowledgement is ignored, to test its repetition.
+DROP_ACKS = {int(offset) for offset in os.environ.get("FEMTO_DROP_ACKS", "").split()}
 EVENTS = ["next", "prev", "select", "back", "power", "hold"]
 
 
@@ -86,11 +88,21 @@ def put(port, source, destination):
         data = file.read()
     port.write(f"femto put {len(data)} {zlib.crc32(data):08x} {destination}\n".encode())
 
+    sent = -1
+
     def acknowledge(line):
+        # The device repeats an acknowledgement that a log line broke apart.
+        # Each chunk is sent once; a truncated offset is earlier or uneven.
+        nonlocal sent
         ack = re.search(rb"USB put: ack (\d+)", line)
-        if ack:
-            port.deadline = time.monotonic() + 30
-            port.write(data[int(ack[1]):int(ack[1]) + CHUNK_BYTES])
+        if not ack or int(ack[1]) <= sent or int(ack[1]) % CHUNK_BYTES:
+            return
+        if int(ack[1]) in DROP_ACKS:
+            DROP_ACKS.discard(int(ack[1]))
+            return
+        sent = int(ack[1])
+        port.deadline = time.monotonic() + 30
+        port.write(data[sent:sent + CHUNK_BYTES])
 
     started = time.monotonic()
     port.file_result(acknowledge, echo=False)

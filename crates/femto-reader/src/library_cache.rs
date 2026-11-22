@@ -245,6 +245,28 @@ impl Cache {
         })
     }
 
+    /// Deletes a book file inside the library and drops it from the cache.
+    pub(crate) fn delete_book(root: &Path, path: &Path, limit: usize) -> Result<()> {
+        if !(1..=4096).contains(&limit) {
+            return Err(Error::Limit("library limit"));
+        }
+        let root = root.canonicalize()?;
+        let path = path.canonicalize()?;
+        if !safe_path(&root, &path) {
+            return Err(Error::Document("book is outside library root".into()));
+        }
+        if !std::fs::metadata(&path)?.is_file() {
+            return Err(Error::Document("book is not a regular file".into()));
+        }
+        std::fs::remove_file(&path)?;
+        let (mut cache, _) = Self::open(&root, limit);
+        if cache.entries.remove(&path).is_some() {
+            cache.stamps.remove(&path);
+            cache.write(EntrySource::Map(&cache.entries))?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn record_open(
         root: &Path,
         path: &Path,

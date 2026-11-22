@@ -409,7 +409,7 @@ impl CatalogMenu {
         self.detail = false;
         self.search = None;
         if self.browser.is_none() {
-            ui.open();
+            ui.close_catalog();
             return Ok(());
         }
         let rows = self.rows();
@@ -457,7 +457,7 @@ impl CatalogMenu {
             CatalogEvent::Back if self.detail || self.search.is_some() => self.show(ui),
             CatalogEvent::Back => {
                 let Some(level) = self.above.pop() else {
-                    ui.open();
+                    ui.close_catalog();
                     return Ok(());
                 };
                 // A page still arriving for the listing being left is dropped.

@@ -31,6 +31,8 @@ pub enum Event {
     Swipe(Turn),
     /// A turn that is already in reading direction.
     Turn(Turn),
+    /// A menu entry named over the diagnostic console.
+    Choose,
     Tap {
         x: u16,
         y: u16,

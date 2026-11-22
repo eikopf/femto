@@ -10,6 +10,7 @@ The USB Serial/JTAG console accepts newline-terminated commands from a physicall
 | `femto next`, `prev`, `select`, `back` | Injects the event on the same path as physical controls |
 | `femto tap X Y` | Injects a tap at reader-view coordinates |
 | `femto type TEXT` | Enters text into the on-screen keyboard field that is open |
+| `femto choose TEXT` | Activates the entry of the current menu whose label starts with the text, opening the root menu first when reading |
 | `femto frame` | Dumps the last presented framebuffer as hexadecimal lines |
 | `femto put LEN CRC32 PATH` | Receives a file below `/sdcard/femto` |
 | `femto ls [PATH]`, `femto rm PATH` | Lists a directory (at most 256 entries) or removes a file below `/sdcard/femto` |

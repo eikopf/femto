@@ -81,7 +81,7 @@ impl Session {
                 self.pending = None;
                 self.navigation = None;
                 self.jobs.cancel();
-                ui.open();
+                ui.close_kosync();
                 return Ok(());
             }
             KosyncEvent::Open => {

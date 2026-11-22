@@ -426,10 +426,8 @@ fn invalid_replacement_descriptor_preserves_current_remote() {
 
 fn open_remote_menu(ui: &mut ReaderUi, reader: &mut Reader) {
     ui.open();
-    for _ in 0..11 {
-        ui.turn(reader, true).unwrap();
-    }
-    ui.select(reader).unwrap();
+    ui.choose(reader, "Settings").unwrap();
+    ui.choose(reader, "Remote buttons").unwrap();
 }
 
 #[test]
@@ -468,6 +466,7 @@ fn menu_edits_persist_and_do_not_replay_a_held_remote_press() {
     assert_eq!(reader.position(), before);
     assert_eq!(ui.render(&mut reader, 2).unwrap().len(), 480 * 800);
     reader.state = serde_json::from_slice(&serde_json::to_vec(&reader.state).unwrap()).unwrap();
+    ui.back(&mut reader).unwrap();
     ui.back(&mut reader).unwrap();
     ui.back(&mut reader).unwrap();
     remote.submit(token, [0, 1], NEXT);

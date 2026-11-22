@@ -12,9 +12,11 @@ use std::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Panel {
     Root,
+    /// Tools for the open book that are used less often than the root rows.
+    Book,
     Rotation,
     Catalog,
     CatalogSearch,
@@ -37,6 +39,8 @@ enum Panel {
     WordList,
     Links,
     LinkPreview,
+    Typography,
+    /// Device preferences and connections.
     Settings,
     Remote,
     Light,
@@ -44,6 +48,10 @@ enum Panel {
     Refresh,
     Library,
     Books,
+    /// The books, listed to choose one for deletion.
+    Delete,
+    /// Confirming deletion of the library entry at this index.
+    DeleteConfirm(usize),
     Recent,
     Folders,
     Folder(usize),
@@ -51,6 +59,47 @@ enum Panel {
     Results,
     Errors,
     Diagnostic(usize),
+}
+impl Panel {
+    /// The panel Back returns to; `None` leaves the menu.
+    fn parent(self) -> Option<Self> {
+        Some(match self {
+            Self::Root => return None,
+            Self::Book
+            | Self::Contents
+            | Self::Bookmarks
+            | Self::Library
+            | Self::Catalog
+            | Self::Light
+            | Self::Typography
+            | Self::Settings
+            | Self::LinkPreview => Self::Root,
+            Self::Chapters | Self::Links | Self::Clippings | Self::Kosync => Self::Book,
+            Self::Device
+            | Self::Tailnet
+            | Self::Power
+            | Self::Rotation
+            | Self::Refresh
+            | Self::DictionaryChooser
+            | Self::Remote => Self::Settings,
+            Self::DeviceText(_) => Self::Device,
+            Self::CatalogSearch => Self::Catalog,
+            Self::Books | Self::Recent | Self::Folders | Self::Search | Self::Errors => {
+                Self::Library
+            }
+            Self::Delete => Self::Library,
+            Self::DeleteConfirm(_) => Self::Delete,
+            Self::Results => Self::Search,
+            Self::Folder(_) => Self::Folders,
+            Self::Diagnostic(_) => Self::Errors,
+            Self::Clipping(_)
+            | Self::ClippingDelete
+            | Self::SelectWord
+            | Self::WordPreview
+            | Self::WordList => Self::Clippings,
+            Self::DictionaryResult => Self::WordPreview,
+        })
+    }
 }
 #[derive(Clone, Copy)]
 enum Command {
@@ -72,16 +121,13 @@ enum Command {
     DeleteClipping(usize),
     ToggleHighlight(usize),
     ConfirmClippingDelete,
-    CancelClippingDelete,
     SelectWord,
     SaveWord,
     LookupWord,
     ChooseDictionary(usize),
-    CloseDictionary,
     SelectWordList,
     PickWord(crate::layout::Locator, crate::layout::Locator),
     ExtendWord,
-    CancelWord,
     Character(char),
     Delete,
     Find,
@@ -95,6 +141,10 @@ enum Command {
     Hinting,
     Fractional,
     Book(usize),
+    DeleteBook(usize),
+    ConfirmDeleteBook(usize),
+    /// Return to the enclosing menu.
+    Leave,
     /// Advance a stepped setting, wrapping to its first value.
     Step(Setting),
     /// Choose a value of a stepped setting by position.
@@ -292,6 +342,8 @@ pub struct ReaderUi {
     reflow_return: Option<Panel>,
     opening: Option<BookOpening>,
     panel: Option<Panel>,
+    /// The row last activated in each panel, restored when Back returns there.
+    remembered: Vec<(Panel, usize)>,
     rotation_available: bool,
     rotation_request: Option<crate::state::Rotation>,
     tailnet_available: bool,
@@ -659,13 +711,59 @@ impl ReaderUi {
         self.error = None;
         Ok(())
     }
-    /// Leaves the device settings panel for the root menu.
+    /// Leaves the device settings panel for the menu it was opened from.
     pub fn close_device(&mut self) {
         if self.is_device_open() {
             self.device_rows.clear();
             self.device_text.clear();
+            self.panel = Some(Panel::Device);
+            self.leave();
+        }
+    }
+    /// Leaves the catalog for the menu it was opened from.
+    pub fn close_catalog(&mut self) {
+        if self.is_catalog_open() {
+            self.panel = Some(Panel::Catalog);
+            self.leave();
+        }
+    }
+    /// Leaves the sync panel for the menu it was opened from.
+    pub fn close_kosync(&mut self) {
+        if self.is_kosync_open() {
+            self.leave();
+        }
+    }
+    fn remember(&mut self) {
+        if let Some(panel) = self.panel {
+            self.remembered.retain(|(other, _)| *other != panel);
+            self.remembered.push((panel, self.selected));
+        }
+    }
+    /// Shows the current panel's parent with the row that led here selected.
+    fn leave(&mut self) {
+        self.panel = self.panel.and_then(Panel::parent);
+        self.selected = self
+            .remembered
+            .iter()
+            .find(|(panel, _)| Some(*panel) == self.panel)
+            .map_or(0, |(_, selected)| *selected);
+        self.error = None;
+    }
+    /// Activates the first entry of the current menu whose label starts
+    /// with `label`, for tests and the diagnostic console.
+    pub fn choose(&mut self, reader: &mut Reader, label: &str) -> Result<Effect> {
+        if self.is_busy() {
+            return Ok(Effect::Unchanged);
+        }
+        if self.panel.is_none() {
             self.open();
         }
+        let entries = self.entries(reader);
+        let Some(index) = entries.iter().position(|(text, _)| text.starts_with(label)) else {
+            return Err(crate::Error::Document(format!("no menu entry {label:?}")));
+        };
+        self.selected = index;
+        self.activate(reader, entries[index].1)
     }
     /// Bytes the field being edited accepts.
     fn text_limit(&self) -> usize {
@@ -959,7 +1057,7 @@ impl ReaderUi {
                 self.cancel_reflow();
                 if let Err(error) = result {
                     if self.panel.is_none() {
-                        self.panel = Some(Panel::Settings);
+                        self.panel = Some(Panel::Typography);
                     }
                     self.show_error(error.to_string());
                 }
@@ -1091,15 +1189,38 @@ impl ReaderUi {
     }
     pub fn set_library(&mut self, library: Library) {
         self.scan = None;
-        self.folders = library
+        self.library = library;
+        self.list_folders();
+        self.selected = 0;
+    }
+    fn list_folders(&mut self) {
+        self.folders = self
+            .library
             .entries
             .iter()
             .filter_map(|e| e.path.parent().map(|p| p.to_path_buf()))
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
-        self.library = library;
-        self.selected = 0;
+    }
+    /// Deletes the file of a library entry other than the open book.
+    fn delete_book(&mut self, reader: &Reader, index: usize) -> Result<()> {
+        let entry = self
+            .library
+            .entries
+            .get(index)
+            .ok_or_else(|| crate::Error::Document("library entry unavailable".into()))?;
+        if entry.metadata.id == reader.document.metadata.id {
+            return Err(crate::Error::Document("this book is open".into()));
+        }
+        let (root, limit) = self
+            .scan_root
+            .as_ref()
+            .ok_or_else(|| crate::Error::Document("library folder unavailable".into()))?;
+        crate::library_cache::Cache::delete_book(root, &entry.path, *limit)?;
+        self.library.entries.remove(index);
+        self.list_folders();
+        Ok(())
     }
     pub fn open_library(&mut self) {
         self.preview = None;
@@ -1144,95 +1265,51 @@ impl ReaderUi {
             }
             return Ok(Effect::Redraw);
         }
-        match self.panel {
-            Some(Panel::DictionaryResult) => {
-                if let Some(dictionary) = self.dictionary_job.take().filter(|d| d.is_ready()) {
-                    self.dictionary_cache = Some(dictionary);
-                }
-                self.dictionary_rows.clear();
-                self.panel = Some(Panel::WordPreview);
-                self.selected = 0;
-                self.error = None;
-                Ok(Effect::Redraw)
-            }
-            Some(Panel::SelectWord | Panel::WordPreview | Panel::WordList) => {
-                self.word_origin = None;
-                self.word_pending = None;
-                self.word_choices.clear();
-                self.panel = Some(Panel::Clippings);
-                self.selected = 0;
-                self.error = None;
-                Ok(Effect::Redraw)
-            }
-            Some(Panel::ClippingDelete) => {
-                self.clipping_delete = None;
-                self.panel = Some(Panel::Clippings);
-                self.selected = 0;
-                self.error = None;
-                Ok(Effect::Redraw)
-            }
-            Some(Panel::Clipping(_)) => {
-                self.panel = Some(Panel::Clippings);
-                self.selected = 0;
-                Ok(Effect::Redraw)
-            }
-            Some(Panel::LinkPreview) => {
-                self.preview = None;
-                self.panel = self.preview_return.take();
-                self.error = None;
-                Ok(Effect::Redraw)
-            }
-            Some(Panel::Catalog | Panel::CatalogSearch) => {
+        let Some(panel) = self.panel else {
+            return self.navigate(reader, Action::Back);
+        };
+        match panel {
+            Panel::Catalog | Panel::CatalogSearch => {
                 self.catalog_event = Some(CatalogEvent::Back);
-                Ok(Effect::Redraw)
+                return Ok(Effect::Redraw);
             }
-            Some(Panel::Device) => {
+            Panel::Device => {
                 self.device_event = Some(DeviceEvent::Back);
-                Ok(Effect::Redraw)
+                return Ok(Effect::Redraw);
             }
-            Some(Panel::DeviceText(index)) => {
+            Panel::Kosync => {
+                self.kosync_event = Some(KosyncEvent::Back);
+                return Ok(Effect::Redraw);
+            }
+            Panel::DeviceText(index) => {
                 // Leaving the keyboard discards the entry.
                 self.device_text.clear();
                 self.panel = Some(Panel::Device);
                 self.selected = index;
-                Ok(Effect::Redraw)
+                return Ok(Effect::Redraw);
             }
-            Some(Panel::Kosync) => {
-                self.kosync_event = Some(KosyncEvent::Back);
-                Ok(Effect::Redraw)
-            }
-            Some(Panel::Diagnostic(_)) => {
-                self.panel = Some(Panel::Errors);
-                self.selected = 0;
-                Ok(Effect::Redraw)
-            }
-            None => self.navigate(reader, Action::Back),
-            Some(Panel::Root) => {
-                self.panel = None;
+            Panel::LinkPreview => {
+                self.preview = None;
+                self.panel = self.preview_return.take();
                 self.error = None;
-                Ok(Effect::Redraw)
+                return Ok(Effect::Redraw);
             }
-            Some(Panel::Books | Panel::Recent | Panel::Folders | Panel::Search | Panel::Errors) => {
-                self.open_library();
-                Ok(Effect::Redraw)
+            Panel::DictionaryResult => {
+                if let Some(dictionary) = self.dictionary_job.take().filter(|d| d.is_ready()) {
+                    self.dictionary_cache = Some(dictionary);
+                }
+                self.dictionary_rows.clear();
             }
-            Some(Panel::Results) => {
-                self.panel = Some(Panel::Search);
-                self.selected = 0;
-                self.error = None;
-                Ok(Effect::Redraw)
+            Panel::SelectWord | Panel::WordPreview | Panel::WordList => {
+                self.word_origin = None;
+                self.word_pending = None;
+                self.word_choices.clear();
             }
-            Some(Panel::Folder(_)) => {
-                self.panel = Some(Panel::Folders);
-                self.selected = 0;
-                self.error = None;
-                Ok(Effect::Redraw)
-            }
-            Some(_) => {
-                self.open();
-                Ok(Effect::Redraw)
-            }
+            Panel::ClippingDelete => self.clipping_delete = None,
+            _ => {}
         }
+        self.leave();
+        Ok(Effect::Redraw)
     }
     pub fn open(&mut self) {
         if let Some(dictionary) = self.dictionary_job.take().filter(|d| d.is_ready()) {
@@ -1244,6 +1321,7 @@ impl ReaderUi {
         self.word_pending = None;
         self.clipping_delete = None;
         self.preview = None;
+        self.remembered.clear();
         self.panel = Some(Panel::Root);
         self.selected = 0;
         self.error = None;
@@ -1517,6 +1595,7 @@ impl ReaderUi {
     }
     fn activate(&mut self, reader: &mut Reader, command: Command) -> Result<Effect> {
         self.error = None;
+        self.remember();
         let result = match command {
             Command::Kosync(event) => {
                 self.kosync_event = Some(event);
@@ -1602,8 +1681,7 @@ impl ReaderUi {
                 self.dictionary_rows.clear();
                 Ok(Effect::Unchanged)
             })(),
-            Command::CloseDictionary => self.back(reader),
-            Command::CancelWord => self.back(reader),
+
             Command::ExtendWord => {
                 if self.word_context_matches(reader) && self.word_pending.is_some() {
                     self.word_pan = false;
@@ -1652,7 +1730,6 @@ impl ReaderUi {
                     Err(crate::Error::Document("clipping no longer exists".into()))
                 }
             }
-            Command::CancelClippingDelete => self.back(reader),
             Command::ConfirmClippingDelete => {
                 let pending = self.clipping_delete.take();
                 self.panel = Some(Panel::Clippings);
@@ -1781,6 +1858,17 @@ impl ReaderUi {
                 }
                 None => Err(crate::Error::Document("library entry unavailable".into())),
             },
+            Command::DeleteBook(index) => {
+                self.panel = Some(Panel::DeleteConfirm(index));
+                self.selected = 0;
+                Ok(Effect::Redraw)
+            }
+            Command::ConfirmDeleteBook(index) => {
+                self.panel = Some(Panel::Delete);
+                self.selected = index.min(self.library.entries.len().saturating_sub(2));
+                self.delete_book(reader, index).map(|()| Effect::Redraw)
+            }
+            Command::Leave => self.back(reader),
             Command::Resume => {
                 self.panel = None;
                 Ok(Effect::Redraw)
@@ -1863,83 +1951,86 @@ impl ReaderUi {
                     )
                 })
                 .collect(),
-            Panel::Root => vec![
+            Panel::Root => [
                 ("Resume reading".into(), Command::Resume),
                 ("Contents".into(), Command::Open(Panel::Contents)),
-                ("Chapters".into(), Command::Open(Panel::Chapters)),
                 ("Bookmarks".into(), Command::Open(Panel::Bookmarks)),
-                (
-                    "Toggle bookmark".into(),
-                    Command::Reader(Action::ToggleBookmark),
-                ),
-                ("Links on this page".into(), Command::Open(Panel::Links)),
-                ("Typography".into(), Command::Open(Panel::Settings)),
-                ("Return from jump".into(), Command::Reader(Action::Back)),
                 ("Library".into(), Command::Open(Panel::Library)),
-                ("Frontlight".into(), Command::Open(Panel::Light)),
             ]
             .into_iter()
-            .chain(
-                self.kosync_available
-                    .then(|| ("KOReader sync".into(), Command::Kosync(KosyncEvent::Open))),
-            )
             .chain(
                 self.catalog_available
                     .then(|| ("Catalog".into(), Command::Catalog(CatalogEvent::Open))),
             )
+            .chain([
+                ("Frontlight".into(), Command::Open(Panel::Light)),
+                ("Typography".into(), Command::Open(Panel::Typography)),
+                ("This book".into(), Command::Open(Panel::Book)),
+                ("Settings".into(), Command::Open(Panel::Settings)),
+            ])
             .chain(
-                self.device_available
-                    .then(|| ("Network and services".into(), Command::DeviceOpen)),
+                self.sleep_available
+                    .then(|| ("Save and sleep".into(), Command::Sleep)),
             )
             .chain(
                 self.device_status
                     .iter()
                     .map(|status| (status.clone(), Command::Noop)),
             )
+            .collect(),
+            Panel::Book => [
+                ("Chapters".into(), Command::Open(Panel::Chapters)),
+                ("Links on this page".into(), Command::Open(Panel::Links)),
+                ("Return from jump".into(), Command::Reader(Action::Back)),
+                ("Clippings".into(), Command::Open(Panel::Clippings)),
+            ]
+            .into_iter()
             .chain(
-                self.sleep_available
-                    .then(|| ("Save and sleep".into(), Command::Sleep)),
-            )
-            .chain(
-                self.sleep_available
-                    .then(|| ("Automatic sleep".into(), Command::Open(Panel::Power))),
-            )
-            .chain(
-                self.tailnet_available
-                    .then(|| ("Tailnet".into(), Command::Tailnet(TailnetEvent::Open))),
-            )
-            .chain(
-                self.rotation_available
-                    .then(|| ("Screen orientation".into(), Command::Open(Panel::Rotation))),
-            )
-            .chain(
-                self.refresh_available
-                    .then(|| ("Full refresh".into(), Command::Open(Panel::Refresh))),
-            )
-            .chain(std::iter::once((
-                "Clippings".into(),
-                Command::Open(Panel::Clippings),
-            )))
-            .chain(
-                (!self.dictionary_choices.is_empty())
-                    .then(|| ("Dictionary".into(), Command::Open(Panel::DictionaryChooser))),
-            )
-            .chain(std::iter::once((
-                "Remote buttons".into(),
-                Command::Open(Panel::Remote),
-            )))
-            .chain(
-                self.page_buttons_available
-                    .then(|| {
-                        [
-                            ("Swap page-turn buttons".into(), Command::SwapPageButtons),
-                            ("Swap menu buttons".into(), Command::SwapMenuButtons),
-                        ]
-                    })
-                    .into_iter()
-                    .flatten(),
+                self.kosync_available
+                    .then(|| ("KOReader sync".into(), Command::Kosync(KosyncEvent::Open))),
             )
             .collect(),
+            Panel::Settings => std::iter::empty()
+                .chain(
+                    self.device_available
+                        .then(|| ("Network and services".into(), Command::DeviceOpen)),
+                )
+                .chain(
+                    self.tailnet_available
+                        .then(|| ("Tailnet".into(), Command::Tailnet(TailnetEvent::Open))),
+                )
+                .chain(
+                    self.sleep_available
+                        .then(|| ("Automatic sleep".into(), Command::Open(Panel::Power))),
+                )
+                .chain(
+                    self.rotation_available
+                        .then(|| ("Screen orientation".into(), Command::Open(Panel::Rotation))),
+                )
+                .chain(
+                    self.refresh_available
+                        .then(|| ("Full refresh".into(), Command::Open(Panel::Refresh))),
+                )
+                .chain(
+                    (!self.dictionary_choices.is_empty())
+                        .then(|| ("Dictionary".into(), Command::Open(Panel::DictionaryChooser))),
+                )
+                .chain(std::iter::once((
+                    "Remote buttons".into(),
+                    Command::Open(Panel::Remote),
+                )))
+                .chain(
+                    self.page_buttons_available
+                        .then(|| {
+                            [
+                                ("Swap page-turn buttons".into(), Command::SwapPageButtons),
+                                ("Swap menu buttons".into(), Command::SwapMenuButtons),
+                            ]
+                        })
+                        .into_iter()
+                        .flatten(),
+                )
+                .collect(),
             Panel::Remote => {
                 use crate::remote::RemoteAction;
                 let bindings = reader.state.remote_bindings.clone().unwrap_or_default();
@@ -2031,7 +2122,7 @@ impl ReaderUi {
                 .map(|(label, start, end)| (label.clone(), Command::PickWord(*start, *end)))
                 .collect(),
             Panel::DictionaryResult => {
-                std::iter::once(("Back to selection".into(), Command::CloseDictionary))
+                std::iter::once(("Back to selection".into(), Command::Leave))
                     .chain(
                         self.dictionary_rows
                             .iter()
@@ -2040,7 +2131,7 @@ impl ReaderUi {
                     .collect()
             }
             Panel::WordPreview => vec![
-                ("Cancel".into(), Command::CancelWord),
+                ("Cancel".into(), Command::Leave),
                 ("Save selection".into(), Command::SaveWord),
                 ("Extend selection".into(), Command::ExtendWord),
             ]
@@ -2085,7 +2176,7 @@ impl ReaderUi {
                 })
                 .unwrap_or_default(),
             Panel::ClippingDelete => vec![
-                ("Keep excerpt".into(), Command::CancelClippingDelete),
+                ("Keep excerpt".into(), Command::Leave),
                 ("Delete this excerpt".into(), Command::ConfirmClippingDelete),
             ]
             .into_iter()
@@ -2196,7 +2287,40 @@ impl ReaderUi {
                     format!("Scan errors ({})", self.library.errors.len()),
                     Command::Open(Panel::Errors),
                 ),
-            ],
+            ]
+            .into_iter()
+            .chain(
+                self.scan_root
+                    .is_some()
+                    .then(|| ("Delete a book".into(), Command::Open(Panel::Delete))),
+            )
+            .collect(),
+            Panel::DeleteConfirm(index) => [
+                ("Keep book".into(), Command::Leave),
+                ("Delete this book".into(), Command::ConfirmDeleteBook(index)),
+            ]
+            .into_iter()
+            .chain(
+                self.library
+                    .entries
+                    .get(index)
+                    .into_iter()
+                    .flat_map(|entry| {
+                        [
+                            (entry.metadata.title.clone(), Command::Noop),
+                            (
+                                entry
+                                    .path
+                                    .file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .into_owned(),
+                                Command::Noop,
+                            ),
+                        ]
+                    }),
+            )
+            .collect(),
             Panel::Errors => self
                 .library
                 .errors
@@ -2263,7 +2387,7 @@ impl ReaderUi {
                     )
                 })
                 .collect(),
-            Panel::Books | Panel::Recent | Panel::Folder(_) | Panel::Results => {
+            Panel::Books | Panel::Delete | Panel::Recent | Panel::Folder(_) | Panel::Results => {
                 let matches = if matches!(self.panel, Some(Panel::Results)) {
                     self.library
                         .search(&self.query)
@@ -2305,7 +2429,11 @@ impl ReaderUi {
                         } else {
                             format!("{} - {}", entry.metadata.title, entry.metadata.author)
                         };
-                        (label, Command::Book(i))
+                        if matches!(self.panel, Some(Panel::Delete)) {
+                            (label, Command::DeleteBook(i))
+                        } else {
+                            (label, Command::Book(i))
+                        }
                     })
                     .collect()
             }
@@ -2330,18 +2458,20 @@ impl ReaderUi {
                     )
                 })
                 .collect(),
-            Panel::Bookmarks => reader
-                .state
-                .books
-                .get(&reader.document.metadata.id)
-                .map(|book| {
-                    book.bookmarks
-                        .iter()
-                        .enumerate()
-                        .map(|(i, b)| (b.label.clone(), Command::Reader(Action::Bookmark(i))))
-                        .collect()
-                })
-                .unwrap_or_default(),
+            Panel::Bookmarks => std::iter::once((
+                "Toggle bookmark".into(),
+                Command::Reader(Action::ToggleBookmark),
+            ))
+            .chain(
+                reader
+                    .state
+                    .books
+                    .get(&reader.document.metadata.id)
+                    .into_iter()
+                    .flat_map(|book| book.bookmarks.iter().enumerate())
+                    .map(|(i, b)| (b.label.clone(), Command::Reader(Action::Bookmark(i)))),
+            )
+            .collect(),
             Panel::LinkPreview => Vec::new(),
             Panel::Links => reader
                 .page_links()
@@ -2357,7 +2487,7 @@ impl ReaderUi {
                     Command::Set(Setting::Brightness, 0),
                 )))
                 .collect(),
-            Panel::Settings => [
+            Panel::Typography => [
                 Setting::TextSize,
                 Setting::LineSpacing,
                 Setting::Margin,
@@ -2529,6 +2659,8 @@ impl ReaderUi {
             Panel::Device => &self.device_title,
             Panel::Results => "Search results",
             Panel::Root => &reader_title,
+            Panel::Book => "This book",
+            Panel::Settings => "Settings",
             Panel::Rotation => "Screen orientation",
             Panel::Tailnet => "Tailnet",
             Panel::Catalog => &self.catalog_title,
@@ -2546,7 +2678,7 @@ impl ReaderUi {
             Panel::WordList => "Choose source word",
             Panel::Links => "Page links",
             Panel::LinkPreview => "Link preview",
-            Panel::Settings => "Typography",
+            Panel::Typography => "Typography",
             Panel::Remote => "Remote buttons",
             Panel::Light => "Frontlight",
             Panel::Power => "Automatic sleep",
@@ -2554,6 +2686,8 @@ impl ReaderUi {
             Panel::Library if self.library.truncated => "Library (incomplete)",
             Panel::Library => "Library",
             Panel::Books => "All books",
+            Panel::Delete => "Delete a book",
+            Panel::DeleteConfirm(_) => "Delete this book?",
             Panel::Recent => "Recent books",
             Panel::Folders | Panel::Folder(_) => "Folders",
         };

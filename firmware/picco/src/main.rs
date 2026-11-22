@@ -273,6 +273,7 @@ fn run() -> Result<(), String> {
         } else {
             console.poll()
         };
+        let mut chosen = String::new();
         let diagnostic_event = command.and_then(|command| {
             use femto_picco_board::console::Command;
             // Typed text may be a credential.
@@ -309,6 +310,10 @@ fn run() -> Result<(), String> {
                     }
                     dirty = true;
                     None
+                }
+                Command::Choose(label) => {
+                    chosen = label;
+                    Some(input::Event::Choose)
                 }
                 Command::Frame => {
                     console::dump_frame(&plane);
@@ -363,6 +368,7 @@ fn run() -> Result<(), String> {
                 input::Event::Swipe(turn) => ui.swipe(&mut reader, turn == Turn::Next),
                 input::Event::Turn(turn) => ui.turn(&mut reader, turn == Turn::Next),
                 input::Event::Tap { x, y } => ui.tap(&mut reader, x.into(), y.into()),
+                input::Event::Choose => ui.choose(&mut reader, &chosen),
             };
             screen.set_long_presses(ui.is_open());
             screen.set_full_refresh_interval(reader.state.full_refresh_interval);

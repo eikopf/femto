@@ -25,6 +25,8 @@ pub enum Command {
     },
     /// Enter text into the open on-screen keyboard field.
     Type(String),
+    /// Activate the entry of the open menu whose label starts with the text.
+    Choose(String),
     /// Dump the last presented framebuffer.
     Frame,
     /// Receive a file below the device data directory.
@@ -71,6 +73,9 @@ fn parse(line: &str) -> Option<Command> {
         }
         ("type", text) if !text.is_empty() && !text.chars().any(char::is_control) => {
             Command::Type(text.into())
+        }
+        ("choose", text) if !text.is_empty() && !text.chars().any(char::is_control) => {
+            Command::Choose(text.into())
         }
         ("put", arguments) => {
             let mut fields = arguments.splitn(3, ' ');
@@ -199,6 +204,10 @@ mod tests {
         assert_eq!(
             commands(b"femto type http://host:80/a b\n"),
             [Command::Type("http://host:80/a b".into())]
+        );
+        assert_eq!(
+            commands(b"femto choose This book\n"),
+            [Command::Choose("This book".into())]
         );
         assert_eq!(
             commands(b"femto ls\nfemto ls fonts\nfemto rm wifi.json\n"),

@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         baseline = json.loads(state.read_text())
 
         def volume_menu():
-            assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 11), "Return", *(["Down"] * 6)).returncode == 0
+            assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 7), "Return", "Return", *(["Down"] * 6)).returncode == 0
 
         def binding(action):
             entries = json.loads(state.read_text()).get("remote_bindings") or []
@@ -83,7 +83,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         time.sleep(0.3)
         first = frame()
         first.save(output / "volume-previous.png")
-        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace", "q").returncode == 0
+        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace", "BackSpace", "q").returncode == 0
         assert app.wait(timeout=10) == 0, app.stderr.read().decode()
         app, window = start()
         assert binding("previous")
@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         wait_for(lambda: binding("next"), app, "volume next")
         assert xdo("key", "Return").returncode == 0
         wait_for(lambda: not binding("next") and not binding("previous"), app, "volume off")
-        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace").returncode == 0
+        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace", "BackSpace").returncode == 0
         volume_menu()
         assert xdo("key", "--delay", "150", *(["Up"] * 5), "Return").returncode == 0
         wait_for(lambda: json.loads(state.read_text()).get("remote_bindings") == [], app, "disable buttons")

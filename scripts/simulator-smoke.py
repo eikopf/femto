@@ -14,6 +14,9 @@ import tempfile
 import time
 from PIL import ImageGrab
 
+# Root menu to This book, then Clippings.
+CLIPPINGS = ("Tab", *(["Down"] * 6), "Return", *(["Down"] * 3), "Return")
+
 root = Path(__file__).resolve().parent.parent
 os.chdir(root)
 output = root / "output/simulator-smoke"
@@ -74,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         assert str(library / "sample.epub") in cached_paths
         assert str(unopened) not in cached_paths, "First startup must not scan other books"
         # The library menu discovers other books only through explicit Rescan.
-        assert xdo("key", "--delay", "100", "Tab", *(["Down"] * 8), "Return", *(["Down"] * 4), "Return").returncode == 0
+        assert xdo("key", "--delay", "100", "Tab", *(["Down"] * 3), "Return", *(["Down"] * 4), "Return").returncode == 0
         wait_for(lambda: cache.exists() and "Scanning library" not in xdo("getwindowname", window).stdout, app, "explicit first library scan")
         wait_for(lambda: str(unopened) in {entry["path"] for entry in json.loads(cache.read_text())["entries"]}, app, "explicit scan discovers unopened book")
         assert xdo("key", "--delay", "100", "BackSpace", "BackSpace").returncode == 0
@@ -83,14 +86,14 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         assert xdo("key", "b").returncode == 0
         wait_for(lambda: saved() and len(saved()["bookmarks"]) == 1, app, "bookmark")
         ImageGrab.grab(xdisplay=display).save(output / "reading.png")
-        assert xdo("key", "--delay", "150", "Tab", "Down", "Down", "Return").returncode == 0
+        assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 6), "Return", "Return").returncode == 0
         time.sleep(0.2)
         ImageGrab.grab(xdisplay=display).save(output / "chapters.png")
         assert xdo("key", "--delay", "150", "Down", "Return").returncode == 0
         wait_for(lambda: saved() and saved()["position"]["chapter"] == 1, app, "chapter menu selection")
         assert xdo("key", "BackSpace").returncode == 0
         wait_for(lambda: saved() and saved()["position"] == first["position"], app, "back navigation")
-        assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 10), "Return", "Return").returncode == 0
+        assert xdo("key", "--delay", "150", *CLIPPINGS, "Return").returncode == 0
         wait_for(lambda: len(saved().get("clippings", [])) == 1, app, "native page clipping")
         clipping = saved()["clippings"][0]
         assert clipping["text"]
@@ -102,7 +105,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         wait_for(lambda: state.stat().st_mtime_ns != before_capture, app, "repeat page clipping")
         assert saved()["clippings"] == [clipping]
         assert saved()["position"] == first["position"]
-        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace").returncode == 0
+        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace", "BackSpace").returncode == 0
         assert xdo("key", "q").returncode == 0
         assert app.wait(timeout=10) == 0, app.stderr.read().decode()
         saved_before_cancel = state.read_bytes()
@@ -131,24 +134,24 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         assert saved()["clippings"] == [clipping]
         assert xdo("key", "Right").returncode == 0
         away = wait_for(lambda: saved()["position"] != first["position"] and saved()["position"], app, "move away from clipping")
-        assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 10), "Return", "Down", "Return", "Down", "Return").returncode == 0
+        assert xdo("key", "--delay", "150", *CLIPPINGS, "Down", "Return", "Down", "Return").returncode == 0
         wait_for(lambda: saved()["position"] == clipping["range"]["start"], app, "clipping source navigation")
         assert xdo("key", "BackSpace").returncode == 0
         wait_for(lambda: saved()["position"] == away, app, "clipping return history")
         assert xdo("key", "Left").returncode == 0
         wait_for(lambda: saved()["position"] == first["position"], app, "restore page after clipping jump")
-        assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 10), "Return", "Down", "Return", "Return").returncode == 0
+        assert xdo("key", "--delay", "150", *CLIPPINGS, "Down", "Return", "Return").returncode == 0
         time.sleep(0.2)
         ImageGrab.grab(xdisplay=display).save(output / "clipping-delete.png")
         before_keep = state.stat().st_mtime_ns
         assert xdo("key", "Return").returncode == 0  # Keep is selected by default.
         wait_for(lambda: state.stat().st_mtime_ns != before_keep, app, "keep clipping")
         assert saved()["clippings"] == [clipping]
-        assert xdo("key", "--delay", "150", "Down", "Return", "Return", "Down", "Return").returncode == 0
+        assert xdo("key", "--delay", "150", "Return", "Return", "Down", "Return").returncode == 0
         wait_for(lambda: not saved().get("clippings"), app, "confirmed native clipping deletion")
         assert saved()["position"] == first["position"]
         assert len(saved()["bookmarks"]) == 1
-        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace").returncode == 0
+        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace", "BackSpace").returncode == 0
 
         def click(x, y):
             before = state.stat().st_mtime_ns
@@ -160,7 +163,14 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
                 assert xdo("mouseup", "1").returncode == 0
             time.sleep(0.1)
 
-        assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 10), "Return", "Down", "Return").returncode == 0
+        def press(x, y):
+            # For taps that start background work without saving state.
+            assert xdo("mousemove", "--window", window, str(x), str(y)).returncode == 0
+            assert xdo("mousedown", "1").returncode == 0
+            time.sleep(0.3)
+            assert xdo("mouseup", "1").returncode == 0
+
+        assert xdo("key", "--delay", "150", *CLIPPINGS, "Down", "Return").returncode == 0
         time.sleep(0.2)
         selection_frame = ImageGrab.grab(xdisplay=display)
         selection_frame.save(output / "word-selection.png")
@@ -189,7 +199,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         assert xdo("key", "Return").returncode == 0  # Cancel is initially selected.
         wait_for(lambda: state.stat().st_mtime_ns != before_cancel, app, "cancel selected word")
         assert not saved().get("clippings")
-        assert xdo("key", "--delay", "150", "Down", "Return").returncode == 0
+        assert xdo("key", "Return").returncode == 0
         click(40, 40)
         assert xdo("key", "--delay", "150", "Down", "Return").returncode == 0
         wait_for(lambda: len(saved().get("clippings", [])) == 1, app, "save selected word")
@@ -201,7 +211,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         assert word_clipping["range"]["end"] == expected_end
         assert saved()["position"] == first["position"]
         assert len(saved()["bookmarks"]) == 1
-        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace", "q").returncode == 0
+        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace", "BackSpace", "q").returncode == 0
         assert app.wait(timeout=10) == 0, app.stderr.read().decode()
         app, window = start()
         assert saved()["clippings"] == [word_clipping]
@@ -211,7 +221,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
             "bookmarks_after_reopen": saved()["bookmarks"],
         }, indent=2) + "\n")
 
-        assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 10), "Return", "Down", "Down", "Return").returncode == 0
+        assert xdo("key", "--delay", "150", *CLIPPINGS, "Down", "Down", "Return").returncode == 0
         click(40, 40)
         assert xdo("key", "--delay", "150", "Down", "Down", "Return").returncode == 0  # Extend.
         geometry = dict(line.split("=", 1) for line in xdo("getwindowgeometry", "--shell", window).stdout.splitlines())
@@ -238,7 +248,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         assert range_clipping["range"]["end"] == range_end
         assert saved()["position"] == first["position"]
         assert len(saved()["bookmarks"]) == 1
-        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace", "q").returncode == 0
+        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace", "BackSpace", "q").returncode == 0
         assert app.wait(timeout=10) == 0, app.stderr.read().decode()
         app, window = start()
         assert saved()["clippings"] == [word_clipping, range_clipping]
@@ -258,7 +268,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         plain_reading = reading_frame().tobytes()
 
         def toggle_first_highlight():
-            assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 10), "Return", "Down", "Return", "Down", "Down", "Return", "BackSpace", "BackSpace", "BackSpace").returncode == 0
+            assert xdo("key", "--delay", "150", *CLIPPINGS, "Down", "Return", "Down", "Down", "Return", "BackSpace", "BackSpace", "BackSpace", "BackSpace").returncode == 0
 
         toggle_first_highlight()
         wait_for(lambda: saved()["clippings"][0].get("highlighted") is True, app, "enable saved highlight")
@@ -294,14 +304,14 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         }, indent=2) + "\n")
 
         def button_word_list():
-            assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 10), "Return", *(["Down"] * 4), "Return").returncode == 0
+            assert xdo("key", "--delay", "150", *CLIPPINGS, *(["Down"] * 4), "Return").returncode == 0
 
         button_word_list()
         time.sleep(0.2)
         reading_frame().save(output / "button-word-list.png")
         assert xdo("key", "--delay", "150", "Down", "Return", "Return").returncode == 0  # Pick "the", then cancel.
         assert saved()["clippings"] == [word_clipping, range_clipping]
-        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace").returncode == 0
+        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace", "BackSpace").returncode == 0
         wait_for(lambda: reading_frame().tobytes() == plain_reading, app, "button selection cancel pixels")
         button_word_list()
         assert xdo("key", "--delay", "150", "Down", "Return", "Down", "Down", "Return", "Down", "Down", "Return").returncode == 0
@@ -317,7 +327,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         assert button_clipping["range"] == {"start": button_start, "end": range_end}
         assert saved()["position"] == first["position"]
         assert len(saved()["bookmarks"]) == 1
-        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace").returncode == 0
+        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace", "BackSpace").returncode == 0
         wait_for(lambda: reading_frame().tobytes() == plain_reading, app, "button capture leaves reading pixels unchanged")
         assert xdo("key", "q").returncode == 0
         assert app.wait(timeout=10) == 0, app.stderr.read().decode()
@@ -337,7 +347,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         assert app.wait(timeout=10) == 0, app.stderr.read().decode()
         app, window = start(extra=("--dictionary", "tests/fixtures/dictionary/example.ifo"))
         before_dictionary = saved()["clippings"]
-        assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 10), "Return", *(["Down"] * 5), "Return", "Down", "Down", "Return").returncode == 0
+        assert xdo("key", "--delay", "150", *CLIPPINGS, *(["Down"] * 5), "Return", "Down", "Down", "Return").returncode == 0
         time.sleep(0.2)
         dictionary_preview = reading_frame().tobytes()
         assert xdo("key", "--delay", "150", "Down", "Down", "Down", "Return").returncode == 0
@@ -347,15 +357,15 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         assert reading_frame().tobytes() != dictionary_preview
         assert saved()["clippings"] == before_dictionary
         assert saved()["position"] == first["position"]
-        assert xdo("key", "BackSpace").returncode == 0
+        assert xdo("key", "--delay", "150", "BackSpace", "Up", "Up", "Up").returncode == 0
         wait_for(lambda: reading_frame().tobytes() == dictionary_preview, app, "dictionary returns to selection")
         assert xdo("key", "--delay", "150", "Down", "Down", "Down", "Return").returncode == 0
         wait_for(lambda: "Dictionary - Backspace" in xdo("getwindowname", window).stdout, app, "repeat dictionary result")
         assert reading_frame().tobytes() == dictionary_result_pixels
         assert saved()["clippings"] == before_dictionary
-        assert xdo("key", "BackSpace").returncode == 0
+        assert xdo("key", "--delay", "150", "BackSpace", "Up", "Up", "Up").returncode == 0
         wait_for(lambda: reading_frame().tobytes() == dictionary_preview, app, "repeat lookup returns to selection")
-        assert xdo("key", "--delay", "150", "Return", "BackSpace", "BackSpace").returncode == 0
+        assert xdo("key", "--delay", "150", "Return", "BackSpace", "BackSpace", "BackSpace").returncode == 0
         wait_for(lambda: reading_frame().tobytes() == plain_reading, app, "dictionary leaves book pixels unchanged")
         assert saved()["clippings"] == before_dictionary
         assert len(saved()["bookmarks"]) == 1
@@ -380,10 +390,10 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         assert xdo("key", "q").returncode == 0
         assert app.wait(timeout=10) == 0, app.stderr.read().decode()
         app, window = start(extra=("--dictionary-directory", str(dictionaries)))
-        assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 11), "Return", "Down", "Return").returncode == 0
+        assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 7), "Return", "Return", "Down", "Return").returncode == 0
         wait_for(lambda: json.loads(state.read_text()).get("dictionary_name") == "b.ifo", app, "persist dictionary choice")
         reading_frame().save(output / "dictionary-chooser.png")
-        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace").returncode == 0
+        assert xdo("key", "--delay", "150", "BackSpace", "BackSpace", "BackSpace").returncode == 0
         wait_for(lambda: reading_frame().tobytes() == plain_reading, app, "chooser leaves reading pixels unchanged")
         chosen_result = None
         for reopened in (False, True):
@@ -392,7 +402,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
                 assert app.wait(timeout=10) == 0, app.stderr.read().decode()
                 app, window = start(extra=("--dictionary-directory", str(dictionaries)))
             assert json.loads(state.read_text())["dictionary_name"] == "b.ifo"
-            assert xdo("key", "--delay", "150", "Tab", *(["Down"] * 10), "Return", *(["Down"] * 5), "Return", "Down", "Down", "Return", "Down", "Down", "Down", "Return").returncode == 0
+            assert xdo("key", "--delay", "150", *CLIPPINGS, *(["Down"] * 5), "Return", "Down", "Down", "Return", "Down", "Down", "Down", "Return").returncode == 0
             wait_for(lambda: "Dictionary - Backspace" in xdo("getwindowname", window).stdout, app, "chosen dictionary result")
             result = reading_frame().tobytes()
             assert result != dictionary_result_pixels
@@ -404,7 +414,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
             assert saved()["clippings"] == before_dictionary
             assert saved()["position"] == first["position"]
             assert len(saved()["bookmarks"]) == 1
-            assert xdo("key", "--delay", "150", "BackSpace", "Return", "BackSpace", "BackSpace").returncode == 0
+            assert xdo("key", "--delay", "150", "BackSpace", "Up", "Up", "Up", "Return", "BackSpace", "BackSpace", "BackSpace").returncode == 0
             wait_for(lambda: reading_frame().tobytes() == plain_reading, app, "chosen dictionary returns to reading")
         (output / "dictionary-choice.json").write_text(json.dumps({
             "dictionary_name_after_reopen": json.loads(state.read_text())["dictionary_name"],
@@ -413,9 +423,8 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         }, indent=2) + "\n")
 
         click(240, 400)  # Reader menu.
-        click(400, 750)  # Second menu page.
-        click(240, 150)  # Typography.
-        click(240, 150)  # Larger text.
+        click(240, 650)  # Typography.
+        click(260, 150)  # Text size 26, the seventh of twelve slider cells.
         wait_for(lambda: json.loads(state.read_text())["layout"]["font_size"] == 26, app, "pointer typography")
         geometry = dict(line.split("=", 1) for line in xdo("getwindowgeometry", "--shell", window).stdout.splitlines())
         window_x, window_y = int(geometry["X"]), int(geometry["Y"])
@@ -427,32 +436,28 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
             return frame if row.convert("L").getextrema()[0] < 128 else None
 
         wait_for(typography_frame, app, "completed typography frame").save(output / "typography.png")
-        click(240, 250)  # Restore the original size.
+        click(220, 150)  # Restore the original size.
         wait_for(lambda: json.loads(state.read_text())["layout"]["font_size"] == 24, app, "restore typography")
         after_reflow = saved()["position"]
         assert after_reflow == first["position"]
-        click(400, 750)  # Second typography page.
-        click(240, 150)  # Disable automatic dictionary hyphenation.
+        click(240, 650)  # Disable automatic dictionary hyphenation.
         wait_for(lambda: json.loads(state.read_text())["layout"]["hyphenation"] == "off", app, "hyphenation setting")
         assert saved()["position"] == after_reflow
-        click(400, 750)  # Reflow returns to the first typography page.
-        click(240, 350)  # Increase line spacing.
+        click(336, 250)  # Line spacing 1.6, the fourth of five cells.
         wait_for(lambda: json.loads(state.read_text())["layout"]["line_height"] == 1.6, app, "line spacing")
         assert saved()["typography"]["line_height"] == 1.6
         assert saved()["position"] == after_reflow
-        click(400, 750)
-        click(240, 450)  # Increase margins.
+        click(308, 350)  # Margins 32, the fifth of seven cells.
         wait_for(lambda: json.loads(state.read_text())["layout"]["margin"] == 32, app, "page margins")
         assert saved()["typography"]["margin"] == 32
         assert saved()["position"] == after_reflow
-        click(400, 750)
-        click(240, 250)  # Reset this book to default typography.
+        click(400, 750)  # Second typography page.
+        click(240, 350)  # Reset this book to default typography.
         wait_for(lambda: json.loads(state.read_text())["layout"]["hyphenation"] == "book", app, "reset book typography")
         assert saved()["typography"]["hyphenation"] == "book"
         assert saved()["position"] == after_reflow
         click(240, 50)  # Back to root.
-        click(400, 750)  # Second menu page.
-        click(240, 350)  # Library.
+        click(240, 450)  # Library.
         shutil.copyfile("tests/fixtures/sample.txt", library / "second.txt")
         click(240, 550)  # Rescan picks up a book added after startup.
         wait_for(lambda: "Scanning library" not in xdo("getwindowname", window).stdout, app, "library rescan")
@@ -472,7 +477,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         click(240, 50)  # Return to the query.
         wait_for(lambda: "Library search" in xdo("getwindowname", window).stdout, app, "restored query editor")
         time.sleep(0.1)
-        click(300, 750)  # Clear.
+        assert xdo("key", "--delay", "100", *(["BackSpace"] * 11)).returncode == 0  # Clear the query.
         assert xdo("type", "--delay", "100", "second.txt").returncode == 0
         assert xdo("key", "Return").returncode == 0
         wait_for(lambda: "Library search" not in xdo("getwindowname", window).stdout, app, "search results")
@@ -508,7 +513,9 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         def preview_ready():
             return "Link preview 1/1" in xdo("getwindowname", window).stdout
 
-        click(70, 40)  # EPUB-marked note reference on the first line.
+        time.sleep(0.2)
+        ImageGrab.grab(xdisplay=display).save(output / "noterefs.png")
+        press(70, 40)  # EPUB-marked note reference on the first line.
         wait_for(preview_ready, app, "cooperative note preview")
         assert saved()["position"] == origin
         assert saved()["bookmarks"] == bookmarks
@@ -519,9 +526,9 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         assert xdo("key", "BackSpace").returncode == 0
         time.sleep(0.2)
         assert saved()["position"] == origin
-        click(70, 40)
+        press(70, 40)
         wait_for(preview_ready, app, "reopened note preview")
-        click(400, 750)  # Follow the note outside the reading spine.
+        assert xdo("key", "Return").returncode == 0  # Follow the note outside the reading spine.
         wait_for(lambda: saved()["position"]["chapter"] > 0, app, "explicit note follow")
         assert xdo("key", "BackSpace").returncode == 0
         wait_for(lambda: saved()["position"] == origin, app, "preview follow back history")
@@ -565,7 +572,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
             (library / "catalog-auth.json").write_text(json.dumps({"username": "reader", "password": "secret", "allow_http": True}))
             state = Path(directory) / "catalog-state.json"
             app, window = start(extra=("--catalog-directory", str(library)))
-            assert xdo("key", "--delay", "100", "Tab", *(["Down"] * 10), "Return").returncode == 0
+            assert xdo("key", "--delay", "100", "Tab", *(["Down"] * 4), "Return").returncode == 0
             wait_for(lambda: "/feed" in requests, app, "authenticated catalog feed")
             time.sleep(0.5)
             ImageGrab.grab(xdisplay=display).save(output / "catalog.png")
@@ -606,7 +613,7 @@ with tempfile.TemporaryDirectory(prefix="femto-simulator-") as directory:
         config.chmod(0o600)
         try:
             app, window = start(extra=("--tailnet-directory", str(tailnet_root), "--tailnet-endpoint", f"127.0.0.1:{port}"))
-            assert xdo("key", "--delay", "100", "Tab", *(["Down"] * 10), "Return", "Return").returncode == 0
+            assert xdo("key", "--delay", "100", "Tab", *(["Down"] * 7), "Return", "Return", "Return").returncode == 0
             time.sleep(0.4)
             assert not (tailnet_root / "identity").exists(), "Connect must not create an identity"
             assert xdo("key", "--delay", "150", "Down", "Return").returncode == 0

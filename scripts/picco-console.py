@@ -155,6 +155,7 @@ def main():
         commands.add_parser(name)
     commands.add_parser("swipe").add_argument("direction", choices=["next", "prev"])
     commands.add_parser("type", help="enter text into the open keyboard field").add_argument("text")
+    commands.add_parser("choose", help="activate the menu entry whose label starts with the text").add_argument("text")
     tap = commands.add_parser("tap", help="tap at reader-view coordinates")
     tap.add_argument("x", type=int)
     tap.add_argument("y", type=int)
@@ -195,8 +196,8 @@ def main():
                 commands = f"femto tap {args.x} {args.y}\n"
             if args.command == "swipe":
                 commands = f"femto swipe {args.direction}\n"
-            if args.command == "type":
-                commands = f"femto type {args.text}\n"
+            if args.command in ("type", "choose"):
+                commands = f"femto {args.command} {args.text}\n"
             if args.command != "status":
                 commands += "femto status\n"
             port.write(commands.encode("ascii"))

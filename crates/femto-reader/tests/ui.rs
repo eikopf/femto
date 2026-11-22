@@ -34,11 +34,7 @@ fn clipping_menu_captures_visible_source_and_reads_it_without_moving_the_book() 
     let expected = femto_reader::selection::extract(&mut reader.document, range.clone()).unwrap();
     let id = reader.document.metadata.id.clone();
     let mut ui = ReaderUi::default();
-    ui.open();
-    for _ in 0..10 {
-        ui.turn(&mut reader, true).unwrap();
-    }
-    ui.select(&mut reader).unwrap(); // Clippings, appended after the existing root entries.
+    go(&mut ui, &mut reader, &["This book", "Clippings"]);
     ui.select(&mut reader).unwrap(); // Save page text.
     let saved = &reader.state.books[&id].clippings;
     assert_eq!(saved.len(), 1);
@@ -50,14 +46,16 @@ fn clipping_menu_captures_visible_source_and_reads_it_without_moving_the_book() 
         reader.state.books[&id].clippings,
         std::slice::from_ref(&first)
     );
-    let list = ui.render(&mut reader, 4).unwrap();
     ui.turn(&mut reader, true).unwrap();
+    let list = ui.render(&mut reader, 4).unwrap();
     ui.select(&mut reader).unwrap();
     let detail = ui.render(&mut reader, 4).unwrap();
     assert_ne!(list, detail);
     ui.turn(&mut reader, true).unwrap();
+    // Back returns to the row that was opened, through each enclosing menu.
     ui.back(&mut reader).unwrap();
     assert_eq!(ui.render(&mut reader, 4).unwrap(), list);
+    ui.back(&mut reader).unwrap();
     ui.back(&mut reader).unwrap();
     ui.back(&mut reader).unwrap();
     assert!(!ui.is_open());
@@ -72,6 +70,14 @@ fn clipping_menu_captures_visible_source_and_reads_it_without_moving_the_book() 
     assert_eq!(saved.books[&id].position, position);
 }
 
+/// Opens the root menu and activates each labelled entry in turn.
+fn go(ui: &mut ReaderUi, reader: &mut Reader, path: &[&str]) {
+    ui.open();
+    for label in path {
+        ui.choose(reader, label).unwrap();
+    }
+}
+
 fn finish_preview(ui: &mut ReaderUi, reader: &mut Reader) {
     for _ in 0..16_384 {
         if !ui.is_preview_opening() {
@@ -83,22 +89,14 @@ fn finish_preview(ui: &mut ReaderUi, reader: &mut Reader) {
 }
 
 fn open_clipping_delete(ui: &mut ReaderUi, reader: &mut Reader) {
-    ui.open();
-    for _ in 0..10 {
-        ui.turn(reader, true).unwrap();
-    }
-    ui.select(reader).unwrap();
+    go(ui, reader, &["This book", "Clippings"]);
     ui.turn(reader, true).unwrap();
     ui.select(reader).unwrap();
     ui.select(reader).unwrap();
 }
 
 fn open_word_selection(ui: &mut ReaderUi, reader: &mut Reader) {
-    ui.open();
-    for _ in 0..10 {
-        ui.turn(reader, true).unwrap();
-    }
-    ui.select(reader).unwrap();
+    go(ui, reader, &["This book", "Clippings"]);
     let count = reader
         .state
         .books
@@ -563,11 +561,7 @@ fn clipping_source_action_returns_to_the_saved_text_and_allows_back() {
     let origin = reader.position();
     assert_ne!(origin, target);
     let mut ui = ReaderUi::default();
-    ui.open();
-    for _ in 0..10 {
-        ui.turn(&mut reader, true).unwrap();
-    }
-    ui.select(&mut reader).unwrap();
+    go(&mut ui, &mut reader, &["This book", "Clippings"]);
     ui.turn(&mut reader, true).unwrap();
     ui.select(&mut reader).unwrap();
     ui.turn(&mut reader, true).unwrap(); // Go to source follows Delete excerpt.
@@ -694,9 +688,7 @@ fn center_tap_and_button_selection_open_and_close_the_same_menu() {
 fn typography_sliders_and_toggles_set_values_by_tap_and_step_by_selection() {
     let mut reader = reader();
     let mut ui = ReaderUi::default();
-    ui.open();
-    ui.tap(&mut reader, 400, 750).unwrap();
-    ui.tap(&mut reader, 240, 150).unwrap(); // Typography.
+    go(&mut ui, &mut reader, &["Typography"]);
     assert_eq!(reader.state.layout.font_size, 24.0);
     // Text size has twelve values across the row; 24 px is the sixth.
     for (x, size) in [
@@ -740,9 +732,7 @@ fn hyphenation_menu_reflow_cancels_and_persists_without_moving_source_anchor() {
     use femto_reader::layout::Hyphenation;
     let mut reader = reader();
     let mut ui = ReaderUi::default();
-    ui.open();
-    ui.tap(&mut reader, 400, 750).unwrap();
-    ui.tap(&mut reader, 240, 150).unwrap(); // Typography.
+    go(&mut ui, &mut reader, &["Typography"]);
     let position = reader.position();
     let pixels = reader.render(2).unwrap();
     ui.tap(&mut reader, 240, 650).unwrap(); // Automatic hyphenation.
@@ -778,10 +768,9 @@ fn bookmarks_and_empty_lists_are_navigable_without_touch() {
     assert_eq!(ui.select(&mut reader).unwrap(), Effect::Unchanged);
     ui.render(&mut reader, 2).unwrap();
     ui.back(&mut reader).unwrap();
-    for _ in 0..4 {
-        ui.turn(&mut reader, true).unwrap();
-    }
-    ui.select(&mut reader).unwrap();
+    ui.turn(&mut reader, true).unwrap(); // Back selected Contents again.
+    ui.select(&mut reader).unwrap(); // Bookmarks.
+    ui.select(&mut reader).unwrap(); // Toggle bookmark.
     assert!(!ui.is_open());
     assert_eq!(
         reader.state.books[&reader.document.metadata.id]
@@ -791,11 +780,8 @@ fn bookmarks_and_empty_lists_are_navigable_without_touch() {
     );
     ui.turn(&mut reader, true).unwrap();
     assert_eq!(reader.page_index(), 1);
-    ui.open();
-    for _ in 0..3 {
-        ui.turn(&mut reader, true).unwrap();
-    }
-    ui.select(&mut reader).unwrap();
+    go(&mut ui, &mut reader, &["Bookmarks"]);
+    ui.turn(&mut reader, true).unwrap();
     ui.select(&mut reader).unwrap();
     assert_eq!(reader.page_index(), 0);
     assert!(!ui.is_open());
@@ -868,9 +854,7 @@ fn library_switching_preserves_positions_and_keeps_failed_targets_in_the_menu() 
 fn frontlight_sliders_set_levels_by_tap_and_step_by_selection() {
     let mut reader = reader();
     let mut ui = ReaderUi::default();
-    ui.open();
-    ui.tap(&mut reader, 400, 750).unwrap();
-    ui.tap(&mut reader, 240, 450).unwrap();
+    go(&mut ui, &mut reader, &["Frontlight"]);
     let plain = ui.render(&mut reader, 2).unwrap();
     // Each slider has one tap target per value across the row.
     for (x, brightness) in [(0, 0), (479, 10), (240, 5), (43, 0), (44, 1)] {
@@ -917,8 +901,7 @@ fn swipes_page_menus_and_power_sleeps_only_while_reading() {
     assert_eq!(ui.swipe(&mut reader, true).unwrap(), Effect::Redraw);
     let second = ui.render(&mut reader, 2).unwrap();
     assert_ne!(first, second);
-    while ui.swipe(&mut reader, true).unwrap() == Effect::Redraw {}
-    assert_ne!(ui.render(&mut reader, 2).unwrap(), second);
+    assert_eq!(ui.swipe(&mut reader, true).unwrap(), Effect::Unchanged);
     while ui.swipe(&mut reader, false).unwrap() == Effect::Redraw {}
     assert_eq!(ui.render(&mut reader, 2).unwrap(), first);
     // Inside a menu the power button selects: the first row resumes reading.
@@ -1124,7 +1107,7 @@ fn device_status_row_does_not_change_reading_position_or_settings() {
     let state = serde_json::to_vec(&reader.state).unwrap();
     ui.set_device_status("75% 4000mV charging");
     ui.open();
-    for _ in 0..10 {
+    for _ in 0..8 {
         ui.turn(&mut reader, true).unwrap();
     }
     let image = ui.render(&mut reader, 2).unwrap();
@@ -1141,7 +1124,7 @@ fn sleep_menu_emits_one_request_without_changing_saved_frontlight_or_position() 
     let mut ui = ReaderUi::default();
     ui.set_sleep_available(true);
     ui.open();
-    for _ in 0..10 {
+    for _ in 0..8 {
         ui.turn(&mut reader, true).unwrap();
     }
     let state = serde_json::to_vec(&reader.state).unwrap();
@@ -1161,7 +1144,7 @@ fn catalog_menu_emits_events_and_uses_existing_touch_pagination() {
     let mut ui = ReaderUi::default();
     ui.set_catalog_available(true);
     ui.open();
-    for _ in 0..10 {
+    for _ in 0..4 {
         ui.turn(&mut reader, true).unwrap();
     }
     ui.select(&mut reader).unwrap();
@@ -1236,11 +1219,7 @@ fn automatic_sleep_menu_selects_timeout_without_requesting_immediate_sleep() {
     let before = reader.position();
     let mut ui = ReaderUi::default();
     ui.set_sleep_available(true);
-    ui.open();
-    for _ in 0..11 {
-        ui.turn(&mut reader, true).unwrap();
-    }
-    ui.select(&mut reader).unwrap();
+    go(&mut ui, &mut reader, &["Settings", "Automatic sleep"]);
     ui.select(&mut reader).unwrap();
     assert_eq!(reader.state.idle_sleep, IdleSleep::Off);
     for expected in [
@@ -1264,10 +1243,8 @@ fn tailnet_menu_is_opt_in_and_emits_explicit_actions() {
     let mut ui = ReaderUi::default();
     ui.set_tailnet_available(true);
     ui.open();
-    for _ in 0..10 {
-        ui.turn(&mut reader, true).unwrap();
-    }
-    ui.select(&mut reader).unwrap();
+    ui.choose(&mut reader, "Settings").unwrap();
+    ui.choose(&mut reader, "Tailnet").unwrap();
     assert_eq!(ui.take_tailnet_event(), Some(TailnetEvent::Open));
     ui.open_tailnet();
     ui.set_tailnet_status(&[
@@ -1383,11 +1360,7 @@ fn orientation_menu_emits_changes_only_when_enabled() {
     let mut reader = reader();
     let mut ui = ReaderUi::default();
     ui.set_rotation_available(true);
-    ui.open();
-    for _ in 0..10 {
-        ui.turn(&mut reader, true).unwrap();
-    }
-    ui.select(&mut reader).unwrap();
+    go(&mut ui, &mut reader, &["Settings", "Screen orientation"]);
     for rotation in [
         Rotation::Portrait,
         Rotation::Clockwise,
@@ -1510,12 +1483,7 @@ fn link_menu_preview_closes_without_navigation_and_follows_explicitly() {
         reader.dispatch(Action::Reflow(config)).unwrap();
         let origin = reader.position();
         let mut ui = ReaderUi::default();
-        ui.open();
-        // Resume, contents, chapters, bookmarks, toggle bookmark, links.
-        for _ in 0..5 {
-            ui.turn(&mut reader, true).unwrap();
-        }
-        ui.select(&mut reader).unwrap();
+        go(&mut ui, &mut reader, &["This book", "Links on this page"]);
         ui.select(&mut reader).unwrap();
         assert_eq!(ui.resize(&reader, 2.0).unwrap(), Effect::Unchanged);
         finish_preview(&mut ui, &mut reader);
@@ -1641,11 +1609,7 @@ fn pending_preview_waits_for_input_and_back_abandons_it() {
     let original_pixels = reader.render(2).unwrap();
     let mut ui = ReaderUi::default();
     for action in 0..3 {
-        ui.open();
-        for _ in 0..5 {
-            ui.turn(&mut reader, true).unwrap();
-        }
-        ui.select(&mut reader).unwrap();
+        go(&mut ui, &mut reader, &["This book", "Links on this page"]);
         ui.select(&mut reader).unwrap();
         assert!(ui.is_preview_opening());
         assert_eq!(ui.poll_preview(&mut reader), Effect::Unchanged);
@@ -1729,10 +1693,7 @@ fn chapter_menu_and_boundary_taps_keep_the_view_until_navigation_finishes() {
     reader.dispatch(Action::Chapter(1)).unwrap();
     let before = reader.position();
     let pixels = reader.render(2).unwrap();
-    ui.open();
-    ui.turn(&mut reader, true).unwrap();
-    ui.turn(&mut reader, true).unwrap();
-    ui.select(&mut reader).unwrap(); // Chapters.
+    go(&mut ui, &mut reader, &["This book", "Chapters"]);
     for back in [true, false] {
         ui.select(&mut reader).unwrap(); // First chapter.
         assert!(ui.is_navigating());
@@ -1785,11 +1746,7 @@ fn stale_preview_follow_returns_to_a_renderable_menu_on_poll_or_cancellation() {
         )
         .unwrap();
         let mut ui = ReaderUi::default();
-        ui.open();
-        for _ in 0..5 {
-            ui.turn(&mut reader, true).unwrap();
-        }
-        ui.select(&mut reader).unwrap();
+        go(&mut ui, &mut reader, &["This book", "Links on this page"]);
         ui.select(&mut reader).unwrap();
         finish_preview(&mut ui, &mut reader);
         ui.select(&mut reader).unwrap();
@@ -1844,9 +1801,7 @@ fn book_typography_reset_is_cancellable_atomic_and_persisted() {
     let original = serde_json::to_value(&reader.state).unwrap();
     let pixels = reader.render(4).unwrap();
     let mut ui = ReaderUi::default();
-    ui.open();
-    ui.tap(&mut reader, 400, 750).unwrap();
-    ui.tap(&mut reader, 240, 150).unwrap(); // Typography.
+    go(&mut ui, &mut reader, &["Typography"]);
     ui.tap(&mut reader, 400, 750).unwrap(); // Second page.
     ui.tap(&mut reader, 240, 350).unwrap(); // Reset book typography.
     assert!(ui.is_reflowing());
@@ -1882,9 +1837,7 @@ fn spacing_and_margin_sliders_cancel_and_persist_as_book_preferences() {
     reader.dispatch(Action::Next).unwrap();
     let position = reader.position();
     let mut ui = ReaderUi::default();
-    ui.open();
-    ui.tap(&mut reader, 400, 750).unwrap();
-    ui.tap(&mut reader, 240, 150).unwrap(); // Typography.
+    go(&mut ui, &mut reader, &["Typography"]);
     let pixels = reader.render(4).unwrap();
     // Line spacing has five values across its row.
     ui.tap(&mut reader, 48 + 96 * 3, 250).unwrap();
@@ -1939,7 +1892,7 @@ fn spacing_and_margin_controls_skip_presets_that_do_not_fit() {
     let mut ui = ReaderUi::default();
     ui.open();
     // Button selection is independent of how many rows fit on a menu page.
-    for _ in 0..6 {
+    for _ in 0..5 {
         ui.turn(&mut reader, true).unwrap();
     }
     ui.select(&mut reader).unwrap(); // Typography.
@@ -1982,10 +1935,7 @@ fn dictionary_selection(word: &str) -> (Reader, ReaderUi) {
 }
 
 fn start_dictionary(ui: &mut ReaderUi, reader: &mut Reader) {
-    for _ in 0..3 {
-        ui.turn(reader, true).unwrap();
-    }
-    ui.select(reader).unwrap();
+    ui.choose(reader, "Look up selection").unwrap();
 }
 
 #[test]
@@ -2008,7 +1958,10 @@ fn dictionary_lookup_returns_to_selection_without_changing_reader_state() {
         assert_eq!(ui.error_message(), None);
         assert_ne!(ui.render(&mut reader, 4).unwrap(), preview);
         assert_eq!(serde_json::to_value(&reader.state).unwrap(), before);
-        ui.select(&mut reader).unwrap(); // Back to selection.
+        ui.select(&mut reader).unwrap(); // Back to selection, on the lookup row.
+        for _ in 0..3 {
+            ui.turn(&mut reader, false).unwrap();
+        }
         assert_eq!(ui.render(&mut reader, 4).unwrap(), preview);
         ui.turn(&mut reader, true).unwrap();
         ui.select(&mut reader).unwrap(); // Save the original source selection.
@@ -2166,11 +2119,7 @@ fn dictionary_chooser_persists_and_restores_the_selected_filename() {
         ui.render(reader, 4).unwrap()
     };
     let first = lookup(&mut ui, &mut reader);
-    ui.open();
-    for _ in 0..11 {
-        ui.turn(&mut reader, true).unwrap();
-    }
-    ui.select(&mut reader).unwrap();
+    go(&mut ui, &mut reader, &["Settings", "Dictionary"]);
     ui.turn(&mut reader, true).unwrap();
     ui.select(&mut reader).unwrap();
     assert_eq!(reader.state.dictionary_name.as_deref(), Some("b.ifo"));
@@ -2328,4 +2277,48 @@ fn device_panel_reports_activation_and_text_entry_to_the_frontend() {
     assert_eq!(ui.take_device_event(), Some(DeviceEvent::Back));
     ui.close_device();
     assert!(ui.is_open() && !ui.is_device_open());
+}
+
+#[test]
+fn deleting_a_book_requires_confirmation_and_spares_the_open_book() {
+    use femto_reader::state::Library;
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["alpha", "beta"] {
+        std::fs::write(dir.path().join(format!("{name}.txt")), name).unwrap();
+    }
+    let mut reader = reader();
+    let mut ui = ReaderUi::default();
+    // Deletion needs the library folder to check the file lies inside it.
+    ui.set_library(Library::scan(dir.path()).unwrap());
+    ui.open_library();
+    assert!(ui.choose(&mut reader, "Delete a book").is_err());
+    ui.configure_library_scan(dir.path().to_path_buf(), 256)
+        .unwrap();
+    ui.set_library(Library::scan_cached(dir.path(), 256).unwrap());
+    ui.open_library();
+    ui.choose(&mut reader, "Delete a book").unwrap();
+    ui.choose(&mut reader, "alpha").unwrap();
+    ui.choose(&mut reader, "Keep book").unwrap();
+    assert!(dir.path().join("alpha.txt").exists());
+    ui.choose(&mut reader, "alpha").unwrap();
+    ui.choose(&mut reader, "Delete this book").unwrap();
+    assert_eq!(ui.error_message(), None);
+    assert!(!dir.path().join("alpha.txt").exists());
+    assert!(dir.path().join("beta.txt").exists());
+    assert!(ui.choose(&mut reader, "alpha").is_err());
+    let cached = Library::load_cached(dir.path(), 256).unwrap();
+    assert_eq!(cached.entries.len(), 1);
+    assert_eq!(cached.entries[0].metadata.title, "beta");
+
+    // The open book stays on the card.
+    ui.back(&mut reader).unwrap();
+    ui.choose(&mut reader, "All books").unwrap();
+    ui.choose(&mut reader, "beta").unwrap();
+    finish_open(&mut ui, &mut reader);
+    ui.open_library();
+    ui.choose(&mut reader, "Delete a book").unwrap();
+    ui.choose(&mut reader, "beta").unwrap();
+    ui.choose(&mut reader, "Delete this book").unwrap();
+    assert_eq!(ui.error_message(), Some("document: this book is open"));
+    assert!(dir.path().join("beta.txt").exists());
 }

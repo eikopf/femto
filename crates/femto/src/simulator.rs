@@ -571,7 +571,8 @@ mod tests {
             Effect::Unchanged
         );
         assert_eq!(reader.state.layout.font_size, size);
-        for key in [Key::Down, Key::Down, Key::Enter, Key::Down, Key::Enter] {
+        ui.choose(&mut reader, "This book").unwrap();
+        for key in [Key::Enter, Key::Down, Key::Enter] {
             handle_key(&mut reader, &mut ui, key).unwrap();
         }
         assert!(ui.is_navigating());

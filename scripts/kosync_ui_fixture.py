@@ -67,7 +67,7 @@ def check(url):
             window = wait(lambda: xdo("search","--name","^Femto"), "window")
             xdo("windowfocus", window)
             wait(lambda: " - page " in xdo("getwindowname",window), "reader startup")
-            xdo("key","--delay","150","Tab",*(["Down"] * 10),"Return")
+            xdo("key","--delay","150","Tab",*(["Down"] * 6),"Return",*(["Down"] * 4),"Return")  # This book, KOReader sync.
             wait(lambda: "KOReader sync" in xdo("getwindowname",window), "sync menu")
             xdo("key","--delay","150","Down","Return")
             remote = wait(lambda: peer("GET","/syncs/progress/"+document), "menu upload")

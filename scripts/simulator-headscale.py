@@ -78,8 +78,8 @@ try:
         window = wait_for(lambda: subprocess.run(["xdotool", "search", "--name", "^Femto"], env=env, capture_output=True, text=True, timeout=5).stdout.strip(), "window")
         xdo("windowfocus", window)
         wait_for(lambda: " - page " in xdo("getwindowname", window).stdout, "reader startup")
-        index = 11 if "--catalog-directory" in extra else 10
-        xdo("key", "--delay", "100", "Tab", *(["Down"] * index), "Return", *([] if existing else ["Down"]), "Return")
+        index = 8 if "--catalog-directory" in extra else 7  # Settings; Tailnet is its first row.
+        xdo("key", "--delay", "100", "Tab", *(["Down"] * index), "Return", "Return", *([] if existing else ["Down"]), "Return")
         return window
 
     def unlocked(directory):
@@ -154,7 +154,7 @@ try:
 
         start(directory, folder / "root.der", ("--catalog-directory", str(services.books)), existing=True)
         wait_for(native_online, "native catalog runtime online")
-        xdo("key", "--delay", "100", "Escape", "Escape", "Tab", *(["Down"] * 10), "Return")
+        xdo("key", "--delay", "100", "Escape", "Escape", "Escape", "Tab", *(["Down"] * 4), "Return")
         wait_for(lambda: services.counts["feed"] == 1, "tailnet catalog request")
         time.sleep(0.5)
         capture("catalog.png")
@@ -173,7 +173,7 @@ try:
                 counts_before_rejection = dict(services.counts)
                 window = start(directory, folder / "root.der", ("--catalog-directory", str(services.books)), existing=True)
                 wait_for(native_online, "native certificate rejection runtime online")
-                xdo("key", "--delay", "100", "Escape", "Escape", "Tab", *(["Down"] * 10), "Return")
+                xdo("key", "--delay", "100", "Escape", "Escape", "Escape", "Tab", *(["Down"] * 4), "Return")
                 title = wait_for(lambda: (title if "invalid peer certificate" in (title := xdo("getwindowname", window).stdout) else None), "client certificate rejection")
                 print("Client TLS rejection: " + title.strip(), flush=True)
                 expected = "not valid for name" if mode == "wrong-name" else "UnknownIssuer"

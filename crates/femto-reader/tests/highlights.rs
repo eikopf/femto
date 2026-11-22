@@ -42,10 +42,8 @@ fn menu_highlights_persist_in_both_stores_and_follow_reflow() {
     );
     let mut ui = ReaderUi::default();
     ui.open();
-    for _ in 0..10 {
-        ui.turn(&mut r, true).unwrap();
-    }
-    ui.select(&mut r).unwrap();
+    ui.choose(&mut r, "This book").unwrap();
+    ui.choose(&mut r, "Clippings").unwrap();
     ui.turn(&mut r, true).unwrap();
     ui.select(&mut r).unwrap();
     ui.turn(&mut r, true).unwrap();
@@ -117,10 +115,8 @@ fn pending_selection_over_saved_highlight_does_not_invert_twice() {
     assert_eq!(r.render(4).unwrap(), marked);
     let mut ui = ReaderUi::default();
     ui.open();
-    for _ in 0..10 {
-        ui.turn(&mut r, true).unwrap();
-    }
-    ui.select(&mut r).unwrap();
+    ui.choose(&mut r, "This book").unwrap();
+    ui.choose(&mut r, "Clippings").unwrap();
     for _ in 0..3 {
         ui.turn(&mut r, true).unwrap();
     }

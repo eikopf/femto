@@ -40,6 +40,8 @@ pub struct Station {
     started: Instant,
     next_poll: Instant,
     next_scan: Instant,
+    /// Whether modem sleep is off; see [`Self::set_attentive`].
+    attentive: bool,
 }
 
 impl Station {
@@ -76,6 +78,7 @@ impl Station {
             started: now,
             next_poll: now,
             next_scan: now,
+            attentive: false,
         };
         if station.saved.enabled()
             && let Err(error) = station.start()
@@ -97,10 +100,29 @@ impl Station {
         let driver = self.driver.as_mut().expect("driver created");
         if !driver.is_started().map_err(|e| e.to_string())? {
             driver.start().map_err(|e| e.to_string())?;
+            // A started driver sleeps between beacons until told otherwise.
+            self.attentive = false;
         }
         self.next_scan = Instant::now();
         self.changed = true;
         Ok(())
+    }
+
+    /// Keeps the radio awake while network work is in flight. Modem sleep
+    /// between beacons loses or delays enough inbound packets on a weak link
+    /// to time out name lookups and stall transfers.
+    pub fn set_attentive(&mut self, attentive: bool) {
+        if self.attentive == attentive || self.driver.is_none() {
+            return;
+        }
+        let mode = if attentive {
+            sys::wifi_ps_type_t_WIFI_PS_NONE
+        } else {
+            sys::wifi_ps_type_t_WIFI_PS_MIN_MODEM
+        };
+        if unsafe { sys::esp_wifi_set_ps(mode) } == sys::ESP_OK {
+            self.attentive = attentive;
+        }
     }
 
     pub fn enabled(&self) -> bool {

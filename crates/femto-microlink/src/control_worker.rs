@@ -187,6 +187,8 @@ pub struct ControlledNetwork<S: EpochStore> {
     cancelled: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
     explicitly_closed: bool,
+    /// Why the last map or tick was rejected, for diagnostics only.
+    rejection: Option<String>,
 }
 impl<S: EpochStore> ControlledNetwork<S> {
     /// The supplied control connection must already be registered. Failure to
@@ -236,6 +238,7 @@ impl<S: EpochStore> ControlledNetwork<S> {
             cancelled,
             worker: Some(worker),
             explicitly_closed: false,
+            rejection: None,
         })
     }
     fn spawn_reader<T: DeadlineIo + 'static>(
@@ -452,6 +455,7 @@ impl<S: EpochStore> ControlledNetwork<S> {
             match self.receiver.try_recv() {
                 Ok(bytes) => {
                     if let Err(error) = self.network.apply_map(&bytes.bytes, clock()) {
+                        self.rejection = Some(format!("{} byte map: {error}", bytes.bytes.len()));
                         *state = Some(StopReason::InvalidMap);
                         self.cancelled.store(true, Ordering::Release);
                         self.network.disconnect();
@@ -467,6 +471,7 @@ impl<S: EpochStore> ControlledNetwork<S> {
             }
         }
         if let Err(error) = self.network.tick(clock().monotonic_ms) {
+            self.rejection = Some(format!("tick: {error}"));
             *state = Some(StopReason::InvalidMap);
             self.cancelled.store(true, Ordering::Release);
             self.network.disconnect();
@@ -499,6 +504,10 @@ impl<S: EpochStore> ControlledNetwork<S> {
     }
     /// The final stop reason is stable once the reader has finished. A pending
     /// cancellation may be observed before the reader reports its I/O result.
+    /// The detail behind [`StopReason::InvalidMap`]; never map contents.
+    pub fn rejection(&self) -> Option<&str> {
+        self.rejection.as_deref()
+    }
     pub fn stop_reason(&self) -> Option<StopReason> {
         match self.state.lock() {
             Ok(state) => (*state).or_else(|| {
@@ -1080,6 +1089,7 @@ mod tests {
             cancelled: Arc::new(AtomicBool::new(false)),
             worker: None,
             explicitly_closed: false,
+            rejection: None,
         };
         (owner, sink, map, peer)
     }

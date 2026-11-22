@@ -1009,7 +1009,7 @@ impl<S: EpochStore> Network<S> {
                 crate::discovery::Error::Invalid
                 | crate::discovery::Error::Unknown
                 | crate::discovery::Error::Capacity
-                | crate::discovery::Error::Map(MapError::Node),
+                | crate::discovery::Error::Map(MapError::Node(_)),
             )) => Ok(false),
             Err(error) => Err(error),
         }

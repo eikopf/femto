@@ -741,6 +741,13 @@ fn run() -> Result<(), String> {
             render(&mut reader, &ui, &mut plane)?;
             screen.present(&plane)?;
         }
+        let networking = screen.catalog.is_busy()
+            || updater.is_busy()
+            || screen.tailnet.driver().is_some()
+            || kosync.as_ref().is_some_and(|sync| sync.is_busy());
+        if let Some(wifi) = screen.wifi() {
+            wifi.set_attentive(networking);
+        }
         let manual_sleep = ui.take_sleep_request();
         let idle_now = idle_epoch.elapsed().as_millis().min(u64::MAX as u128) as u64;
         idle.configure(idle_now, reader.state.idle_sleep.minutes() * 60 * 1000);

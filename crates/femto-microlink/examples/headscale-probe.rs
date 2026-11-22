@@ -902,7 +902,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 self.expired_node |= value["Node"]["Expired"] == true
                     && value["Node"]["Key"].as_str() == Some(self.local_key.as_str())
-                    && matches!(result, Err(Self::Error::Node));
+                    && matches!(result, Err(Self::Error::Node(_)));
                 result
             }
             fn disconnect(&mut self) {

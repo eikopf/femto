@@ -143,23 +143,7 @@ fn fetch(
     .map(|_| ())
 }
 
-/// Keeps the radio awake for a transfer. Modem sleep between beacons stalls
-/// a long download on a weak link.
-struct Awake;
-impl Awake {
-    fn new() -> Self {
-        unsafe { sys::esp_wifi_set_ps(sys::wifi_ps_type_t_WIFI_PS_NONE) };
-        Self
-    }
-}
-impl Drop for Awake {
-    fn drop(&mut self) {
-        unsafe { sys::esp_wifi_set_ps(sys::wifi_ps_type_t_WIFI_PS_MIN_MODEM) };
-    }
-}
-
 fn check() -> Result<Manifest, String> {
-    let _awake = Awake::new();
     let mut bytes = Vec::new();
     fetch("femto-picco.json", 4096, 0, 60, &mut bytes).map_err(|e| e.to_string())?;
     let manifest: Manifest =
@@ -181,7 +165,6 @@ const STALLED_ATTEMPTS: u32 = 4;
 /// from the bytes already on the card; a download that gives up leaves them
 /// for the next try, and one that fails verification is deleted.
 fn download(manifest: &Manifest) -> Result<(), String> {
-    let _awake = Awake::new();
     let partial = Path::new(PARTIAL);
     fs::create_dir_all(partial.parent().unwrap_or(partial)).map_err(|e| e.to_string())?;
     let held = || fs::metadata(partial).map_or(0, |metadata| metadata.len());

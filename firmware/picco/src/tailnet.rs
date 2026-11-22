@@ -132,6 +132,10 @@ fn setup_worker(
                 .map_err(|_| io::Error::other("endpoint publisher receiver unavailable"))?;
             Ok((control, request))
         })();
+        #[cfg(target_os = "espidf")]
+        if let Err(error) = &result {
+            log::warn!("Tailnet setup: {error}");
+        }
         if result.is_err() && !reported {
             let retryable = result
                 .as_ref()
@@ -301,8 +305,9 @@ impl Runtime {
                 return Ok(None);
             }
             Err(error) => {
+                let detail = self.owner.rejection().unwrap_or_default().to_owned();
                 self.cancel();
-                return Err(error.to_string());
+                return Err(format!("{error} {detail}"));
             }
         }
         let result = (|| {

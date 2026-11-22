@@ -16,8 +16,8 @@ type Key = PublicKey<Node>;
 pub enum MapError {
     #[error("invalid coordinator JSON")]
     Json(#[from] serde_json::Error),
-    #[error("invalid or unsupported coordinator node update")]
-    Node,
+    #[error("invalid or unsupported coordinator node update: {0}")]
+    Node(&'static str),
     #[error("coordinator capacity exceeded")]
     Capacity,
     #[error("invalid or backwards clock")]
@@ -147,7 +147,7 @@ impl Coordinator {
         now_ms: u64,
     ) -> Result<Self, MapError> {
         if local_key == Key::zero() {
-            return Err(MapError::Node);
+            return Err(MapError::Node("zero local key"));
         }
         Ok(Self {
             plane: DataPlane::new(local_address, max_peers, max_sessions, now_ms)?,
@@ -224,7 +224,7 @@ impl Coordinator {
                 && self.plane.begin_handshake(node.peer.key, now_ms).is_ok()
             {
                 if found.is_some() {
-                    return Err(MapError::Node);
+                    return Err(MapError::Node("ambiguous discovery key"));
                 }
                 found = Some(node.peer.key);
             }
@@ -252,7 +252,7 @@ impl Coordinator {
             return Ok(None);
         };
         if matches.next().is_some() {
-            return Err(MapError::Node);
+            return Err(MapError::Node("ambiguous peer"));
         }
         let answer = (node.peer.key, node.peer.addresses[0]);
         if self.plane.begin_handshake(answer.0, now_ms).is_err() {
@@ -315,7 +315,10 @@ impl Coordinator {
             return Ok(None);
         }
         for id in self.relays.region_ids() {
-            let region = self.relays.region(id).ok_or(MapError::Node)?;
+            let region = self
+                .relays
+                .region(id)
+                .ok_or(MapError::Node("unknown relay region"))?;
             if region.no_measure_no_home {
                 continue;
             }
@@ -364,7 +367,12 @@ impl Coordinator {
             return Ok(servers);
         }
         for id in self.relays.region_ids() {
-            for node in &self.relays.region(id).ok_or(MapError::Node)?.nodes {
+            for node in &self
+                .relays
+                .region(id)
+                .ok_or(MapError::Node("unknown relay region"))?
+                .nodes
+            {
                 if let (crate::relay::Address::Fixed(ip), Some(port)) = (&node.ipv4, node.stun_port)
                 {
                     let endpoint = std::net::SocketAddrV4::new(*ip, port);
@@ -421,7 +429,7 @@ impl Coordinator {
                     .local_deadline
                     .is_none_or(|deadline| deadline <= clock.monotonic_ms)
             {
-                return Err(MapError::Node);
+                return Err(MapError::Node("heartbeat after local expiry"));
             }
             return Ok(false);
         }
@@ -434,30 +442,32 @@ impl Coordinator {
             Some(node) => {
                 let record = record(node, clock)?;
                 if record.peer.key != self.local_key || !record.permitted || record.peer.jailed {
-                    return Err(MapError::Node);
+                    return Err(MapError::Node(
+                        "local node not this device or not authorized",
+                    ));
                 }
                 if initial && self.discover_address {
                     let [address] = record.peer.addresses.as_slice() else {
-                        return Err(MapError::Node);
+                        return Err(MapError::Node("local node needs one IPv4 address"));
                     };
                     if address.is_unspecified()
                         || address.is_loopback()
                         || address.is_multicast()
                         || address.is_broadcast()
                     {
-                        return Err(MapError::Node);
+                        return Err(MapError::Node("unusable local address"));
                     }
                     local_address = *address;
                 } else if !record.peer.addresses.contains(&local_address) {
                     // Address changes require a fresh stream and new data plane.
-                    return Err(MapError::Node);
+                    return Err(MapError::Node("local address changed"));
                 }
                 record.peer.expires_ms
             }
-            None => self.local_deadline.ok_or(MapError::Node)?,
+            None => self.local_deadline.ok_or(MapError::Node("no local node"))?,
         };
         if local_deadline <= clock.monotonic_ms {
-            return Err(MapError::Node);
+            return Err(MapError::Node("local node expired"));
         }
         let changed = map.peers_changed.unwrap_or_default();
         let removed = map.peers_removed.unwrap_or_default();
@@ -480,23 +490,21 @@ impl Coordinator {
             }
             for node in peers {
                 if !touched.insert(node.id) {
-                    return Err(MapError::Node);
+                    return Err(MapError::Node("duplicate peer"));
                 }
                 nodes.insert(node.id, record(node, clock)?);
             }
         } else {
-            if full && (!changed.is_empty() || !removed.is_empty() || !patches.is_empty()) {
-                return Err(MapError::Node);
-            }
+            // Tailscale's first response lists peers as changes to an empty map.
             for id in removed {
                 if id == 0 || !touched.insert(id) {
-                    return Err(MapError::Node);
+                    return Err(MapError::Node("invalid removal"));
                 }
                 nodes.remove(&id);
             }
             for node in changed {
                 if !touched.insert(node.id) {
-                    return Err(MapError::Node);
+                    return Err(MapError::Node("duplicate changed peer"));
                 }
                 nodes.insert(node.id, record(node, clock)?);
             }
@@ -504,7 +512,7 @@ impl Coordinator {
         let mut patched = BTreeSet::new();
         for patch in patches {
             if !patched.insert(patch.id) {
-                return Err(MapError::Node);
+                return Err(MapError::Node("duplicate patch"));
             }
             let Some(node) = nodes.get_mut(&patch.id) else {
                 continue;
@@ -519,7 +527,7 @@ impl Coordinator {
                 node.route.endpoints = parse_endpoints(endpoints)?;
             }
             if patch.derp_region > crate::relay::MAX_REGION_ID {
-                return Err(MapError::Node);
+                return Err(MapError::Node("patch relay region"));
             }
             if patch.derp_region != 0 {
                 node.route.relay_region = Some(patch.derp_region);
@@ -538,7 +546,7 @@ impl Coordinator {
                 || node.peer.key == self.local_key
                 || !keys.insert(node.peer.key)
             {
-                return Err(MapError::Node);
+                return Err(MapError::Node("zero, local or duplicate peer key"));
             }
             if node.permitted && !node.peer.addresses.is_empty() {
                 let mut peer = node.peer.clone();
@@ -583,22 +591,24 @@ impl Coordinator {
 
 fn record(node: WireNode, clock: Clock) -> Result<Record, MapError> {
     if node.id == 0 || node.key == Key::zero() || node.addresses.len() > 8 {
-        return Err(MapError::Node);
+        return Err(MapError::Node("node id, key or address count"));
     }
     let mut addresses = Vec::new();
     for prefix in &node.addresses {
-        let (ip, bits) = prefix.rsplit_once('/').ok_or(MapError::Node)?;
-        let ip: IpAddr = ip.parse().map_err(|_| MapError::Node)?;
-        let bits: u8 = bits.parse().map_err(|_| MapError::Node)?;
+        let (ip, bits) = prefix
+            .rsplit_once('/')
+            .ok_or(MapError::Node("address prefix"))?;
+        let ip: IpAddr = ip.parse().map_err(|_| MapError::Node("address"))?;
+        let bits: u8 = bits.parse().map_err(|_| MapError::Node("prefix length"))?;
         match ip {
             IpAddr::V4(ip) if bits == 32 => {
                 if addresses.contains(&ip) {
-                    return Err(MapError::Node);
+                    return Err(MapError::Node("duplicate address"));
                 }
                 addresses.push(ip);
             }
             IpAddr::V6(_) if bits == 128 => (),
-            _ => return Err(MapError::Node),
+            _ => return Err(MapError::Node("address prefix length")),
         }
     }
     if addresses.len() > 4 {
@@ -618,16 +628,19 @@ fn record(node: WireNode, clock: Clock) -> Result<Record, MapError> {
         deadline(node.key_expiry.as_deref(), clock)?
     };
     if node.home_derp > crate::relay::MAX_REGION_ID {
-        return Err(MapError::Node);
+        return Err(MapError::Node("home relay region"));
     }
     let relay_region = if node.home_derp != 0 {
         Some(node.home_derp)
     } else if node.legacy_derp.is_empty() {
         None
     } else {
-        let endpoint: SocketAddr = node.legacy_derp.parse().map_err(|_| MapError::Node)?;
+        let endpoint: SocketAddr = node
+            .legacy_derp
+            .parse()
+            .map_err(|_| MapError::Node("legacy relay"))?;
         if endpoint.ip() != IpAddr::V4(Ipv4Addr::new(127, 3, 3, 40)) || endpoint.port() == 0 {
-            return Err(MapError::Node);
+            return Err(MapError::Node("legacy relay"));
         }
         Some(u64::from(endpoint.port()))
     };
@@ -669,7 +682,7 @@ pub(crate) fn dns_name(name: &str) -> Result<Option<String>, MapError> {
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-')
         })
     {
-        return Err(MapError::Node);
+        return Err(MapError::Node("peer name"));
     }
     Ok(Some(name.to_ascii_lowercase()))
 }
@@ -680,9 +693,9 @@ fn parse_endpoints(values: Vec<String>) -> Result<Vec<SocketAddr>, MapError> {
     let mut endpoints = Vec::new();
     for value in values {
         if value.len() > 80 {
-            return Err(MapError::Node);
+            return Err(MapError::Node("endpoint length"));
         }
-        let endpoint: SocketAddr = value.parse().map_err(|_| MapError::Node)?;
+        let endpoint: SocketAddr = value.parse().map_err(|_| MapError::Node("endpoint"))?;
         let ip = endpoint.ip().to_canonical();
         if endpoint.port() == 0
             || ip.is_unspecified()
@@ -690,7 +703,7 @@ fn parse_endpoints(values: Vec<String>) -> Result<Vec<SocketAddr>, MapError> {
             || ip.is_loopback()
             || matches!(ip, IpAddr::V4(ip) if ip.is_broadcast())
         {
-            return Err(MapError::Node);
+            return Err(MapError::Node("unusable endpoint"));
         }
         if !endpoints.contains(&endpoint) {
             endpoints.push(endpoint);
@@ -974,6 +987,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn first_map_may_list_peers_as_changes() {
+        let mut c = coordinator();
+        apply(
+            &mut c,
+            json!({"Node":node(1,1), "PeersChanged":[node(2,2)], "PeersChangedPatch":[{"NodeID":2,"DERPRegion":8}]}),
+            0,
+        )
+        .unwrap();
+        assert!(authorized(&mut c, 2, 0));
+    }
     #[test]
     fn full_delta_rotation_and_removal_follow_node_ids() {
         let mut c = coordinator();

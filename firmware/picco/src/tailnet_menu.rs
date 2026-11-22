@@ -235,8 +235,10 @@ impl Manager {
                         self.rows = vec!["Waiting for assigned address".into()];
                     }
                 }
-                Err(_) => {
-                    self.rows = vec!["Tailnet connection closed".into()];
+                Err(error) => {
+                    #[cfg(target_os = "espidf")]
+                    log::warn!("Tailnet closed: {error}");
+                    self.rows = vec!["Tailnet connection closed".into(), error];
                     self.stopping = true;
                 }
             }

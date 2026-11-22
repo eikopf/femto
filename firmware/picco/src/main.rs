@@ -298,6 +298,11 @@ fn run() -> Result<(), String> {
                     log::info!("USB awake: automatic sleep suppressed until restart");
                     None
                 }
+                Command::Relay => {
+                    tailnet::RELAY_ONLY.store(true, std::sync::atomic::Ordering::Relaxed);
+                    log::info!("USB relay: new tailnet sessions use relays only until restart");
+                    None
+                }
                 Command::Swipe(turn) => Some(input::Event::Swipe(turn)),
                 Command::Slide { up } => Some(input::Event::Gesture(if up {
                     femto_reader::ui::Gesture::SwipeUp

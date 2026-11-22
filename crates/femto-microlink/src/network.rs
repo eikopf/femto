@@ -165,6 +165,8 @@ pub struct Network<S: EpochStore> {
     probe_cursor: Option<u64>,
     next_probe_scan_ms: u64,
     endpoints: crate::stun::EndpointDiscovery,
+    /// The relay region each STUN server measures.
+    stun_regions: Vec<(u64, std::net::SocketAddrV4)>,
     handshake_retry: BTreeMap<Key, u64>,
     retry_series: BTreeMap<Key, RetrySeries>,
     keepalives: BTreeMap<Key, Keepalive>,
@@ -222,6 +224,7 @@ impl<S: EpochStore> Network<S> {
             probe_cursor: None,
             next_probe_scan_ms: 0,
             endpoints: Default::default(),
+            stun_regions: Vec::new(),
             handshake_retry: BTreeMap::new(),
             retry_series: BTreeMap::new(),
             keepalives: BTreeMap::new(),
@@ -515,7 +518,12 @@ impl<S: EpochStore> Network<S> {
         self.outgoing.clear();
         self.incoming.clear();
         self.probe_cursor = None;
-        let servers = self.coordinator.stun_servers(clock.monotonic_ms)?;
+        self.stun_regions = self.coordinator.stun_servers(clock.monotonic_ms)?;
+        let servers: Vec<_> = self
+            .stun_regions
+            .iter()
+            .map(|(_, server)| *server)
+            .collect();
         if let Err(error) = self.endpoints.configure(&servers) {
             self.disconnect();
             return Err(error.into());
@@ -577,7 +585,9 @@ impl<S: EpochStore> Network<S> {
             directory: self.coordinator.relay_identity(),
         }))
     }
-    /// Deterministic initial home selection; latency ranking is not implemented.
+    /// The home relay to set up: the region whose STUN server answered
+    /// fastest, or the first region when none answered. `None` until the
+    /// first measurements are in.
     pub fn home_relay_plan(&mut self, now_ms: u64) -> Result<Option<RelayPlan>, Error> {
         self.home_relay_matching(now_ms, |_| true)
     }
@@ -587,12 +597,29 @@ impl<S: EpochStore> Network<S> {
         mut accept: impl FnMut(&RelayPlan) -> bool,
     ) -> Result<Option<RelayPlan>, Error> {
         self.tick(now_ms)?;
+        // The home relay is the nearest one; wait for the first measurements.
+        if !self.endpoints.settled(now_ms) {
+            return Ok(None);
+        }
+        let mut nearest: Vec<(u64, u64)> = self
+            .endpoints
+            .latencies()
+            .filter_map(|(server, round_trip)| {
+                let (region, _) = self
+                    .stun_regions
+                    .iter()
+                    .find(|(_, other)| *other == server)?;
+                Some((round_trip, *region))
+            })
+            .collect();
+        nearest.sort_unstable();
+        let nearest: Vec<u64> = nearest.into_iter().map(|(_, region)| region).collect();
         let authorization = self.coordinator.data_plane().authorization_identity();
         let local_node = self.local_node;
         let directory = self.coordinator.relay_identity();
         Ok(self
             .coordinator
-            .home_relay_matching(now_ms, |region, node| {
+            .home_relay_matching(now_ms, &nearest, |region, node| {
                 accept(&RelayPlan {
                     region,
                     home: true,
@@ -2586,6 +2613,61 @@ mod tests {
         owner.disconnect();
         assert!(owner.receive(Source::Udp(server), &response, 6).is_err());
         assert!(owner.observed_endpoints(6).unwrap().is_empty());
+    }
+    #[test]
+    fn home_relay_is_the_region_whose_stun_server_answers_fastest() {
+        let a = DeviceIdentity::generate().unwrap();
+        let b = DeviceIdentity::generate().unwrap();
+        let mut owner = network(&a, &b, 1, 2);
+        owner.apply_map(br#"{"DERPMap":{"Regions":{"1":{"RegionID":1,"Nodes":[{"Name":"1a","RegionID":1,"HostName":"far.example","IPv4":"192.0.2.1","STUNPort":3478}]},"4":{"RegionID":4,"Nodes":[{"Name":"4a","RegionID":4,"HostName":"near.example","IPv4":"192.0.2.4","STUNPort":3478}]},"9":{"RegionID":9,"Nodes":[{"Name":"9a","RegionID":9,"HostName":"silent.example","IPv4":"192.0.2.9","STUNPort":3478}]}}}}"#, clock(1)).unwrap();
+        let answer = |request: &[u8]| {
+            let mut response = vec![1, 1, 0, 12, 0x21, 0x12, 0xa4, 0x42];
+            response.extend_from_slice(&request[8..20]);
+            response.extend_from_slice(&[0, 32, 0, 8, 0, 1]);
+            response.extend_from_slice(&(40000u16 ^ 0x2112).to_be_bytes());
+            for (byte, mask) in [203, 0, 113, 9].into_iter().zip([0x21, 0x12, 0xa4, 0x42]) {
+                response.push(byte ^ mask);
+            }
+            response
+        };
+        let mut sent = Vec::new();
+        for now in [1, 51, 101] {
+            // No home is chosen before the measurements are in.
+            assert!(owner.home_relay_plan(now).unwrap().is_none());
+            assert!(
+                owner
+                    .send_stun(now, |target, bytes| {
+                        sent.push((target, bytes.to_vec()));
+                        Ok(())
+                    })
+                    .unwrap()
+            );
+        }
+        let reply = |owner: &mut Network<Store>, address: &str, now| {
+            let server: SocketAddr = address.parse().unwrap();
+            let (_, request) = sent.iter().find(|(target, _)| *target == server).unwrap();
+            owner
+                .receive(Source::Udp(server), &answer(request), now)
+                .unwrap();
+        };
+        // Region 4 answers after 70 ms, region 1 after 190 ms, region 9 never.
+        reply(&mut owner, "192.0.2.4:3478", 121);
+        reply(&mut owner, "192.0.2.1:3478", 191);
+        assert!(owner.home_relay_plan(400).unwrap().is_none());
+        assert_eq!(owner.home_relay_plan(401).unwrap().unwrap().region(), 4);
+        // A nearest region that is refused yields the next nearest, then the rest.
+        let mut refused = vec![4];
+        let next = owner
+            .home_relay_matching(401, |plan| !refused.contains(&plan.region()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(next.region(), 1);
+        refused.push(1);
+        let last = owner
+            .home_relay_matching(401, |plan| !refused.contains(&plan.region()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(last.region(), 9);
     }
     #[test]
     fn automatic_probes_cycle_peers_and_recheck_revocation() {

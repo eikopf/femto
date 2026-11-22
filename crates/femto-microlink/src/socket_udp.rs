@@ -12,6 +12,7 @@ pub struct Datagram {
 }
 pub struct UdpTransport {
     socket: Option<UdpSocket>,
+    muted: bool,
 }
 impl UdpTransport {
     pub fn bind(address: SocketAddr) -> io::Result<Self> {
@@ -19,7 +20,19 @@ impl UdpTransport {
         socket.set_nonblocking(true)?;
         Ok(Self {
             socket: Some(socket),
+            muted: false,
         })
+    }
+    /// Discards all but STUN datagrams in both directions from now on, so
+    /// that no direct path is ever confirmed and peers are reached through
+    /// relays only. A diagnostic, like Tailscale's `TS_DEBUG_ALWAYS_USE_DERP`.
+    pub fn mute(&mut self) {
+        self.muted = true;
+    }
+    fn passes(&self, bytes: &[u8]) -> bool {
+        let stun =
+            bytes.len() >= 8 && bytes[0] & 0xc0 == 0 && bytes[4..8] == [0x21, 0x12, 0xa4, 0x42];
+        !self.muted || stun
     }
     fn socket(&self) -> io::Result<&UdpSocket> {
         self.socket
@@ -44,7 +57,7 @@ impl UdpTransport {
                 "invalid UDP datagram or target",
             ));
         }
-        if socket.send_to(bytes, destination)? != bytes.len() {
+        if self.passes(bytes) && socket.send_to(bytes, destination)? != bytes.len() {
             return Err(io::Error::new(
                 io::ErrorKind::WriteZero,
                 "incomplete UDP datagram",
@@ -64,6 +77,9 @@ impl UdpTransport {
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(None),
             Err(error) => return Err(error),
         };
+        if !self.passes(&bytes[..length]) {
+            return Ok(None);
+        }
         if length > MAX_DATAGRAM {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,

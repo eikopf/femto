@@ -18,6 +18,8 @@ pub enum Command {
     Power,
     /// Suppress automatic sleep until restart, for unattended test sessions.
     Awake,
+    /// Reach tailnet peers through relays only in sessions opened from now on.
+    Relay,
     Swipe(crate::input::Turn),
     /// A vertical swipe on the reading page.
     Slide {
@@ -68,6 +70,7 @@ fn parse(line: &str) -> Option<Command> {
         ("back", "") => Command::Back,
         ("power", "") => Command::Power,
         ("awake", "") => Command::Awake,
+        ("relay", "") => Command::Relay,
         ("swipe", "next") => Command::Swipe(crate::input::Turn::Next),
         ("swipe", "prev") => Command::Swipe(crate::input::Turn::Previous),
         ("swipe", "up") => Command::Slide { up: true },

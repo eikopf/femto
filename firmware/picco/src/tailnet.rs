@@ -39,6 +39,13 @@ struct Setup {
     followup: Option<Followup>,
     authorized: AtomicBool,
 }
+/// How long the first endpoint publication waits for the home relay.
+const HOME_WAIT_MS: u64 = 10_000;
+
+/// Set from the USB console: sessions opened afterwards exchange no direct
+/// datagrams, which leaves only relayed paths to test.
+pub static RELAY_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn setup_worker(
     setup: Arc<Setup>,
     sender: SyncSender<Registration>,
@@ -120,12 +127,17 @@ fn setup_worker(
             let publication_endpoint = endpoint.clone();
             let publisher = control.endpoint_publisher(&request, 128 * 1024, move |cancel| {
                 crate::clock::require_ready()?;
-                crate::control::connect_session(
+                let session = crate::control::connect_session(
                     &publication_endpoint,
                     &machine,
-                    Duration::from_secs(5),
+                    Duration::from_secs(15),
                     cancel,
-                )
+                );
+                #[cfg(target_os = "espidf")]
+                if let Err(error) = &session {
+                    log::warn!("Endpoint publication connection: {error}");
+                }
+                session
             })?;
             publish_sender
                 .try_send(publisher)
@@ -162,7 +174,8 @@ pub struct Runtime {
     enrollment: Context,
     registration: Receiver<Registration>,
     started: Instant,
-    assigned: bool,
+    /// When the coordinator assigned the local address.
+    assigned: Option<u64>,
     setup: Arc<Setup>,
     retry: Reconnect,
     reconnecting: bool,
@@ -194,7 +207,11 @@ impl Runtime {
             .as_secs();
         let timestamps = TimestampClock::open(store, unix).map_err(|e| e.to_string())?;
         let network = Network::new(&identity, timestamps, 64, 4).map_err(|e| e.to_string())?;
-        let udp = UdpTransport::bind("0.0.0.0:0".parse().unwrap()).map_err(|e| e.to_string())?;
+        let mut udp =
+            UdpTransport::bind("0.0.0.0:0".parse().unwrap()).map_err(|e| e.to_string())?;
+        if RELAY_ONLY.load(std::sync::atomic::Ordering::Relaxed) {
+            udp.mute();
+        }
         let started = Instant::now();
         let (sender, registration) = mpsc::sync_channel(1);
         let (publish_sender, publication) = mpsc::sync_channel(1);
@@ -225,7 +242,7 @@ impl Runtime {
             enrollment,
             registration,
             started,
-            assigned: false,
+            assigned: None,
             setup,
             retry: Reconnect::default(),
             reconnecting: false,
@@ -296,7 +313,7 @@ impl Runtime {
         if let Some((registration, publication)) = replacement {
             self.registration = registration;
             self.publication = publication;
-            self.assigned = false;
+            self.assigned = None;
         }
         match progress {
             Ok(ReconnectProgress::Active) => self.reconnecting = false,
@@ -374,12 +391,19 @@ impl Runtime {
                 }
                 if let Some(publisher) = &mut self.publisher {
                     if assigned.is_some() {
-                        self.assigned = true;
+                        let since = *self.assigned.get_or_insert(now);
                         let observed = network.observed_endpoints(now)?;
                         let local = self.local_address.endpoint(self.udp.local_addr()?.port());
                         let home = self.relays.home_region(network, now);
                         let snapshot = Snapshot::new(local, &observed)?.with_home_relay(home)?;
-                        match publisher.poll(snapshot, now)? {
+                        // Each publication costs a control connection, and
+                        // peers answer through the home relay: wait for it.
+                        let progress = if home.is_none() && now < since + HOME_WAIT_MS {
+                            PublicationProgress::Idle
+                        } else {
+                            publisher.poll(snapshot, now)?
+                        };
+                        match progress {
                             PublicationProgress::Rejected | PublicationProgress::Cancelled => {
                                 return Err(io::Error::new(
                                     io::ErrorKind::PermissionDenied,
@@ -397,7 +421,7 @@ impl Runtime {
                             }
                             _ => {}
                         }
-                    } else if self.assigned {
+                    } else if self.assigned.is_some() {
                         publisher.cancel();
                         return Err(io::Error::new(
                             io::ErrorKind::PermissionDenied,

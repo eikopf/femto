@@ -237,7 +237,15 @@ Release 0.1.3, installed through the on-device update, repeated the catalog test
 
 Joining after a restart logs one ESP-IDF task watchdog warning: back-to-back TLS handshakes for the coordinator and relay keep CPU 0 busy for longer than the watchdog period. The warning does not restart the reader, and joining completes.
 
-A relayed (DERP) path, HTTPS to a peer, node-key renewal and a session lasting hours were not tested on the device. While a session that had failed was still open, two firmware pushes over the USB console timed out, both exactly at a chunk boundary: the reader waited for a chunk that the host never sent. The likely cause is a log line from another thread breaking the acknowledgement apart, which was not reproduced. The reader now repeats an acknowledgement every second until its chunk begins to arrive; a push with three acknowledgements deliberately ignored completed.
+The relayed (DERP) path was tested with `femto relay`, which makes the reader discard direct datagrams other than STUN so that no direct path forms; the Tailscale client on the server then reported the reader as relayed. The catalog loaded through the relay, and the test led to three changes:
+
+- The home relay was the first region of the directory, New York from a reader in Europe. The reader now sends one STUN request to each region, 50 ms apart, and takes the region that answers fastest as its home; it waits for these measurements before setting up a home relay, and falls back to the first region when nothing answers. The tested reader chose Frankfurt or Paris.
+- The reader published its endpoints before its home relay was connected and then again with the home relay. Each publication opens a control connection, and a peer cannot answer through a relay until it knows the reader's home. The first publication now waits up to ten seconds for the home relay.
+- The control connection for a publication had five seconds to complete, which it missed while relay handshakes kept the processor busy. It now has fifteen.
+
+After these changes a relayed catalog request after a restart took 15, 26 and 16 seconds including joining, where it had taken 30 seconds or timed out; a direct one still takes 16 to 19 seconds. Two limits remain. A relayed 170 KiB feed takes 21 to 26 seconds against 4 to 5 seconds direct, whichever relay is used; reading several relay frames in one poll made it slower, and the cause is not known. And the first request after a restart shares its 30-second deadline with joining the tailnet, so it fails when joining is slow; choosing the entry again succeeds.
+
+HTTPS to a peer, node-key renewal, a direct path through address translation and a session lasting hours were not tested on the device. While a session that had failed was still open, two firmware pushes over the USB console timed out, both exactly at a chunk boundary: the reader waited for a chunk that the host never sent. The likely cause is a log line from another thread breaking the acknowledgement apart, which was not reproduced. The reader now repeats an acknowledgement every second until its chunk begins to arrive; a push with three acknowledgements deliberately ignored completed.
 
 ## Catalog tailnet routing
 

@@ -198,7 +198,7 @@ def main():
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--expect-page", type=int)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ["status", "reboot", "awake", *EVENTS]:
+    for name in ["status", "reboot", "awake", "relay", *EVENTS]:
         commands.add_parser(name)
     commands.add_parser("swipe").add_argument("direction", choices=["next", "prev", "up", "down"])
     commands.add_parser("type", help="enter text into the open keyboard field").add_argument("text")
@@ -243,7 +243,7 @@ def main():
             port.file_result(echo=False)
         elif args.command == "frame":
             frame(port, args.output, args.rotate)
-        elif args.command in ("reboot", "awake"):
+        elif args.command in ("reboot", "awake", "relay"):
             port.write(f"femto {args.command}\n".encode())
         else:
             commands = f"femto {args.command}\n"

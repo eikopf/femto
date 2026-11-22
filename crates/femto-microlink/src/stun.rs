@@ -1,7 +1,14 @@
 //! Bounded unauthenticated STUN observations; these never authorize a peer.
 use crate::protocol::stun::{binding_request, parse_binding_response};
 use std::{collections::BTreeMap, net::SocketAddrV4};
-const LIMIT: usize = 8;
+/// One server for each relay region of a directory.
+const LIMIT: usize = 32;
+/// Hints published to the coordinator.
+const ENDPOINTS: usize = 8;
+/// Between requests of a round.
+const SPACING_MS: u64 = 50;
+/// How long after its last request the first round's nearby answers are in.
+const GRACE_MS: u64 = 300;
 const TIMEOUT_MS: u64 = 5000;
 
 #[derive(Debug, thiserror::Error)]
@@ -26,15 +33,19 @@ struct Pending {
     started: u64,
     deadline: u64,
 }
-/// Periodic observations from at most eight authenticated-directory servers.
-/// Observed endpoints are unauthenticated hints, never peer authorization.
+/// Periodic observations from authenticated-directory servers, with their
+/// round-trip times. Observed endpoints are unauthenticated hints, never
+/// peer authorization.
 #[derive(Default)]
 pub struct EndpointDiscovery {
     transactions: Discovery,
     servers: Vec<SocketAddrV4>,
-    observations: BTreeMap<SocketAddrV4, (SocketAddrV4, u64)>,
+    /// Observed address, expiry and round-trip time for each server.
+    observations: BTreeMap<SocketAddrV4, (SocketAddrV4, u64, u64)>,
     cursor: usize,
     next_ms: u64,
+    /// When the first round sent its last request.
+    round_ms: Option<u64>,
 }
 impl EndpointDiscovery {
     pub fn clear(&mut self) {
@@ -43,6 +54,7 @@ impl EndpointDiscovery {
         self.observations.clear();
         self.cursor = 0;
         self.next_ms = 0;
+        self.round_ms = None;
     }
     pub fn configure(&mut self, servers: &[SocketAddrV4]) -> Result<(), Error> {
         if servers.len() > LIMIT {
@@ -71,10 +83,10 @@ impl EndpointDiscovery {
             return Err(error);
         }
         self.observations
-            .retain(|_, (_, deadline)| *deadline > now_ms);
+            .retain(|_, (_, deadline, _)| *deadline > now_ms);
         Ok(())
     }
-    /// One request per second within a round, then a 30-second pause.
+    /// Requests in quick succession within a round, then a 30-second pause.
     /// Failed socket sends consume the attempt and retry in a later round.
     pub fn request(&mut self, now_ms: u64) -> Result<Option<(SocketAddrV4, [u8; 40])>, Error> {
         self.maintain(now_ms)?;
@@ -83,12 +95,15 @@ impl EndpointDiscovery {
         }
         let next = (self.cursor + 1) % self.servers.len();
         let deadline = now_ms
-            .checked_add(if next == 0 { 30000 } else { 1000 })
+            .checked_add(if next == 0 { 30000 } else { SPACING_MS })
             .ok_or(Error::Clock)?;
         let server = self.servers[self.cursor];
         let packet = self.transactions.begin(server, now_ms)?;
         self.cursor = next;
         self.next_ms = deadline;
+        if next == 0 {
+            self.round_ms.get_or_insert(now_ms);
+        }
         Ok(Some((server, packet)))
     }
     pub fn receive(
@@ -100,8 +115,10 @@ impl EndpointDiscovery {
         self.maintain(now_ms)?;
         let deadline = now_ms.checked_add(60000).ok_or(Error::Clock)?;
         let observation = self.transactions.finish(server, bytes, now_ms)?;
-        self.observations
-            .insert(server, (observation.address, deadline));
+        self.observations.insert(
+            server,
+            (observation.address, deadline, observation.round_trip_ms),
+        );
         Ok(())
     }
     pub fn endpoints(&mut self, now_ms: u64) -> Result<Vec<SocketAddrV4>, Error> {
@@ -109,11 +126,26 @@ impl EndpointDiscovery {
         let mut endpoints: Vec<_> = self
             .observations
             .values()
-            .map(|(address, _)| *address)
+            .map(|(address, ..)| *address)
             .collect();
         endpoints.sort_unstable();
         endpoints.dedup();
+        endpoints.truncate(ENDPOINTS);
         Ok(endpoints)
+    }
+    /// Whether the servers nearby have had time to answer a first round, so
+    /// that [`Self::latencies`] can rank them. True without servers.
+    pub fn settled(&self, now_ms: u64) -> bool {
+        self.servers.is_empty()
+            || self
+                .round_ms
+                .is_some_and(|sent| now_ms >= sent.saturating_add(GRACE_MS))
+    }
+    /// Servers that answered, with their latest round-trip time.
+    pub fn latencies(&self) -> impl Iterator<Item = (SocketAddrV4, u64)> + '_ {
+        self.observations
+            .iter()
+            .map(|(server, (_, _, round_trip))| (*server, *round_trip))
     }
 }
 #[derive(Debug, PartialEq, Eq)]
@@ -271,18 +303,25 @@ mod tests {
         discovery.configure(&[server(), other]).unwrap();
         let (first, request) = discovery.request(0).unwrap().unwrap();
         assert_eq!(first, server());
-        assert!(discovery.request(999).unwrap().is_none());
+        assert!(discovery.request(49).unwrap().is_none());
+        assert!(!discovery.settled(49));
         discovery
-            .receive(server(), &response(&request), 999)
+            .receive(server(), &response(&request), 49)
             .unwrap();
-        assert_eq!(discovery.endpoints(999).unwrap().len(), 1);
+        assert_eq!(discovery.endpoints(49).unwrap().len(), 1);
         // Reordering an unchanged server set preserves the outstanding round.
         discovery.configure(&[other, server()]).unwrap();
-        let (second, request) = discovery.request(1000).unwrap().unwrap();
+        let (second, request) = discovery.request(50).unwrap().unwrap();
         assert_eq!(second, other);
-        discovery.receive(other, &response(&request), 1001).unwrap();
-        assert_eq!(discovery.endpoints(1001).unwrap().len(), 1);
-        assert!(discovery.request(30999).unwrap().is_none());
+        discovery.receive(other, &response(&request), 57).unwrap();
+        assert_eq!(discovery.endpoints(57).unwrap().len(), 1);
+        // The round is ranked once its nearby servers have had time to answer.
+        assert!(!discovery.settled(349));
+        assert!(discovery.settled(350));
+        let mut latencies: Vec<_> = discovery.latencies().collect();
+        latencies.sort_unstable();
+        assert_eq!(latencies, [(server(), 49), (other, 7)]);
+        assert!(discovery.request(30049).unwrap().is_none());
         let (_, request) = discovery.request(31000).unwrap().unwrap();
         discovery.configure(&[other]).unwrap();
         assert!(discovery.endpoints(31000).unwrap().is_empty());
@@ -297,7 +336,7 @@ mod tests {
             .unwrap();
         assert_eq!(discovery.endpoints(91000).unwrap().len(), 1);
         assert!(discovery.endpoints(91001).unwrap().is_empty());
-        assert!(discovery.configure(&[other; 9]).is_err());
+        assert!(discovery.configure(&[other; 33]).is_err());
         assert!(discovery.request(91000).is_err());
         assert!(discovery.endpoints(91001).unwrap().is_empty());
         assert!(discovery.request(91001).unwrap().is_none());
@@ -346,7 +385,7 @@ mod tests {
         bad[39] ^= 1;
         assert!(d.finish(server(), &bad, 0).is_err());
         assert!(d.finish(server(), &fingerprint, 0).is_ok());
-        for port in 1..=8 {
+        for port in 1..=32 {
             d.begin(SocketAddrV4::new(*server().ip(), port), 1).unwrap();
         }
         assert!(matches!(d.begin(server(), 1), Err(Error::Capacity)));

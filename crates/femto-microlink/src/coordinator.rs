@@ -314,15 +314,29 @@ impl Coordinator {
             .and_then(|route| route.relay_region);
         Ok(region.and_then(|id| self.relays.region(id)))
     }
+    /// The first acceptable home relay, trying the `preferred` regions in
+    /// their order before the others.
     pub(crate) fn home_relay_matching(
         &mut self,
         now_ms: u64,
+        preferred: &[u64],
         mut accept: impl FnMut(u64, &crate::relay::RelayNode) -> bool,
     ) -> Result<Option<(u64, crate::relay::RelayNode)>, MapError> {
         if self.local_address(now_ms)?.is_none() {
             return Ok(None);
         }
-        for id in self.relays.region_ids() {
+        let known = |id: &u64| self.relays.region(*id).is_some();
+        let others = self
+            .relays
+            .region_ids()
+            .filter(|id| !preferred.contains(id));
+        let order: Vec<u64> = preferred
+            .iter()
+            .copied()
+            .filter(known)
+            .chain(others)
+            .collect();
+        for id in order {
             let region = self
                 .relays
                 .region(id)
@@ -366,31 +380,32 @@ impl Coordinator {
         self.local_deadline = None;
         self.synchronized = false;
     }
+    /// One STUN server for each relay region, with the region.
     pub(crate) fn stun_servers(
         &mut self,
         now_ms: u64,
-    ) -> Result<Vec<std::net::SocketAddrV4>, MapError> {
+    ) -> Result<Vec<(u64, std::net::SocketAddrV4)>, MapError> {
         let mut servers = Vec::new();
         if self.local_address(now_ms)?.is_none() {
             return Ok(servers);
         }
         for id in self.relays.region_ids() {
-            for node in &self
+            let endpoint = self
                 .relays
                 .region(id)
                 .ok_or(MapError::Node("unknown relay region"))?
                 .nodes
-            {
-                if let (crate::relay::Address::Fixed(ip), Some(port)) = (&node.ipv4, node.stun_port)
-                {
-                    let endpoint = std::net::SocketAddrV4::new(*ip, port);
-                    if !servers.contains(&endpoint) {
-                        servers.push(endpoint);
+                .iter()
+                .find_map(|node| match (&node.ipv4, node.stun_port) {
+                    (crate::relay::Address::Fixed(ip), Some(port)) => {
+                        Some(std::net::SocketAddrV4::new(*ip, port))
                     }
-                    if servers.len() == 8 {
-                        return Ok(servers);
-                    }
-                }
+                    _ => None,
+                })
+                .filter(|endpoint| servers.iter().all(|(_, other)| other != endpoint));
+            servers.extend(endpoint.map(|endpoint| (id, endpoint)));
+            if servers.len() == 32 {
+                break;
             }
         }
         Ok(servers)

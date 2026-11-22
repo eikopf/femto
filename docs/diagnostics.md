@@ -17,6 +17,7 @@ The USB Serial/JTAG console accepts newline-terminated commands from a physicall
 | `femto power`, `femto swipe next`, `femto swipe prev` | Injects the power button or a swipe |
 | `femto swipe up`, `femto swipe down`, `femto hold` | Injects a reading gesture: a vertical swipe or a touch held in place |
 | `femto awake` | Suppresses automatic sleep until restart; deep sleep disconnects USB and needs the power button to wake. Automatic sleep is also suppressed while a USB host is connected |
+| `femto relay` | Makes tailnet sessions opened afterwards discard direct datagrams other than STUN until restart, so that peers are reached through relays only |
 | `femto reboot` | Restarts the application |
 | `femto update` | Installs the firmware package waiting on the card; see [Updates](picco-firmware.md#updates) |
 

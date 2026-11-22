@@ -39,7 +39,7 @@ Femto keeps its data in a `femto` directory on the SD card. Copy EPUB or plain-t
 
 ## Updating
 
-With Wi-Fi set up, choose Settings, Check for updates, then Download update when a newer release exists. Without Wi-Fi, copy a newer `femto-picco.bin` to the card as `update/firmware.bin`. Either way, Settings then shows Install update. The reader restarts into BOOX's recovery application, which installs the image and shows `Update complete`; tap Restart. Keep the reader charged or plugged in while it installs. [Updates](picco-firmware.md#updates) describes the mechanism.
+With Wi-Fi set up, choose Settings, Firmware update, Check for updates, then Download when a newer release exists; a bar shows the download's progress. Without Wi-Fi, copy a newer `femto-picco.bin` to the card as `update/firmware.bin`. Either way, Firmware update then offers Install and restart. The reader restarts into BOOX's recovery application, which installs the image and shows `Update complete`; tap Restart. Keep the reader charged or plugged in while it installs. [Updates](picco-firmware.md#updates) describes the mechanism.
 
 ## Returning to the stock firmware
 

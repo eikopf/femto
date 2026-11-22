@@ -13,11 +13,15 @@
 //! the card when its version is newer. Installing is a separate step.
 use esp_idf_svc::sys;
 use femto_catalog::http;
+use femto_reader::ui::{UpdateStep, UpdateView};
 use std::{
     fs,
     io::{Read, Write},
     path::Path,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
@@ -160,22 +164,38 @@ fn check() -> Result<Manifest, String> {
 /// Attempts that receive nothing before a download gives up.
 const STALLED_ATTEMPTS: u32 = 4;
 
+/// Counts the bytes that reach the card, for the progress bar.
+struct Counted<'a>(fs::File, &'a AtomicUsize);
+impl Write for Counted<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let written = self.0.write(bytes)?;
+        self.1.fetch_add(written, Ordering::Relaxed);
+        Ok(written)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
 /// Downloads the release image and publishes it as the waiting package only
 /// when it is the image the manifest describes. A broken connection resumes
 /// from the bytes already on the card; a download that gives up leaves them
-/// for the next try, and one that fails verification is deleted.
-fn download(manifest: &Manifest) -> Result<(), String> {
+/// for the next try, and one that fails verification is deleted. `received`
+/// follows the bytes on the card.
+fn download(manifest: &Manifest, received: &AtomicUsize) -> Result<(), String> {
     let partial = Path::new(PARTIAL);
     fs::create_dir_all(partial.parent().unwrap_or(partial)).map_err(|e| e.to_string())?;
     let held = || fs::metadata(partial).map_or(0, |metadata| metadata.len());
     let mut stalled = 0;
     while held() < manifest.bytes {
         let offset = held();
-        let mut file = fs::OpenOptions::new()
+        received.store(offset as usize, Ordering::Relaxed);
+        let file = fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(partial)
             .map_err(|e| e.to_string())?;
+        let mut file = Counted(file, received);
         let result = fetch(
             "femto-picco.bin",
             (manifest.bytes - offset) as usize,
@@ -183,7 +203,7 @@ fn download(manifest: &Manifest) -> Result<(), String> {
             600,
             &mut file,
         );
-        file.sync_all().map_err(|e| e.to_string())?;
+        file.0.sync_all().map_err(|e| e.to_string())?;
         drop(file);
         let Err(error) = result else { break };
         log::warn!("Update download stopped at {} bytes: {error}", held());
@@ -200,6 +220,7 @@ fn download(manifest: &Manifest) -> Result<(), String> {
             std::thread::sleep(Duration::from_secs(2));
         }
     }
+    received.store(manifest.bytes as usize, Ordering::Relaxed);
     let verified = (|| -> Result<(), String> {
         let digest =
             femto_reader::hashing::digest(fs::File::open(partial).map_err(|e| e.to_string())?)
@@ -227,7 +248,8 @@ enum Step {
     /// The latest release is not newer than the running application.
     Current,
     Available(Manifest),
-    Downloading(Manifest),
+    /// With the bytes on the card so far.
+    Downloading(Manifest, Arc<AtomicUsize>),
 }
 
 enum Job {
@@ -270,20 +292,52 @@ impl Updater {
         self.job.is_some()
     }
 
-    /// The label of the update row in the settings.
-    pub fn label(&self) -> String {
-        match (&self.waiting, &self.step) {
-            (_, Step::Checking) => "Checking for updates".into(),
-            (_, Step::Downloading(release)) => {
-                format!("Downloading update {}", short(&release.version))
+    /// The firmware update panel.
+    pub fn view(&self) -> UpdateView {
+        let megabytes = |bytes: u64| format!("{:.1}", bytes as f64 / 1e6);
+        let installed = || format!("Version {} is installed", short(&running()));
+        let (status, step) = match (&self.waiting, &self.step) {
+            (_, Step::Checking) => (
+                installed(),
+                UpdateStep::Working {
+                    label: "Checking for updates".into(),
+                    percent: None,
+                },
+            ),
+            (_, Step::Downloading(release, received)) => {
+                let received = (received.load(Ordering::Relaxed) as u64).min(release.bytes);
+                let label = if received == release.bytes {
+                    "Verifying the download".into()
+                } else {
+                    format!(
+                        "Downloaded {} of {} MB",
+                        megabytes(received),
+                        megabytes(release.bytes)
+                    )
+                };
+                (
+                    format!("Version {} is available", short(&release.version)),
+                    UpdateStep::Working {
+                        label,
+                        percent: Some((received * 100 / release.bytes.max(1)) as u8),
+                    },
+                )
             }
-            (Some(version), _) => format!("Install update {}", short(version)),
-            (None, Step::Available(release)) => {
-                format!("Download update {}", short(&release.version))
-            }
-            (None, Step::Current) => "Up to date; check again".into(),
-            (None, Step::Idle) => "Check for updates".into(),
-        }
+            (Some(version), _) => (
+                format!("Version {} is ready to install", short(version)),
+                UpdateStep::Action("Install and restart".into()),
+            ),
+            (None, Step::Available(release)) => (
+                format!("Version {} is available", short(&release.version)),
+                UpdateStep::Action(format!("Download {} MB", megabytes(release.bytes))),
+            ),
+            (None, Step::Current) => (
+                format!("Version {} is the latest", short(&running())),
+                UpdateStep::Action("Check again".into()),
+            ),
+            (None, Step::Idle) => (installed(), UpdateStep::Action("Check for updates".into())),
+        };
+        UpdateView { status, step }
     }
 
     /// A short note for the status row when an update can be had.
@@ -291,6 +345,7 @@ impl Updater {
         match (&self.waiting, &self.step) {
             (Some(version), _) => Some(format!("Update {} ready", short(version))),
             (None, Step::Available(release)) => Some(format!("Update {}", short(&release.version))),
+            (None, Step::Downloading(..)) => Some("Downloading update".into()),
             _ => None,
         }
     }
@@ -326,8 +381,12 @@ impl Updater {
         if let Step::Available(release) = &self.step {
             let release = release.clone();
             let task = release.clone();
-            self.job = Some(Job::Download(Self::spawn(move || download(&task))?));
-            self.step = Step::Downloading(release);
+            let received = Arc::new(AtomicUsize::new(0));
+            let counter = received.clone();
+            self.job = Some(Job::Download(Self::spawn(move || {
+                download(&task, &counter)
+            })?));
+            self.step = Step::Downloading(release, received);
             self.quiet = false;
         } else {
             self.check(false)?;
@@ -335,7 +394,7 @@ impl Updater {
         Ok(Activation::Started)
     }
 
-    /// Collects a finished job. Returns whether the labels changed and the
+    /// Collects a finished job. Returns whether the panel changed and the
     /// failure to show, if any.
     pub fn poll(&mut self) -> (bool, Option<String>) {
         if !self.job.as_ref().is_some_and(|job| match job {
@@ -365,7 +424,7 @@ impl Updater {
             log::warn!("Update: {error}");
             // A failed download can be tried again without another check.
             self.step = match std::mem::replace(&mut self.step, Step::Idle) {
-                Step::Downloading(release) => Step::Available(release),
+                Step::Downloading(release, _) => Step::Available(release),
                 _ => Step::Idle,
             };
             (!self.quiet).then_some(error)

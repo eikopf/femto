@@ -215,7 +215,8 @@ fn run() -> Result<(), String> {
     let mut updater = update::Updater::new();
     // One automatic check per start, once the network and clock allow it.
     let mut update_checked = false;
-    ui.set_update(Some(updater.label()));
+    let mut update_drawn = Instant::now();
+    ui.set_update(Some(updater.view()));
     let choose_book = !resumed && !library.entries.is_empty();
     ui.set_library(library);
     if screen.storage.is_some() {
@@ -324,7 +325,7 @@ fn run() -> Result<(), String> {
                 Command::Put { .. } | Command::List(_) | Command::Remove(_) => {
                     console.files(&command);
                     updater.rescan();
-                    ui.set_update(Some(updater.label()));
+                    ui.set_update(Some(updater.view()));
                     None
                 }
                 Command::Update => {
@@ -685,11 +686,19 @@ fn run() -> Result<(), String> {
             if let Err(error) = updater.check(true) {
                 log::warn!("Update check not started: {error}");
             }
-            ui.set_update(Some(updater.label()));
+            ui.set_update(Some(updater.view()));
         }
         let (update_changed, update_error) = updater.poll();
+        // A download redraws its progress every few seconds at most.
+        if updater.is_busy() && update_drawn.elapsed() >= Duration::from_secs(3) {
+            update_drawn = Instant::now();
+            if ui.set_update(Some(updater.view())) && ui.is_update_open() {
+                render(&mut reader, &ui, &mut plane)?;
+                screen.present(&plane)?;
+            }
+        }
         if update_changed {
-            ui.set_update(Some(updater.label()));
+            ui.set_update(Some(updater.view()));
             if let Some(error) = update_error {
                 ui.open();
                 ui.show_error(error);
@@ -704,7 +713,7 @@ fn run() -> Result<(), String> {
                 && match updater.activate() {
                     Ok(update::Activation::Install) => true,
                     Ok(update::Activation::Started) => {
-                        ui.set_update(Some(updater.label()));
+                        ui.set_update(Some(updater.view()));
                         render(&mut reader, &ui, &mut plane)?;
                         screen.present(&plane)?;
                         false
@@ -738,7 +747,8 @@ fn run() -> Result<(), String> {
                 String::new(),
                 "Installing the update.".into(),
                 "Keep the reader charged or plugged in.".into(),
-                "It restarts when it is done.".into(),
+                "When it says Update complete,".into(),
+                "tap Restart.".into(),
             ];
             let pixels = reader
                 .render_panel(&lines, levels)
@@ -748,7 +758,7 @@ fn run() -> Result<(), String> {
             let error = update::install();
             log::warn!("Update not started: {error}");
             updater.rescan();
-            ui.set_update(Some(updater.label()));
+            ui.set_update(Some(updater.view()));
             ui.open();
             ui.show_error(error);
             render(&mut reader, &ui, &mut plane)?;

@@ -2324,23 +2324,45 @@ fn deleting_a_book_requires_confirmation_and_spares_the_open_book() {
 }
 
 #[test]
-fn settings_offer_a_waiting_update_and_show_the_running_version() {
+fn update_panel_shows_status_and_acts_only_on_an_action() {
+    use femto_reader::ui::{UpdateStep, UpdateView};
     let mut reader = reader();
     let mut ui = ReaderUi::default();
     go(&mut ui, &mut reader, &["Settings"]);
-    assert!(ui.choose(&mut reader, "Install update").is_err());
+    assert!(ui.choose(&mut reader, "Firmware update").is_err());
     assert!(ui.choose(&mut reader, "Version").is_err());
     ui.set_firmware("femto-1");
-    ui.set_update(Some("Install update 2".into()));
+    let view = |step| UpdateView {
+        status: "Version 2 is available".into(),
+        step,
+    };
+    assert!(ui.set_update(Some(view(UpdateStep::Action("Download 7.1 MB".into())))));
     go(&mut ui, &mut reader, &["Settings", "Version femto-1"]);
+    ui.choose(&mut reader, "Firmware update").unwrap();
+    assert!(ui.is_update_open());
+    // The panel opens on its action; Select starts it.
+    ui.choose(&mut reader, "Version 2 is available").unwrap();
     assert!(!ui.take_update_request());
-    ui.choose(&mut reader, "Install update 2").unwrap();
+    ui.choose(&mut reader, "Download 7.1 MB").unwrap();
     assert!(ui.take_update_request());
     assert!(!ui.take_update_request());
+    // Work in progress is shown in the same row and cannot be activated.
+    let working = view(UpdateStep::Working {
+        label: "Downloaded 3.5 of 7.1 MB".into(),
+        percent: Some(49),
+    });
+    assert!(ui.set_update(Some(working.clone())));
+    assert!(!ui.set_update(Some(working)));
+    ui.choose(&mut reader, "Downloaded 3.5 of 7.1 MB").unwrap();
+    assert!(!ui.take_update_request());
+    ui.render(&mut reader, 2).unwrap();
     assert!(!reader.state.check_updates);
     ui.choose(&mut reader, "Check automatically").unwrap();
     assert!(reader.state.check_updates);
     assert!(!ui.take_update_request());
+    ui.back(&mut reader).unwrap();
+    assert!(!ui.is_update_open());
+    ui.choose(&mut reader, "Firmware update").unwrap();
 }
 
 #[test]

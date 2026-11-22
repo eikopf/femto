@@ -28,6 +28,7 @@ enum Panel {
     DeviceText(usize),
     Kosync,
     Tailnet,
+    Update,
     Contents,
     Chapters,
     Bookmarks,
@@ -79,6 +80,7 @@ impl Panel {
             Self::Chapters | Self::Links | Self::Clippings | Self::Kosync => Self::Book,
             Self::Device
             | Self::Tailnet
+            | Self::Update
             | Self::Power
             | Self::Rotation
             | Self::Refresh
@@ -306,7 +308,29 @@ enum Control {
     None,
     Submenu,
     Toggle(bool),
-    Slider { position: usize, positions: usize },
+    Slider {
+        position: usize,
+        positions: usize,
+    },
+    /// A bar filled to this percentage.
+    Progress(u8),
+}
+
+/// The firmware update panel, described by the frontend.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UpdateView {
+    /// What is known, for example "Version 1.2.0 is available".
+    pub status: String,
+    pub step: UpdateStep,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UpdateStep {
+    /// What activating the row does next, for example "Download 7.1 MB".
+    Action(String),
+    /// Work in progress, which activating the row does not disturb. A known
+    /// percentage is drawn as a bar.
+    Working { label: String, percent: Option<u8> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -399,7 +423,7 @@ pub struct ReaderUi {
     sleep_available: bool,
     sleep_request: bool,
     firmware: Option<String>,
-    update: Option<String>,
+    update: Option<UpdateView>,
     update_request: bool,
     font_families: Vec<String>,
     font_request: Option<Option<String>>,
@@ -980,6 +1004,13 @@ impl ReaderUi {
             Command::SwapPageButtons => Control::Toggle(state.swap_page_buttons),
             Command::SwapMenuButtons => Control::Toggle(state.swap_menu_buttons),
             Command::AutoUpdate => Control::Toggle(state.check_updates),
+            Command::Update => match self.update.as_ref().map(|view| &view.step) {
+                Some(UpdateStep::Working {
+                    percent: Some(percent),
+                    ..
+                }) => Control::Progress(*percent),
+                _ => Control::None,
+            },
             Command::Hinting => Control::Toggle(state.text_raster.hinting),
             Command::Fractional => Control::Toggle(state.text_raster.fractional),
             Command::DeviceRow(index) => match self.device_rows.get(index).map(|row| &row.kind) {
@@ -1058,11 +1089,16 @@ impl ReaderUi {
         let reflow = reader.begin_fonts(fonts, family)?;
         Ok(self.start_reflow(reflow))
     }
-    /// Shows the frontend's firmware update row with this label, for example
-    /// "Check for updates" or "Install update 1.2.0", and the setting for
-    /// automatic checks. Activating the row raises the update request.
-    pub fn set_update(&mut self, label: Option<String>) {
-        self.update = label;
+    /// Offers the firmware update panel with this content and the setting
+    /// for automatic checks. Activating its action raises the update request.
+    /// Returns whether the content changed.
+    pub fn set_update(&mut self, view: Option<UpdateView>) -> bool {
+        let changed = self.update != view;
+        self.update = view;
+        changed
+    }
+    pub fn is_update_open(&self) -> bool {
+        matches!(self.panel, Some(Panel::Update))
     }
     pub fn take_update_request(&mut self) -> bool {
         std::mem::take(&mut self.update_request)
@@ -1940,7 +1976,10 @@ impl ReaderUi {
                 Ok(Effect::Unchanged)
             }
             Command::Update => {
-                self.update_request = true;
+                self.update_request = matches!(
+                    self.update.as_ref().map(|view| &view.step),
+                    Some(UpdateStep::Action(_))
+                );
                 Ok(Effect::Unchanged)
             }
             Command::AutoUpdate => {
@@ -2017,7 +2056,8 @@ impl ReaderUi {
             }
             Command::Open(panel) => {
                 self.panel = Some(panel);
-                self.selected = 0;
+                // The update panel opens on its action, below the status.
+                self.selected = usize::from(panel == Panel::Update);
                 Ok(Effect::Redraw)
             }
             Command::Reader(Action::Link(index)) => {
@@ -2133,12 +2173,11 @@ impl ReaderUi {
             )
             .collect(),
             Panel::Settings => std::iter::empty()
-                .chain(self.update.iter().flat_map(|label| {
-                    [
-                        (label.clone(), Command::Update),
-                        ("Check automatically".into(), Command::AutoUpdate),
-                    ]
-                }))
+                .chain(
+                    self.update
+                        .is_some()
+                        .then(|| ("Firmware update".into(), Command::Open(Panel::Update))),
+                )
                 .chain(
                     self.device_available
                         .then(|| ("Network and services".into(), Command::DeviceOpen)),
@@ -2390,6 +2429,20 @@ impl ReaderUi {
                     .map(|row| (row.clone(), Command::Noop)),
             )
             .collect(),
+            Panel::Update => self
+                .update
+                .iter()
+                .flat_map(|view| {
+                    let step = match &view.step {
+                        UpdateStep::Action(label) | UpdateStep::Working { label, .. } => label,
+                    };
+                    [
+                        (view.status.clone(), Command::Noop),
+                        (step.clone(), Command::Update),
+                        ("Check automatically".into(), Command::AutoUpdate),
+                    ]
+                })
+                .collect(),
             Panel::Refresh => crate::state::FULL_REFRESH_INTERVALS
                 .into_iter()
                 .map(|interval| {
@@ -2874,6 +2927,7 @@ impl ReaderUi {
             Panel::Light => "Frontlight",
             Panel::Power => "Automatic sleep",
             Panel::Refresh => "Full refresh",
+            Panel::Update => "Firmware update",
             Panel::Library if self.library.truncated => "Library (incomplete)",
             Panel::Library => "Library",
             Panel::Books => "All books",
@@ -2941,8 +2995,8 @@ impl ReaderUi {
                 Control::None => (width, height),
                 Control::Submenu => (width - 48, height),
                 Control::Toggle(_) => (width - 96, height),
-                // The label sits above the slider track.
-                Control::Slider { .. } => (width, height * 11 / 20),
+                // The label sits above the slider track or the bar.
+                Control::Slider { .. } | Control::Progress(_) => (width, height * 11 / 20),
             };
             canvas.blit(
                 0,
@@ -2956,6 +3010,18 @@ impl ReaderUi {
                 Control::None => {}
                 Control::Submenu => canvas.chevron(width - 28, middle, true, ink),
                 Control::Toggle(on) => canvas.toggle(width - 20 - 56, middle - 14, on, ink),
+                Control::Progress(percent) => {
+                    let (y0, y1) = (top + height * 12 / 20, top + height * 16 / 20);
+                    let span = width - 40;
+                    canvas.frame(20, y0, span, y1 - y0, ink);
+                    canvas.fill(
+                        20,
+                        y0,
+                        span * usize::from(percent.min(100)) / 100,
+                        y1 - y0,
+                        ink,
+                    );
+                }
                 Control::Slider {
                     position,
                     positions,

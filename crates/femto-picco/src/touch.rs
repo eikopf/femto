@@ -5,9 +5,24 @@ pub const MAX_REPORT: usize = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Gesture {
-    Tap { x: u16, y: u16 },
+    Tap {
+        x: u16,
+        y: u16,
+    },
     Swipe(Turn),
+    /// A vertical swipe, upward or downward in view coordinates.
+    Slide {
+        up: bool,
+    },
+    /// A contact resting in place; reported while it is still down.
+    Hold {
+        x: u16,
+        y: u16,
+    },
 }
+
+/// A still contact becomes a hold after this long, in milliseconds.
+const HOLD_MS: u64 = 600;
 
 #[derive(Clone, Copy)]
 struct Contact {
@@ -44,6 +59,19 @@ impl Touch {
         {
             self.cancel();
         }
+    }
+
+    /// Reports a contact that has rested in place, once; lifting it then
+    /// produces no further gesture.
+    pub fn held(&mut self, now: u64) -> Option<Gesture> {
+        let contact = self
+            .contact
+            .filter(|c| !c.moved && now.saturating_sub(c.started) >= HOLD_MS)?;
+        self.cancel();
+        Some(Gesture::Hold {
+            x: contact.x,
+            y: contact.y,
+        })
     }
 
     pub fn cancel(&mut self) {
@@ -120,6 +148,8 @@ impl Touch {
                 } else {
                     Turn::Previous
                 }))
+            } else if dy.abs() >= 80 && dx.abs() <= 60 {
+                Some(Gesture::Slide { up: dy < 0 })
             } else if !c.moved {
                 Some(Gesture::Tap { x: c.x, y: c.y })
             } else {

@@ -15,6 +15,7 @@ The USB Serial/JTAG console accepts newline-terminated commands from a physicall
 | `femto put LEN CRC32 PATH` | Receives a file below `/sdcard/femto` |
 | `femto ls [PATH]`, `femto rm PATH` | Lists a directory (at most 256 entries) or removes a file below `/sdcard/femto` |
 | `femto power`, `femto swipe next`, `femto swipe prev` | Injects the power button or a swipe |
+| `femto swipe up`, `femto swipe down`, `femto hold` | Injects a reading gesture: a vertical swipe or a touch held in place |
 | `femto awake` | Suppresses automatic sleep until restart; deep sleep disconnects USB and needs the power button to wake. Automatic sleep is also suppressed while a USB host is connected |
 | `femto reboot` | Restarts the application |
 | `femto update` | Installs the firmware package waiting on the card; see [Updates](picco-firmware.md#updates) |

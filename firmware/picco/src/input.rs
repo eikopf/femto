@@ -29,6 +29,8 @@ pub enum Event {
     /// A page button, named for its turn in the lower-forward arrangement.
     Button(Turn),
     Swipe(Turn),
+    /// A reading gesture that is not a page turn.
+    Gesture(femto_reader::ui::Gesture),
     /// A turn that is already in reading direction.
     Turn(Turn),
     /// A menu entry named over the diagnostic console.
@@ -173,6 +175,9 @@ impl TouchDevice {
     }
     fn poll(&mut self, now: u64) -> Result<Option<Event>, String> {
         self.gestures.expire(now);
+        if self.gestures.held(now).is_some() {
+            return Ok(Some(Event::Gesture(femto_reader::ui::Gesture::Hold)));
+        }
         if !self.enabled || self.irq.is_high() {
             return Ok(None);
         }
@@ -188,6 +193,11 @@ impl TouchDevice {
             .map(|gesture| match gesture {
                 Gesture::Tap { x, y } => Event::Tap { x, y },
                 Gesture::Swipe(turn) => Event::Swipe(turn),
+                Gesture::Slide { up: true } => Event::Gesture(femto_reader::ui::Gesture::SwipeUp),
+                Gesture::Slide { up: false } => {
+                    Event::Gesture(femto_reader::ui::Gesture::SwipeDown)
+                }
+                Gesture::Hold { .. } => Event::Gesture(femto_reader::ui::Gesture::Hold),
             }))
     }
 }

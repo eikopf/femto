@@ -158,6 +158,62 @@ impl IdleSleep {
     }
 }
 
+/// What a touch gesture does while a page is shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GestureAction {
+    Nothing,
+    Brighter,
+    Dimmer,
+    Warmer,
+    Cooler,
+    /// Opens the frontlight controls; Back returns to the page.
+    Frontlight,
+    Bookmark,
+    Menu,
+}
+impl GestureAction {
+    pub const ALL: [Self; 8] = [
+        Self::Nothing,
+        Self::Brighter,
+        Self::Dimmer,
+        Self::Warmer,
+        Self::Cooler,
+        Self::Frontlight,
+        Self::Bookmark,
+        Self::Menu,
+    ];
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Nothing => "nothing",
+            Self::Brighter => "brighter",
+            Self::Dimmer => "dimmer",
+            Self::Warmer => "warmer",
+            Self::Cooler => "cooler",
+            Self::Frontlight => "frontlight",
+            Self::Bookmark => "bookmark",
+            Self::Menu => "menu",
+        }
+    }
+}
+
+/// The reading gestures that are not page turns, and their actions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Gestures {
+    pub swipe_up: GestureAction,
+    pub swipe_down: GestureAction,
+    pub hold: GestureAction,
+}
+impl Default for Gestures {
+    fn default() -> Self {
+        Self {
+            swipe_up: GestureAction::Brighter,
+            swipe_down: GestureAction::Dimmer,
+            hold: GestureAction::Frontlight,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Rotation {
@@ -192,6 +248,8 @@ pub struct ReaderState {
     pub idle_sleep: IdleSleep,
     #[serde(default)]
     pub rotation: Rotation,
+    #[serde(default)]
+    pub gestures: Gestures,
     /// Exchanges the directions of a device's two page buttons.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub swap_page_buttons: bool,
@@ -216,6 +274,7 @@ impl Default for ReaderState {
             frontlight: Default::default(),
             idle_sleep: IdleSleep::default(),
             rotation: Rotation::default(),
+            gestures: Gestures::default(),
             swap_page_buttons: false,
             swap_menu_buttons: false,
             full_refresh_interval: default_full_refresh_interval(),

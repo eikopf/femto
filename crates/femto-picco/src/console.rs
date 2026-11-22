@@ -19,6 +19,12 @@ pub enum Command {
     /// Suppress automatic sleep until restart, for unattended test sessions.
     Awake,
     Swipe(crate::input::Turn),
+    /// A vertical swipe on the reading page.
+    Slide {
+        up: bool,
+    },
+    /// A touch held in place on the reading page.
+    Hold,
     Tap {
         x: u16,
         y: u16,
@@ -64,6 +70,9 @@ fn parse(line: &str) -> Option<Command> {
         ("awake", "") => Command::Awake,
         ("swipe", "next") => Command::Swipe(crate::input::Turn::Next),
         ("swipe", "prev") => Command::Swipe(crate::input::Turn::Previous),
+        ("swipe", "up") => Command::Slide { up: true },
+        ("swipe", "down") => Command::Slide { up: false },
+        ("hold", "") => Command::Hold,
         ("frame", "") => Command::Frame,
         ("reboot", "") => Command::Reboot,
         ("update", "") => Command::Update,
@@ -213,6 +222,14 @@ mod tests {
             [Command::Type("http://host:80/a b".into())]
         );
         assert_eq!(
+            commands(b"femto swipe up\nfemto swipe down\nfemto hold\n"),
+            [
+                Command::Slide { up: true },
+                Command::Slide { up: false },
+                Command::Hold
+            ]
+        );
+        assert_eq!(
             commands(b"femto choose This book\n"),
             [Command::Choose("This book".into())]
         );
@@ -239,7 +256,7 @@ mod tests {
             "femto tap 1",
             "femto type",
             "femto swipe",
-            "femto swipe up",
+            "femto swipe left",
         ] {
             let mut line = rejected.as_bytes().to_vec();
             line.push(b'\n');

@@ -192,6 +192,7 @@ fn run() -> Result<(), String> {
     ui.set_tailnet_available(true);
     ui.set_rotation_available(true);
     ui.set_page_buttons_available(true);
+    ui.set_gestures_available(true);
     ui.set_refresh_available(true);
     ui.set_device_available(true);
     ui.set_device_status(&format!(
@@ -287,6 +288,12 @@ fn run() -> Result<(), String> {
                     None
                 }
                 Command::Swipe(turn) => Some(input::Event::Swipe(turn)),
+                Command::Slide { up } => Some(input::Event::Gesture(if up {
+                    femto_reader::ui::Gesture::SwipeUp
+                } else {
+                    femto_reader::ui::Gesture::SwipeDown
+                })),
+                Command::Hold => Some(input::Event::Gesture(femto_reader::ui::Gesture::Hold)),
                 Command::Tap { x, y } => Some(input::Event::Tap { x, y }),
                 Command::Type(text) => {
                     for character in text.chars() {
@@ -355,6 +362,7 @@ fn run() -> Result<(), String> {
                     ui.turn(&mut reader, next)
                 }
                 input::Event::Swipe(turn) => ui.swipe(&mut reader, turn == Turn::Next),
+                input::Event::Gesture(gesture) => ui.gesture(&mut reader, gesture),
                 input::Event::Turn(turn) => ui.turn(&mut reader, turn == Turn::Next),
                 input::Event::Tap { x, y } => ui.tap(&mut reader, x.into(), y.into()),
                 input::Event::Choose => ui.choose(&mut reader, &chosen),
@@ -438,6 +446,19 @@ fn run() -> Result<(), String> {
             // Input that arrived during the last panel update is handled
             // before drawing again, so typing and repeated turns are not
             // held up by one refresh per event.
+            // A light step from a reading gesture changes no pixels.
+            if effect != Effect::Redraw && ui.take_light_request() {
+                let light = reader.state.frontlight;
+                log::info!(
+                    "Light: brightness {} warmth {}",
+                    light.brightness,
+                    light.warmth
+                );
+                if let Err(error) = screen.set_light(light.brightness, light.warmth) {
+                    log::warn!("{error}");
+                    reader.state.frontlight = previous_light;
+                }
+            }
             dirty |= effect == Effect::Redraw;
             if dirty {
                 carry = screen.event();

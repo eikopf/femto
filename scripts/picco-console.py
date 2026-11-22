@@ -12,7 +12,7 @@ import tty
 import zlib
 
 CHUNK_BYTES = 2048
-EVENTS = ["next", "prev", "select", "back", "power"]
+EVENTS = ["next", "prev", "select", "back", "power", "hold"]
 
 
 class Port:
@@ -188,7 +188,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ["status", "reboot", "awake", *EVENTS]:
         commands.add_parser(name)
-    commands.add_parser("swipe").add_argument("direction", choices=["next", "prev"])
+    commands.add_parser("swipe").add_argument("direction", choices=["next", "prev", "up", "down"])
     commands.add_parser("type", help="enter text into the open keyboard field").add_argument("text")
     commands.add_parser("choose", help="activate the menu entry whose label starts with the text").add_argument("text")
     tap = commands.add_parser("tap", help="tap at reader-view coordinates")

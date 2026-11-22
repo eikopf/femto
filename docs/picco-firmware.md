@@ -36,6 +36,18 @@ Reports are bounded to 128 bytes and checked for length consistency, duplicate I
 
 The shared reader handles page boundaries and monochrome rasterization. The firmware maps each page into the panel's native plane and keeps the display handle alive. It tries one reset and full-refresh recovery if an update fails; a second failure stops the reading loop and logs the error. Free heap is logged every ten seconds while the loop runs. The fallback specimen uses bounded in-memory TXT input with the same content hash and paragraph handling as filesystem TXT.
 
+## Reading gestures
+
+Besides taps and horizontal page-turn swipes, the touch decoder reports a vertical swipe (at least 80 px along the view's vertical axis with at most 60 px sideways) and a hold (a contact that has not moved more than 20 px for 600 ms, reported while it is still down; its lift produces nothing). On a reading page each performs a configurable action; menus ignore them.
+
+| Gesture | Default |
+| --- | --- |
+| Swipe up | Brighter |
+| Swipe down | Dimmer |
+| Touch and hold | Frontlight controls |
+
+Settings, Gestures lists the three; activating a row selects the next action of nothing, brighter, dimmer, warmer, cooler, frontlight, bookmark and menu. Light steps change the frontlight by one level without redrawing the page. Frontlight controls opened by a gesture return to the page on Back. The assignments are saved with the reading state. Console injection of all three was checked on the tested Picco; recognition of real touches is covered by host tests only.
+
 ## Frontlight
 
 The Frontlight menu selects brightness from 0 (off) through 10 and warmth from 0 (cool) through 9 (warm). The driver uses exact discrete entries from the FreeInk Picco table. It does not interpolate percentage brightness. Settings default to off, load at startup, and persist with reading state when menus close. Older state files use the off default.

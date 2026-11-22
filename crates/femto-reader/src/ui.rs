@@ -18,6 +18,7 @@ enum Panel {
     /// Tools for the open book that are used less often than the root rows.
     Book,
     Fonts,
+    Gestures,
     Rotation,
     Catalog,
     CatalogSearch,
@@ -85,6 +86,7 @@ impl Panel {
             | Self::Remote => Self::Settings,
             Self::DeviceText(_) => Self::Device,
             Self::Fonts => Self::Typography,
+            Self::Gestures => Self::Settings,
             Self::CatalogSearch => Self::Catalog,
             Self::Books | Self::Recent | Self::Folders | Self::Search | Self::Errors => {
                 Self::Library
@@ -115,6 +117,7 @@ enum Command {
     Sleep,
     Update,
     Font(Option<usize>),
+    CycleGesture(Gesture),
     Rotation(crate::state::Rotation),
     IdleSleep(crate::state::IdleSleep),
     FullRefresh(u8),
@@ -155,6 +158,23 @@ enum Command {
     Set(Setting, usize),
     SwapPageButtons,
     SwapMenuButtons,
+}
+
+/// A touch gesture on the reading page that is not a page turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gesture {
+    SwipeUp,
+    SwipeDown,
+    Hold,
+}
+impl Gesture {
+    fn action(self, gestures: &mut crate::state::Gestures) -> &mut crate::state::GestureAction {
+        match self {
+            Self::SwipeUp => &mut gestures.swipe_up,
+            Self::SwipeDown => &mut gestures.swipe_down,
+            Self::Hold => &mut gestures.hold,
+        }
+    }
 }
 
 /// A setting with a short ordered list of values, drawn as a stepped slider.
@@ -382,7 +402,10 @@ pub struct ReaderUi {
     update_request: bool,
     font_families: Vec<String>,
     font_request: Option<Option<String>>,
+    /// The panel was opened from the page by a gesture; Back returns there.
+    shortcut: bool,
     page_buttons_available: bool,
+    gestures_available: bool,
     refresh_available: bool,
     query: String,
     scan_root: Option<(PathBuf, usize)>,
@@ -750,6 +773,11 @@ impl ReaderUi {
     }
     /// Shows the current panel's parent with the row that led here selected.
     fn leave(&mut self) {
+        if std::mem::take(&mut self.shortcut) {
+            self.panel = None;
+            self.error = None;
+            return;
+        }
         self.panel = self.panel.and_then(Panel::parent);
         self.selected = self
             .remembered
@@ -835,6 +863,10 @@ impl ReaderUi {
     pub fn set_refresh_available(&mut self, available: bool) {
         self.refresh_available = available;
     }
+    /// Offers the settings for reading gestures on a touch screen.
+    pub fn set_gestures_available(&mut self, available: bool) {
+        self.gestures_available = available;
+    }
     /// Offers the setting that exchanges the two page buttons.
     pub fn set_page_buttons_available(&mut self, available: bool) {
         self.page_buttons_available = available;
@@ -883,6 +915,42 @@ impl ReaderUi {
         }
         self.selected = target * items;
         Ok(Effect::Redraw)
+    }
+    /// Performs the configured action of a reading gesture. Menus ignore it.
+    /// Frontlight steps change no pixels, so they request the light only.
+    pub fn gesture(&mut self, reader: &mut Reader, gesture: Gesture) -> Result<Effect> {
+        use crate::state::GestureAction::*;
+        if self.is_busy() || self.panel.is_some() {
+            return Ok(Effect::Unchanged);
+        }
+        let action = *gesture.action(&mut reader.state.gestures);
+        let light = &mut reader.state.frontlight;
+        let (level, limit, up) = match action {
+            Nothing => return Ok(Effect::Unchanged),
+            Brighter => (&mut light.brightness, 10, true),
+            Dimmer => (&mut light.brightness, 10, false),
+            Warmer => (&mut light.warmth, 9, true),
+            Cooler => (&mut light.warmth, 9, false),
+            Frontlight => {
+                self.open();
+                self.panel = Some(Panel::Light);
+                self.shortcut = true;
+                return Ok(Effect::Redraw);
+            }
+            Bookmark => return self.navigate(reader, Action::ToggleBookmark),
+            Menu => {
+                self.open();
+                return Ok(Effect::Redraw);
+            }
+        };
+        let next = if up {
+            (*level + 1).min(limit)
+        } else {
+            level.saturating_sub(1)
+        };
+        self.light_request |= next != *level;
+        *level = next;
+        Ok(Effect::Unchanged)
     }
     /// The image left on an e-paper panel while the device sleeps.
     pub fn render_sleep(&self, reader: &Reader, levels: u16) -> Result<Vec<u8>> {
@@ -1368,6 +1436,7 @@ impl ReaderUi {
         self.clipping_delete = None;
         self.preview = None;
         self.remembered.clear();
+        self.shortcut = false;
         self.panel = Some(Panel::Root);
         self.selected = 0;
         self.error = None;
@@ -1870,6 +1939,14 @@ impl ReaderUi {
                 self.update_request = true;
                 Ok(Effect::Unchanged)
             }
+            Command::CycleGesture(gesture) => {
+                use crate::state::GestureAction;
+                let action = gesture.action(&mut reader.state.gestures);
+                let index = GestureAction::ALL.iter().position(|known| known == action);
+                *action =
+                    GestureAction::ALL[index.map_or(0, |i| (i + 1) % GestureAction::ALL.len())];
+                Ok(Effect::Redraw)
+            }
             Command::Font(choice) => {
                 let family = choice.and_then(|index| self.font_families.get(index).cloned());
                 if family != reader.state.font_family {
@@ -2076,6 +2153,10 @@ impl ReaderUi {
                 .chain(
                     (!self.dictionary_choices.is_empty())
                         .then(|| ("Dictionary".into(), Command::Open(Panel::DictionaryChooser))),
+                )
+                .chain(
+                    self.gestures_available
+                        .then(|| ("Gestures".into(), Command::Open(Panel::Gestures))),
                 )
                 .chain(std::iter::once((
                     "Remote buttons".into(),
@@ -2554,6 +2635,18 @@ impl ReaderUi {
                     Command::Set(Setting::Brightness, 0),
                 )))
                 .collect(),
+            Panel::Gestures => [
+                ("Swipe up", Gesture::SwipeUp),
+                ("Swipe down", Gesture::SwipeDown),
+                ("Touch and hold", Gesture::Hold),
+            ]
+            .into_iter()
+            .map(|(label, gesture)| {
+                let mut gestures = reader.state.gestures;
+                let action = gesture.action(&mut gestures).label();
+                (format!("{label}: {action}"), Command::CycleGesture(gesture))
+            })
+            .collect(),
             Panel::Fonts => {
                 let current = reader.state.font_family.as_deref();
                 let row = |name: &str, chosen: bool, choice| {
@@ -2767,6 +2860,7 @@ impl ReaderUi {
             Panel::LinkPreview => "Link preview",
             Panel::Typography => "Typography",
             Panel::Fonts => "Font",
+            Panel::Gestures => "Gestures while reading",
             Panel::Remote => "Remote buttons",
             Panel::Light => "Frontlight",
             Panel::Power => "Automatic sleep",

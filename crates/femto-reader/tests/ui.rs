@@ -2373,3 +2373,57 @@ fn font_menu_requests_a_family_and_adopts_it_after_reflow() {
     ui.choose(&mut reader, "Default").unwrap();
     assert_eq!(ui.take_font_request(), Some(None));
 }
+
+#[test]
+fn reading_gestures_step_the_light_open_its_panel_and_are_configurable() {
+    use femto_reader::{state::GestureAction, ui::Gesture};
+    let mut reader = reader();
+    let mut ui = ReaderUi::default();
+    reader.state.frontlight.brightness = 9;
+    // Light steps leave the page alone and stop at the ends of the range.
+    for expected in [10, 10] {
+        assert_eq!(
+            ui.gesture(&mut reader, Gesture::SwipeUp).unwrap(),
+            Effect::Unchanged
+        );
+        assert_eq!(reader.state.frontlight.brightness, expected);
+    }
+    assert!(ui.take_light_request());
+    ui.gesture(&mut reader, Gesture::SwipeUp).unwrap();
+    assert!(!ui.take_light_request());
+    ui.gesture(&mut reader, Gesture::SwipeDown).unwrap();
+    assert_eq!(reader.state.frontlight.brightness, 9);
+    assert!(ui.take_light_request());
+
+    // Hold opens the frontlight controls; Back returns straight to the page.
+    assert_eq!(
+        ui.gesture(&mut reader, Gesture::Hold).unwrap(),
+        Effect::Redraw
+    );
+    assert!(ui.is_open());
+    // Menus ignore reading gestures.
+    ui.gesture(&mut reader, Gesture::SwipeDown).unwrap();
+    assert_eq!(reader.state.frontlight.brightness, 9);
+    ui.choose(&mut reader, "Turn off").unwrap();
+    assert_eq!(reader.state.frontlight.brightness, 0);
+    ui.back(&mut reader).unwrap();
+    assert!(!ui.is_open());
+
+    // Each activation selects the next action.
+    ui.set_gestures_available(true);
+    go(&mut ui, &mut reader, &["Settings", "Gestures"]);
+    ui.choose(&mut reader, "Touch and hold: frontlight")
+        .unwrap();
+    ui.choose(&mut reader, "Touch and hold: bookmark").unwrap();
+    assert_eq!(reader.state.gestures.hold, GestureAction::Menu);
+    ui.choose(&mut reader, "Touch and hold: menu").unwrap();
+    ui.choose(&mut reader, "Touch and hold: nothing").unwrap();
+    assert_eq!(reader.state.gestures.hold, GestureAction::Brighter);
+    ui.choose(&mut reader, "Swipe up: brighter").unwrap();
+    assert_eq!(reader.state.gestures.swipe_up, GestureAction::Dimmer);
+    // The frontlight panel reached through the menu returns to the menu.
+    ui.open();
+    ui.choose(&mut reader, "Frontlight").unwrap();
+    ui.back(&mut reader).unwrap();
+    assert!(ui.is_open());
+}

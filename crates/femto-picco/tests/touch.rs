@@ -150,3 +150,37 @@ fn orientation_changes_discard_the_contact_until_release() {
         Some(Gesture::Tap { x: 199, y: 380 })
     );
 }
+
+#[test]
+fn vertical_swipes_and_resting_contacts_are_reading_gestures() {
+    let mut touch = Touch::default();
+    // Raw coordinates grow toward the top of the portrait view.
+    touch.report(&report(&[(0, 1, 200, 300)]), 10);
+    touch.report(&report(&[(0, 2, 210, 500)]), 100);
+    assert_eq!(
+        touch.report(&report(&[]), 150),
+        Some(Gesture::Slide { up: true })
+    );
+    touch.report(&report(&[(0, 1, 200, 500)]), 200);
+    touch.report(&report(&[(0, 2, 200, 300)]), 300);
+    assert_eq!(
+        touch.report(&report(&[]), 350),
+        Some(Gesture::Slide { up: false })
+    );
+    // A diagonal drag is neither swipe.
+    touch.report(&report(&[(0, 1, 100, 300)]), 400);
+    touch.report(&report(&[(0, 2, 300, 500)]), 500);
+    assert_eq!(touch.report(&report(&[]), 550), None);
+
+    // A still contact is reported once while down, and its lift is silent.
+    touch.report(&report(&[(0, 1, 400, 600)]), 1000);
+    assert_eq!(touch.held(1599), None);
+    assert_eq!(touch.held(1600), Some(Gesture::Hold { x: 80, y: 200 }));
+    assert_eq!(touch.held(1700), None);
+    assert_eq!(touch.report(&report(&[(0, 2, 400, 600)]), 1750), None);
+    assert_eq!(touch.report(&report(&[]), 1800), None);
+    // A contact that moved is not a hold.
+    touch.report(&report(&[(0, 1, 400, 600)]), 2000);
+    touch.report(&report(&[(0, 2, 400, 500)]), 2100);
+    assert_eq!(touch.held(2700), None);
+}

@@ -1108,7 +1108,23 @@ impl<S: EpochStore> Network<S> {
                 ..
             } => {
                 if self.incoming.len() >= INCOMING {
-                    return Err(Error::Capacity);
+                    // Nothing consumes a packet that no open flow or bound
+                    // socket claims, such as a late segment of a closed
+                    // connection; left queued, eight of them block all input.
+                    let unclaimed = self.incoming.iter().position(|(peer, packet, port)| {
+                        match (packet.tcp_endpoints(), port) {
+                            (Some((remote, local)), _) => !self
+                                .tcp_connections
+                                .values()
+                                .any(|flow| flow.claims(peer, remote, local)),
+                            (None, Some(port)) => !self.udp_bindings.is_bound(*port),
+                            (None, None) => true,
+                        }
+                    });
+                    let Some(index) = unclaimed else {
+                        return Err(Error::Capacity);
+                    };
+                    self.incoming.remove(index);
                 }
                 let port = packet.udp_destination()?;
                 self.arm_keepalive(peer, now_ms)?;
@@ -2794,7 +2810,7 @@ mod tests {
         deliver(&mut na, &mut nb, ak, ea, 1);
         deliver(&mut nb, &mut na, bk, eb, 2);
         deliver(&mut na, &mut nb, ak, ea, 3);
-        for index in 0..=INCOMING {
+        for _ in 0..=INCOMING {
             na.send_ip(bk, &udp(), 4).unwrap();
             let mut wire = None;
             na.flush_one(4, |_, _, bytes| {
@@ -2803,11 +2819,8 @@ mod tests {
             })
             .unwrap();
             let result = nb.receive(Source::Relay(ak), &wire.unwrap(), 4);
-            if index < INCOMING {
-                result.unwrap();
-            } else {
-                assert!(matches!(result, Err(Error::Capacity)));
-            }
+            // Nothing has bound the port, so a full queue sheds its oldest packet.
+            result.unwrap();
         }
         assert_eq!(nb.incoming.len(), INCOMING);
         for _ in 0..INCOMING {

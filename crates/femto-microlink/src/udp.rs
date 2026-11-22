@@ -47,6 +47,9 @@ impl Bindings {
         self.ports.insert(self.next, port);
         Ok(Socket(self.next))
     }
+    pub fn is_bound(&self, port: u16) -> bool {
+        self.ports.values().any(|bound| *bound == port)
+    }
     pub fn port(&self, socket: Socket) -> Result<u16, Error> {
         self.ports.get(&socket.0).copied().ok_or(Error::Closed)
     }

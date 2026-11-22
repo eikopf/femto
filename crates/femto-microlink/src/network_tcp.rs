@@ -13,6 +13,12 @@ pub(super) struct Connection {
     reply_lease: Option<Arc<()>>,
     reply_armed: bool,
 }
+impl Connection {
+    /// Whether an incoming segment between these endpoints belongs to this flow.
+    pub(super) fn claims(&self, peer: &Key, remote: SocketAddrV4, local: SocketAddrV4) -> bool {
+        self.peer == *peer && self.remote == remote && self.local == local
+    }
+}
 pub(super) fn matches(connections: &BTreeMap<u64, Connection>, socket: &Socket) -> bool {
     connections
         .get(&socket.id)
@@ -132,7 +138,13 @@ impl<S: EpochStore> Network<S> {
         if !matches(&self.tcp_connections, socket) {
             return Err(crate::tcp::Error::State.into());
         }
-        self.tcp_connections.remove(&socket.id);
+        if let Some(flow) = self.tcp_connections.remove(&socket.id) {
+            self.incoming.retain(|(peer, packet, _)| {
+                packet
+                    .tcp_endpoints()
+                    .is_none_or(|(remote, local)| !flow.claims(peer, remote, local))
+            });
+        }
         self.outgoing.retain(|p| {
             p.tcp_socket
                 .as_ref()

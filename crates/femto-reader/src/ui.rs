@@ -17,6 +17,7 @@ enum Panel {
     Root,
     /// Tools for the open book that are used less often than the root rows.
     Book,
+    Fonts,
     Rotation,
     Catalog,
     CatalogSearch,
@@ -83,6 +84,7 @@ impl Panel {
             | Self::DictionaryChooser
             | Self::Remote => Self::Settings,
             Self::DeviceText(_) => Self::Device,
+            Self::Fonts => Self::Typography,
             Self::CatalogSearch => Self::Catalog,
             Self::Books | Self::Recent | Self::Folders | Self::Search | Self::Errors => {
                 Self::Library
@@ -112,6 +114,7 @@ enum Command {
     Tailnet(TailnetEvent),
     Sleep,
     Update,
+    Font(Option<usize>),
     Rotation(crate::state::Rotation),
     IdleSleep(crate::state::IdleSleep),
     FullRefresh(u8),
@@ -377,6 +380,8 @@ pub struct ReaderUi {
     firmware: Option<String>,
     update: Option<String>,
     update_request: bool,
+    font_families: Vec<String>,
+    font_request: Option<Option<String>>,
     page_buttons_available: bool,
     refresh_available: bool,
     query: String,
@@ -956,6 +961,32 @@ impl ReaderUi {
     /// Shows the running firmware version in the settings.
     pub fn set_firmware(&mut self, version: &str) {
         self.firmware = Some(version.into());
+    }
+    /// Offers font families to choose besides the frontend's default.
+    pub fn set_font_families(&mut self, families: Vec<String>) {
+        self.font_families = families;
+    }
+    /// The family chosen in the menu, for the frontend to load and pass to
+    /// [`Self::set_fonts`]; none is the default family.
+    pub fn take_font_request(&mut self) -> Option<Option<String>> {
+        self.font_request.take()
+    }
+    /// Lays the book out in other fonts and adopts them when that finishes.
+    pub fn set_fonts(
+        &mut self,
+        reader: &Reader,
+        fonts: crate::layout::Fonts,
+        family: Option<String>,
+    ) -> Result<Effect> {
+        if self.is_navigating()
+            || self.is_reflowing()
+            || self.is_opening()
+            || self.is_preview_opening()
+        {
+            return Ok(Effect::Unchanged);
+        }
+        let reflow = reader.begin_fonts(fonts, family)?;
+        Ok(self.start_reflow(reflow))
     }
     /// Offers installing a firmware update of the given version.
     pub fn set_update(&mut self, version: Option<String>) {
@@ -1839,6 +1870,13 @@ impl ReaderUi {
                 self.update_request = true;
                 Ok(Effect::Unchanged)
             }
+            Command::Font(choice) => {
+                let family = choice.and_then(|index| self.font_families.get(index).cloned());
+                if family != reader.state.font_family {
+                    self.font_request = Some(family);
+                }
+                Ok(Effect::Unchanged)
+            }
             Command::SwapMenuButtons => {
                 reader.state.swap_menu_buttons = !reader.state.swap_menu_buttons;
                 Ok(Effect::Redraw)
@@ -2516,25 +2554,45 @@ impl ReaderUi {
                     Command::Set(Setting::Brightness, 0),
                 )))
                 .collect(),
-            Panel::Typography => [
-                Setting::TextSize,
-                Setting::LineSpacing,
-                Setting::Margin,
-                Setting::Stroke,
-                Setting::Coverage,
-            ]
-            .into_iter()
-            .map(|setting| (setting.label(&reader.state), Command::Step(setting)))
-            .chain([
-                (
-                    format!("Hyphenation: {}", reader.state.layout.hyphenation.label()),
-                    Command::Hyphenation,
-                ),
-                ("Font hinting".into(), Command::Hinting),
-                ("Fractional positions".into(), Command::Fractional),
-                ("Reset book typography".into(), Command::ResetTypography),
-            ])
-            .collect(),
+            Panel::Fonts => {
+                let current = reader.state.font_family.as_deref();
+                let row = |name: &str, chosen: bool, choice| {
+                    let marker = if chosen { "> " } else { "" };
+                    (format!("{marker}{name}"), Command::Font(choice))
+                };
+                std::iter::once(row("Default", current.is_none(), None))
+                    .chain(self.font_families.iter().enumerate().map(|(index, name)| {
+                        row(name, current == Some(name.as_str()), Some(index))
+                    }))
+                    .collect()
+            }
+            Panel::Typography => (!self.font_families.is_empty())
+                .then(|| {
+                    let name = reader.state.font_family.as_deref().unwrap_or("Default");
+                    (format!("Font: {name}"), Command::Open(Panel::Fonts))
+                })
+                .into_iter()
+                .chain(
+                    [
+                        Setting::TextSize,
+                        Setting::LineSpacing,
+                        Setting::Margin,
+                        Setting::Stroke,
+                        Setting::Coverage,
+                    ]
+                    .into_iter()
+                    .map(|setting| (setting.label(&reader.state), Command::Step(setting))),
+                )
+                .chain([
+                    (
+                        format!("Hyphenation: {}", reader.state.layout.hyphenation.label()),
+                        Command::Hyphenation,
+                    ),
+                    ("Font hinting".into(), Command::Hinting),
+                    ("Fractional positions".into(), Command::Fractional),
+                    ("Reset book typography".into(), Command::ResetTypography),
+                ])
+                .collect(),
         }
     }
     fn render_keyboard(&self, reader: &Reader, levels: u16) -> Result<Vec<u8>> {
@@ -2708,6 +2766,7 @@ impl ReaderUi {
             Panel::Links => "Page links",
             Panel::LinkPreview => "Link preview",
             Panel::Typography => "Typography",
+            Panel::Fonts => "Font",
             Panel::Remote => "Remote buttons",
             Panel::Light => "Frontlight",
             Panel::Power => "Automatic sleep",

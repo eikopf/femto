@@ -81,30 +81,6 @@ fn run() -> Result<(), String> {
         services::import_from_card();
     }
     report_heap("peripherals");
-    // Libron, embedded unmodified under the SIL Open Font License; see fonts/.
-    let default_fonts = || -> femto_reader::Result<Fonts> {
-        let face = |bytes: &[u8]| Font::from_bytes(bytes.to_vec());
-        let mut fonts = Fonts::new(face(include_bytes!("../fonts/Libron-Regular.ttf"))?);
-        fonts.bold = Some(face(include_bytes!("../fonts/Libron-Bold.ttf"))?);
-        fonts.italic = Some(face(include_bytes!("../fonts/Libron-Italic.ttf"))?);
-        fonts.bold_italic = Some(face(include_bytes!("../fonts/Libron-BoldItalic.ttf"))?);
-        Ok(fonts)
-    };
-    let fonts = if screen.storage.is_some() {
-        let loaded = femto_reader::fontset::load(
-            std::path::Path::new("/sdcard/femto/fonts"),
-            default_fonts,
-            4 * 1024 * 1024,
-        )
-        .map_err(|e| e.to_string())?;
-        for warning in &loaded.warnings {
-            log::warn!("Font: {warning}");
-        }
-        log::info!("Loaded {} bytes of SD font data", loaded.bytes);
-        loaded.fonts
-    } else {
-        default_fonts().map_err(|e| e.to_string())?
-    };
     let mut candidates = Vec::new();
     let mut journal = None;
     let mut state = ReaderState::default();
@@ -117,6 +93,7 @@ fn run() -> Result<(), String> {
             Err(error) => log::error!("State unavailable; saving disabled: {error}"),
         }
     }
+    let fonts = load_fonts(screen.storage.is_some(), state.font_family.as_deref())?;
     // Device geometry is fixed even if a state file came from a host viewport.
     let (width, height) = orientation(state.rotation).dimensions();
     state.layout.width = width as u32;
@@ -224,6 +201,9 @@ fn run() -> Result<(), String> {
     ));
     ui.set_sleep_available(journal.is_some());
     ui.set_firmware(&update::running());
+    if screen.storage.is_some() {
+        ui.set_font_families(femto_reader::fontset::families(std::path::Path::new(FONTS)));
+    }
     ui.set_update(update::waiting());
     let choose_book = !resumed && !library.entries.is_empty();
     ui.set_library(library);
@@ -277,7 +257,7 @@ fn run() -> Result<(), String> {
             console.poll()
         };
         let mut chosen = String::new();
-    let mut update_now = false;
+        let mut update_now = false;
         let diagnostic_event = command.and_then(|command| {
             use femto_picco_board::console::Command;
             // Typed text may be a credential.
@@ -392,6 +372,16 @@ fn run() -> Result<(), String> {
             if let Some(rotation) = ui.take_rotation_request() {
                 if let Err(error) = ui.rotate(&reader, rotation) {
                     ui.show_error(error.to_string());
+                }
+                effect = Effect::Redraw;
+            }
+            if let Some(family) = ui.take_font_request() {
+                let started = load_fonts(true, family.as_deref()).and_then(|fonts| {
+                    ui.set_fonts(&reader, fonts, family)
+                        .map_err(|e| e.to_string())
+                });
+                if let Err(error) = started {
+                    ui.show_error(error);
                 }
                 effect = Effect::Redraw;
             }
@@ -764,6 +754,37 @@ fn run() -> Result<(), String> {
             heap_report = Instant::now();
         }
     }
+}
+
+const FONTS: &str = "/sdcard/femto/fonts";
+
+/// The chosen card family, or the card's own `regular.ttf` family, over the
+/// embedded Libron, with the card's fallback faces.
+fn load_fonts(card: bool, family: Option<&str>) -> Result<Fonts, String> {
+    // Libron, embedded unmodified under the SIL Open Font License; see fonts/.
+    let default_fonts = || -> femto_reader::Result<Fonts> {
+        let face = |bytes: &[u8]| Font::from_bytes(bytes.to_vec());
+        let mut fonts = Fonts::new(face(include_bytes!("../fonts/Libron-Regular.ttf"))?);
+        fonts.bold = Some(face(include_bytes!("../fonts/Libron-Bold.ttf"))?);
+        fonts.italic = Some(face(include_bytes!("../fonts/Libron-Italic.ttf"))?);
+        fonts.bold_italic = Some(face(include_bytes!("../fonts/Libron-BoldItalic.ttf"))?);
+        Ok(fonts)
+    };
+    if !card {
+        return default_fonts().map_err(|e| e.to_string());
+    }
+    let loaded = femto_reader::fontset::load(
+        std::path::Path::new(FONTS),
+        family,
+        default_fonts,
+        4 * 1024 * 1024,
+    )
+    .map_err(|e| e.to_string())?;
+    for warning in &loaded.warnings {
+        log::warn!("Font: {warning}");
+    }
+    log::info!("Loaded {} bytes of SD font data", loaded.bytes);
+    Ok(loaded.fonts)
 }
 
 fn startup_reader(

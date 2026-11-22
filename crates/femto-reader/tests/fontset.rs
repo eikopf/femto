@@ -15,7 +15,7 @@ fn default_font() -> femto_reader::Result<Fonts> {
 #[test]
 fn default_family_is_used_whole_unless_the_directory_has_a_regular_face() {
     let root = tempfile::tempdir().unwrap();
-    let absent = fontset::load(&root.path().join("missing"), default_font, 0).unwrap();
+    let absent = fontset::load(&root.path().join("missing"), None, default_font, 0).unwrap();
     assert_eq!(absent.bytes, 0);
     assert!(absent.warnings.is_empty());
     assert!(absent.fonts.bold.is_some());
@@ -24,7 +24,7 @@ fn default_family_is_used_whole_unless_the_directory_has_a_regular_face() {
     fs::write(root.path().join("regular.ttf"), b"invalid").unwrap();
     fs::write(root.path().join("italic.ttf"), SERIF).unwrap();
     fs::write(root.path().join("fallback1.ttf"), SANS).unwrap();
-    let loaded = fontset::load(root.path(), default_font, SANS.len() as u64).unwrap();
+    let loaded = fontset::load(root.path(), None, default_font, SANS.len() as u64).unwrap();
     assert_eq!(loaded.warnings.len(), 1);
     assert!(loaded.fonts.bold.is_some());
     assert!(loaded.fonts.italic.is_none());
@@ -33,7 +33,7 @@ fn default_family_is_used_whole_unless_the_directory_has_a_regular_face() {
     // A usable regular face replaces the whole family; invalid styles are isolated.
     fs::write(root.path().join("regular.ttf"), SERIF).unwrap();
     fs::create_dir(root.path().join("bold.ttf")).unwrap();
-    let loaded = fontset::load(root.path(), default_font, 2 * SERIF.len() as u64).unwrap();
+    let loaded = fontset::load(root.path(), None, default_font, 2 * SERIF.len() as u64).unwrap();
     assert_eq!(loaded.warnings.len(), 2);
     assert!(loaded.fonts.bold.is_none());
     assert!(loaded.fonts.italic.is_some());
@@ -47,7 +47,7 @@ fn aggregate_limit_is_enforced_and_failed_face_does_not_consume_budget() {
     fs::write(root.path().join("bold.ttf"), SANS).unwrap();
     fs::write(root.path().join("italic.ttf"), SERIF).unwrap();
     fs::write(root.path().join("fallback1.ttf"), SERIF).unwrap();
-    let loaded = fontset::load(root.path(), default_font, 2 * SERIF.len() as u64).unwrap();
+    let loaded = fontset::load(root.path(), None, default_font, 2 * SERIF.len() as u64).unwrap();
     assert!(SANS.len() > SERIF.len());
     // The oversized bold face is skipped and leaves its budget to the italic.
     assert_eq!(loaded.bytes, 2 * SERIF.len() as u64);
@@ -67,6 +67,7 @@ fn loaded_style_and_fallback_faces_reach_shaping_and_rasterization() {
     let expected = (SERIF.len() * 4 + SANS.len()) as u64;
     let loaded = fontset::load(
         root.path(),
+        None,
         || panic!("valid regular face must skip default"),
         expected,
     )
@@ -105,4 +106,30 @@ fn loaded_style_and_fallback_faces_reach_shaping_and_rasterization() {
             .iter()
             .any(|pixel| *pixel < 128)
     );
+}
+
+#[test]
+fn named_families_load_from_subdirectories_and_share_the_fallbacks() {
+    let root = tempfile::tempdir().unwrap();
+    for family in ["Sans", "Serif", "Empty"] {
+        fs::create_dir(root.path().join(family)).unwrap();
+    }
+    fs::write(root.path().join("Sans/regular.ttf"), SANS).unwrap();
+    fs::write(root.path().join("Serif/regular.ttf"), SERIF).unwrap();
+    fs::write(root.path().join("Serif/italic.ttf"), SERIF).unwrap();
+    fs::write(root.path().join("fallback1.ttf"), SANS).unwrap();
+    assert_eq!(fontset::families(root.path()), ["Sans", "Serif"]);
+    assert!(fontset::families(&root.path().join("missing")).is_empty());
+    let limit = 4 * SANS.len() as u64;
+    let serif = fontset::load(root.path(), Some("Serif"), default_font, limit).unwrap();
+    assert!(serif.warnings.is_empty());
+    assert!(serif.fonts.italic.is_some() && serif.fonts.bold.is_none());
+    assert_eq!(serif.fonts.fallback.len(), 1);
+    let sans = fontset::load(root.path(), Some("Sans"), default_font, limit).unwrap();
+    assert_eq!(serif.bytes, (2 * SERIF.len() + SANS.len()) as u64);
+    assert_eq!(sans.bytes, 2 * SANS.len() as u64);
+    // A family without a regular face leaves the default in place.
+    let empty = fontset::load(root.path(), Some("Empty"), default_font, limit).unwrap();
+    assert_eq!(empty.bytes, SANS.len() as u64);
+    assert!(empty.fonts.bold.is_some());
 }

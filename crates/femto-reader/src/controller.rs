@@ -146,6 +146,8 @@ pub struct Reflowing {
     next_rotation: crate::state::Rotation,
     previous_raster: crate::display::TextRaster,
     next_raster: crate::display::TextRaster,
+    /// Replacement fonts and the family name saved with them.
+    fonts: Option<(Fonts, Option<String>)>,
 }
 
 pub struct Navigating {
@@ -583,10 +585,22 @@ impl Reader {
     }
 
     pub fn begin_reflow(&self, next: LayoutConfig) -> Result<Reflowing> {
+        self.reflow_with(next, None)
+    }
+    /// Prepares replacing the fonts; the page stays in the old ones until
+    /// the chapter is laid out in the new ones.
+    pub fn begin_fonts(&self, fonts: Fonts, family: Option<String>) -> Result<Reflowing> {
+        self.reflow_with(self.state.layout, Some((fonts, family)))
+    }
+    fn reflow_with(
+        &self,
+        next: LayoutConfig,
+        fonts: Option<(Fonts, Option<String>)>,
+    ) -> Result<Reflowing> {
         Ok(Reflowing {
             indexer: chapter_indexer(
                 self.index_store.as_ref(),
-                &self.fonts,
+                fonts.as_ref().map_or(&self.fonts, |(fonts, _)| fonts),
                 &self.document.metadata.id,
                 self.pagination.chapter(),
                 next,
@@ -600,6 +614,7 @@ impl Reader {
             next_rotation: self.state.rotation,
             previous_raster: self.state.text_raster,
             next_raster: self.state.text_raster,
+            fonts,
         })
     }
     /// Prepares layout and raster changes as one cancellable transition.
@@ -842,7 +857,8 @@ impl Reader {
     }
     pub fn step_reflow(&self, job: &mut Reflowing) -> Result<bool> {
         self.check_reflow(job)?;
-        job.indexer.step(&self.fonts)
+        let fonts = job.fonts.as_ref().map_or(&self.fonts, |(fonts, _)| fonts);
+        job.indexer.step(fonts)
     }
     pub fn finish_reflow(&mut self, job: Reflowing) -> Result<Effect> {
         self.check_reflow(&job)?;
@@ -850,7 +866,7 @@ impl Reader {
         let position = normalize_position(&pagination, job.position);
         rasterize_display(
             pagination.page(),
-            &self.fonts,
+            job.fonts.as_ref().map_or(&self.fonts, |(fonts, _)| fonts),
             job.next,
             job.next_raster,
             256,
@@ -862,6 +878,14 @@ impl Reader {
         self.state.layout = job.next;
         self.state.text_raster = job.next_raster;
         self.state.rotation = job.next_rotation;
+        if let Some((fonts, family)) = job.fonts {
+            // Everything rendered or indexed ahead used the old fonts.
+            self.fonts = fonts;
+            self.state.font_family = family;
+            self.frames.clear();
+            self.cells.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            self.ahead = None;
+        }
         Ok(Effect::Redraw)
     }
 

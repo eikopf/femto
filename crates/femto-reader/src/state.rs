@@ -180,6 +180,9 @@ pub struct ReaderState {
     pub dictionary_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_bindings: Option<crate::remote::SavedBindings>,
+    /// The chosen font family; none selects the frontend's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<String>,
     pub layout: LayoutConfig,
     #[serde(default)]
     pub text_raster: crate::display::TextRaster,
@@ -207,6 +210,7 @@ impl Default for ReaderState {
             version: STATE_VERSION,
             dictionary_name: None,
             remote_bindings: None,
+            font_family: None,
             layout: LayoutConfig::default(),
             text_raster: Default::default(),
             frontlight: Default::default(),

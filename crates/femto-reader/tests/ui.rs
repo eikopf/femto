@@ -2338,3 +2338,38 @@ fn settings_offer_a_waiting_update_and_show_the_running_version() {
     assert!(ui.take_update_request());
     assert!(!ui.take_update_request());
 }
+
+#[test]
+fn font_menu_requests_a_family_and_adopts_it_after_reflow() {
+    use femto_reader::layout::{Font, Fonts};
+    let sans = || {
+        Fonts::new(
+            Font::from_bytes(include_bytes!("../../../tests/fixtures/DejaVuSans.ttf").to_vec())
+                .unwrap(),
+        )
+    };
+    let mut reader = reader();
+    let mut ui = ReaderUi::default();
+    go(&mut ui, &mut reader, &["Typography"]);
+    assert!(ui.choose(&mut reader, "Font:").is_err());
+    ui.set_font_families(vec!["Sans".into(), "Slab".into()]);
+    go(&mut ui, &mut reader, &["Typography", "Font: Default"]);
+    // The current family is not requested again.
+    ui.choose(&mut reader, "> Default").unwrap();
+    assert_eq!(ui.take_font_request(), None);
+    ui.choose(&mut reader, "Sans").unwrap();
+    assert_eq!(ui.take_font_request(), Some(Some("Sans".into())));
+    let position = reader.position();
+    let before = ui.render(&mut reader, 2).unwrap();
+    ui.set_fonts(&reader, sans(), Some("Sans".into())).unwrap();
+    assert_eq!(reader.state.font_family, None);
+    finish_reflow(&mut ui, &mut reader);
+    assert_eq!(reader.state.font_family.as_deref(), Some("Sans"));
+    assert_eq!(reader.position(), position);
+    // The menu stays on the chooser and is redrawn in the new face.
+    assert_ne!(ui.render(&mut reader, 2).unwrap(), before);
+    ui.choose(&mut reader, "> Sans").unwrap();
+    assert_eq!(ui.take_font_request(), None);
+    ui.choose(&mut reader, "Default").unwrap();
+    assert_eq!(ui.take_font_request(), Some(None));
+}

@@ -21,6 +21,7 @@ fn oversized_line_reports_an_error_instead_of_crossing_page_bounds() {
         font_size: 32.0,
         line_height: 1.0,
         hyphenation: Default::default(),
+        footer: 0,
     };
     config.validate().unwrap();
     assert!(matches!(
@@ -47,6 +48,7 @@ fn tight_lines_contain_accents_descenders_and_shaping_offsets() {
         font_size: 24.0,
         line_height: 1.0,
         hyphenation: Default::default(),
+        footer: 0,
     };
     let pages = paginate(&document.chapter(0).unwrap(), &fonts, config).unwrap();
     assert!(pages.pages.len() > 1);

@@ -202,6 +202,7 @@ fn run() -> Result<(), String> {
     ui.set_gestures_available(true);
     ui.set_refresh_available(true);
     ui.set_device_available(true);
+    ui.set_battery(screen.battery().and_then(|sample| sample.percentage));
     ui.set_device_status(&format!(
         "{} | {}",
         battery_label(screen.battery()),
@@ -376,6 +377,7 @@ fn run() -> Result<(), String> {
         }
         if let Some(event) = event {
             idle.activity(idle_epoch.elapsed().as_millis().min(u64::MAX as u128) as u64);
+            ui.set_battery(screen.battery().and_then(|sample| sample.percentage));
             ui.set_device_status(&format!(
                 "{} | {}{}",
                 battery_label(screen.battery()),
@@ -839,7 +841,7 @@ fn run() -> Result<(), String> {
                 ui.release_dictionary();
                 let levels = if cfg!(feature = "grayscale") { 4 } else { 2 };
                 let pixels = ui
-                    .render_sleep(&reader, levels)
+                    .render_sleep(&mut reader, levels)
                     .map_err(|e| format!("Sleep screen failed: {e}"))?;
                 pack_pixels(&pixels, reader.state.rotation, &mut plane)?;
                 screen.present_clean(&plane)?;

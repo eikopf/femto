@@ -98,6 +98,7 @@ fn reader_navigates_beyond_the_eager_chapter_cache_limit() {
         font_size: 24.0,
         line_height: 1.35,
         hyphenation: Default::default(),
+        footer: 0,
     };
     let chapter = document.chapter(0).unwrap();
     assert!(paginate(&chapter, &fonts, config).is_err());

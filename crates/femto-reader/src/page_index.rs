@@ -46,6 +46,7 @@ impl IndexStore {
             config.width,
             config.height,
             config.margin,
+            config.footer,
             config.font_size.to_bits(),
             config.line_height.to_bits(),
             config.hyphenation as u32,

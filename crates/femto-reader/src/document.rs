@@ -535,6 +535,32 @@ impl Document {
         Some((fraction * 100.0).floor().clamp(0.0, 99.0) as u8)
     }
 
+    /// The chapter that holds the given share of the book, and the share of
+    /// that chapter that lies before it: the inverse of the estimate above.
+    pub(crate) fn position_at(&self, percent: u8) -> Option<(usize, f64)> {
+        let weights = self.progress_weights.as_ref()?;
+        if weights.len() != self.metadata.chapters.len() {
+            return None;
+        }
+        let total = weights
+            .iter()
+            .try_fold(0u64, |sum, weight| sum.checked_add(*weight))?;
+        let wanted = total as f64 * f64::from(percent.min(100)) / 100.0;
+        let mut before = 0.0;
+        for (chapter, weight) in weights.iter().enumerate() {
+            let weight = *weight as f64;
+            if weight > 0.0 && wanted < before + weight {
+                return Some((chapter, (wanted - before) / weight));
+            }
+            before += weight;
+        }
+        // The end of the book is the end of its last chapter with content.
+        weights
+            .iter()
+            .rposition(|weight| *weight > 0)
+            .map(|chapter| (chapter, 1.0))
+    }
+
     pub fn chapter(&mut self, index: usize) -> Result<Chapter> {
         self.chapter_with_sources(index, false)
             .map(|(chapter, _)| chapter)
@@ -1072,6 +1098,19 @@ impl Document {
         }
     }
 
+    /// The encoded cover image, if the book names one within the size cap.
+    pub fn cover(&mut self) -> Option<Vec<u8>> {
+        let Source::Epub(book) = &mut self.source else {
+            return None;
+        };
+        let mut options = epub_stream::book::CoverImageOptions::default();
+        options.image.max_bytes = image::MAX_ENCODED_BYTES;
+        let mut bytes = Vec::new();
+        book.read_cover_image_into_with_options(&mut bytes, options)
+            .ok()?
+            .map(|_| bytes)
+    }
+
     /// Reads an archive resource with an explicit size cap. Network URLs and
     /// host filesystem paths are never fetched through document resources.
     pub fn resource(&mut self, href: &str) -> Result<Vec<u8>> {
@@ -1317,6 +1356,10 @@ mod hashed_file_tests {
         assert_eq!(doc.estimated_progress(0, 2, 2), Some(10));
         assert_eq!(doc.estimated_progress(1, 1, 2), Some(55));
         assert_eq!(doc.estimated_progress(1, 2, 2), Some(100));
+        assert_eq!(doc.position_at(0), Some((0, 0.0)));
+        assert_eq!(doc.position_at(5), Some((0, 0.5)));
+        assert_eq!(doc.position_at(10), Some((1, 0.0)));
+        assert_eq!(doc.position_at(100), Some((1, 1.0)));
         assert_eq!(doc.estimated_progress(2, 1, 1), None);
         assert_eq!(doc.estimated_progress(0, 1, 0), None);
         assert_eq!(doc.estimated_progress(0, 3, 2), None);

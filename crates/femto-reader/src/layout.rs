@@ -97,6 +97,11 @@ pub struct LayoutConfig {
     pub line_height: f32,
     #[serde(default)]
     pub hyphenation: Hyphenation,
+    /// Rows at the bottom that book content leaves free, for a status line.
+    /// They overlap the bottom margin, so a margin at least as deep is
+    /// unchanged by them.
+    #[serde(default)]
+    pub footer: u32,
 }
 
 impl Default for LayoutConfig {
@@ -108,11 +113,16 @@ impl Default for LayoutConfig {
             font_size: 24.0,
             line_height: 1.35,
             hyphenation: Hyphenation::Book,
+            footer: 0,
         }
     }
 }
 
 impl LayoutConfig {
+    /// The rows below book content: the margin, or the footer if deeper.
+    fn below(&self) -> u32 {
+        self.margin.max(self.footer)
+    }
     pub fn validate(&self) -> Result<()> {
         if self.width > 2048 || self.height > 2048 || self.width < 80 || self.height < 80 {
             return Err(Error::Layout("viewport must be between 80 and 2048 pixels"));
@@ -128,9 +138,13 @@ impl LayoutConfig {
             .margin
             .checked_mul(2)
             .ok_or(Error::Layout("margin overflow"))?;
+        let vertical = self
+            .margin
+            .checked_add(self.below())
+            .ok_or(Error::Layout("margin overflow"))?;
         if margin >= self.width
-            || margin >= self.height
-            || ((self.height - margin) as f32) < self.font_size * self.line_height * 3.0
+            || vertical >= self.height
+            || ((self.height - vertical) as f32) < self.font_size * self.line_height * 3.0
         {
             return Err(Error::Layout("margins leave insufficient reading area"));
         }
@@ -554,7 +568,7 @@ pub(crate) fn paginate_step_with_context(
         return Err(Error::Limit("fallback fonts"));
     }
     let available = (config.width - 2 * config.margin) as f32;
-    let bottom = (config.height - config.margin) as f32;
+    let bottom = (config.height - config.below()) as f32;
     let mut warnings = chapter.warnings.clone();
     let emitted = std::cell::Cell::new(0);
     let mut missing = 0;
@@ -638,7 +652,7 @@ pub(crate) fn paginate_step_with_context(
                         height: 1,
                     }),
                     config.width - 2 * config.margin,
-                    config.height - 2 * config.margin,
+                    config.height - config.margin - config.below(),
                 )?
                 else {
                     continue;

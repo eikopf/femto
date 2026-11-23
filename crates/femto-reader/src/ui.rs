@@ -31,6 +31,7 @@ enum Panel {
     Update,
     Contents,
     Chapters,
+    GoTo,
     Bookmarks,
     Clippings,
     Clipping(usize),
@@ -77,7 +78,9 @@ impl Panel {
             | Self::Typography
             | Self::Settings
             | Self::LinkPreview => Self::Root,
-            Self::Chapters | Self::Links | Self::Clippings | Self::Kosync => Self::Book,
+            Self::Chapters | Self::GoTo | Self::Links | Self::Clippings | Self::Kosync => {
+                Self::Book
+            }
             Self::Device
             | Self::Tailnet
             | Self::Update
@@ -160,6 +163,7 @@ enum Command {
     /// Choose a value of a stepped setting by position.
     Set(Setting, usize),
     SwapPageButtons,
+    StatusLine,
     SwapMenuButtons,
 }
 
@@ -179,6 +183,32 @@ impl Gesture {
         }
     }
 }
+
+/// The book's cover reduced to fit the screen and centered on white. A cover
+/// smaller than the screen keeps its size.
+fn sleep_cover(reader: &mut Reader, levels: u16) -> Option<Vec<u8>> {
+    let (width, height) = (reader.state.layout.width, reader.state.layout.height);
+    let cover = crate::image::decode(&reader.document.cover()?).ok()?;
+    let size = cover.size.fit(width, height).ok()?;
+    let cover = cover.resize(size).ok()?;
+    let mut pixels = vec![255; (width * height) as usize];
+    let (left, top) = ((width - size.width) / 2, (height - size.height) / 2);
+    for (row, source) in cover.pixels.chunks_exact(size.width as usize).enumerate() {
+        let start = ((top + row as u32) * width + left) as usize;
+        pixels[start..start + source.len()].copy_from_slice(source);
+    }
+    crate::image::quantize(&mut pixels, width, levels).ok()?;
+    Some(pixels)
+}
+
+/// The places the Go to list offers are this many percent of the book apart.
+const GO_TO_STEP: usize = 5;
+
+/// Rows at the bottom of the reading page that the text leaves to the status
+/// line, and the lowest of them that hold its ink. The rest keep it apart
+/// from the last line of text.
+const STATUS_ROWS: u32 = 32;
+const STATUS_INK_ROWS: u32 = 22;
 
 /// A setting with a short ordered list of values, drawn as a stepped slider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -417,6 +447,7 @@ pub struct ReaderUi {
     selected: usize,
     error: Option<String>,
     device_status: Option<String>,
+    battery: Option<u8>,
     library: Library,
     folders: Vec<PathBuf>,
     light_request: bool,
@@ -982,7 +1013,12 @@ impl ReaderUi {
         Ok(Effect::Unchanged)
     }
     /// The image left on an e-paper panel while the device sleeps.
-    pub fn render_sleep(&self, reader: &Reader, levels: u16) -> Result<Vec<u8>> {
+    /// The page shown while asleep: the book's cover, or its title, author
+    /// and progress when it has no cover that can be shown.
+    pub fn render_sleep(&self, reader: &mut Reader, levels: u16) -> Result<Vec<u8>> {
+        if let Some(pixels) = sleep_cover(reader, levels) {
+            return Ok(pixels);
+        }
         let metadata = &reader.document.metadata;
         let clip = |text: &str| text.graphemes(true).take(120).collect::<String>();
         let mut lines = vec![String::new(), clip(&metadata.title)];
@@ -1006,6 +1042,7 @@ impl ReaderUi {
                 positions: setting.positions(),
             },
             Command::SwapPageButtons => Control::Toggle(state.swap_page_buttons),
+            Command::StatusLine => Control::Toggle(state.layout.footer != 0),
             Command::SwapMenuButtons => Control::Toggle(state.swap_menu_buttons),
             Command::AutoUpdate => Control::Toggle(state.check_updates),
             Command::Update => match self.update.as_ref().map(|view| &view.step) {
@@ -1109,6 +1146,10 @@ impl ReaderUi {
     }
 
     /// Updates a read-only root-menu status row without requesting a panel refresh.
+    /// The battery charge shown in the reading page's status line.
+    pub fn set_battery(&mut self, percent: Option<u8>) {
+        self.battery = percent.map(|percent| percent.min(100));
+    }
     pub fn set_device_status(&mut self, status: &str) {
         self.device_status = Some(
             status
@@ -2013,6 +2054,14 @@ impl ReaderUi {
                 reader.state.swap_page_buttons = !reader.state.swap_page_buttons;
                 Ok(Effect::Redraw)
             }
+            Command::StatusLine => {
+                if self.is_navigating() || self.is_reflowing() || self.is_opening() {
+                    return Ok(Effect::Unchanged);
+                }
+                let mut next = reader.state.layout;
+                next.footer = if next.footer == 0 { STATUS_ROWS } else { 0 };
+                Ok(self.start_reflow(reader.begin_reflow(next)?))
+            }
             Command::Find => Ok(self.submit_search()),
             Command::Step(setting) => {
                 // Advance to the next value that the layout accepts, wrapping.
@@ -2060,8 +2109,15 @@ impl ReaderUi {
             }
             Command::Open(panel) => {
                 self.panel = Some(panel);
-                // The update panel opens on its action, below the status.
-                self.selected = usize::from(panel == Panel::Update);
+                self.selected = match panel {
+                    // The update panel opens on its action, below the status.
+                    Panel::Update => 1,
+                    // The list of places opens on the one being read.
+                    Panel::GoTo => reader
+                        .book_progress_percent()
+                        .map_or(0, |percent| usize::from(percent.min(99)) / GO_TO_STEP),
+                    _ => 0,
+                };
                 Ok(Effect::Redraw)
             }
             Command::Reader(Action::Link(index)) => {
@@ -2166,6 +2222,7 @@ impl ReaderUi {
             .collect(),
             Panel::Book => [
                 ("Chapters".into(), Command::Open(Panel::Chapters)),
+                ("Go to".into(), Command::Open(Panel::GoTo)),
                 ("Links on this page".into(), Command::Open(Panel::Links)),
                 ("Return from jump".into(), Command::Reader(Action::Back)),
                 ("Clippings".into(), Command::Open(Panel::Clippings)),
@@ -2210,6 +2267,7 @@ impl ReaderUi {
                     self.gestures_available
                         .then(|| ("Gestures".into(), Command::Open(Panel::Gestures))),
                 )
+                .chain(std::iter::once(("Status line".into(), Command::StatusLine)))
                 .chain(std::iter::once((
                     "Remote buttons".into(),
                     Command::Open(Panel::Remote),
@@ -2659,6 +2717,15 @@ impl ReaderUi {
                 .enumerate()
                 .map(|(i, c)| (c.title.clone(), Command::Reader(Action::Contents(i))))
                 .collect(),
+            Panel::GoTo => (0..100)
+                .step_by(GO_TO_STEP)
+                .map(|percent| {
+                    (
+                        format!("{percent}%"),
+                        Command::Reader(Action::Progress(percent as u8)),
+                    )
+                })
+                .collect(),
             Panel::Chapters => reader
                 .document
                 .metadata
@@ -2843,9 +2910,67 @@ impl ReaderUi {
         }
         Ok(pixels)
     }
+    /// Draws book progress and battery charge in the rows the layout keeps
+    /// free below the text.
+    fn status_line(&self, reader: &Reader, pixels: &mut Vec<u8>, levels: u16) -> Result<()> {
+        let layout = reader.state.layout;
+        if layout.footer == 0 {
+            return Ok(());
+        }
+        let (width, rows) = (layout.width as usize, STATUS_INK_ROWS as usize);
+        let top = (layout.height as usize - rows) * width;
+        let inset = layout.margin.max(12) as usize;
+        // A label is set from its cell's left margin; copy its ink to where
+        // it belongs, ending at `end` or else starting at the inset.
+        let mut label = |text: &str, end: Option<usize>| -> Result<()> {
+            let style = crate::controller::CellStyle::Label {
+                size: 14,
+                bold: false,
+            };
+            let cell =
+                reader.render_styled_cell(text, layout.width, STATUS_INK_ROWS, levels, style)?;
+            let columns = (0..width).filter(|x| (0..rows).any(|y| cell[y * width + x] < 255));
+            let (Some(left), Some(right)) = (columns.clone().min(), columns.max()) else {
+                return Ok(());
+            };
+            let span = right + 1 - left;
+            let start = end.map_or(inset, |end| end.saturating_sub(span));
+            if start + span > width {
+                return Ok(());
+            }
+            for y in 0..rows {
+                pixels[top + y * width + start..][..span]
+                    .copy_from_slice(&cell[y * width + left..][..span]);
+            }
+            Ok(())
+        };
+        if let Some(percent) = reader.book_progress_percent() {
+            label(&format!("{percent}%"), None)?;
+        }
+        if let Some(percent) = self.battery {
+            // A cell outline with its terminal, filled to the charge.
+            const BODY: (usize, usize) = (22, 11);
+            let x = width.saturating_sub(inset + BODY.0 + 2);
+            label(&format!("{percent}%"), Some(x.saturating_sub(6)))?;
+            let mut canvas = Canvas {
+                pixels: std::mem::take(pixels),
+                width,
+            };
+            let y = top / width + (rows - BODY.1) / 2;
+            canvas.fill(x, y, BODY.0, BODY.1, 0);
+            canvas.fill(x + 1, y + 1, BODY.0 - 2, BODY.1 - 2, 255);
+            canvas.fill(x + BODY.0, y + 3, 2, BODY.1 - 6, 0);
+            let charge = (BODY.0 - 4) * usize::from(percent) / 100;
+            canvas.fill(x + 2, y + 2, charge, BODY.1 - 4, 0);
+            *pixels = canvas.pixels;
+        }
+        Ok(())
+    }
     fn render_view(&self, reader: &mut Reader, levels: u16) -> Result<Vec<u8>> {
         let Some(panel) = self.panel else {
-            return reader.render(levels);
+            let mut pixels = reader.render(levels)?;
+            self.status_line(reader, &mut pixels, levels)?;
+            return Ok(pixels);
         };
         if matches!(panel, Panel::SelectWord) {
             let width = reader.state.layout.width as usize;
@@ -2913,6 +3038,7 @@ impl ReaderUi {
             Panel::Kosync => "KOReader sync",
             Panel::Contents => "Contents",
             Panel::Chapters => "Chapters",
+            Panel::GoTo => "Go to",
             Panel::Bookmarks => "Bookmarks",
             Panel::Clippings => "Clippings",
             Panel::Clipping(_) => "Saved excerpt",

@@ -39,6 +39,16 @@ Tests cover unequal chapter weights, real EPUB ZIP sizes, monotonic page turns t
 
 Direct page turns that fail while opening a destination chapter retain the current page and show a recoverable menu error. The previous-page action and library menu remain available. Firmware also converts errors from input dispatch into menu errors instead of stopping the reader.
 
+## Go to, status line and sleep page
+
+This book, Go to lists places 5% of the book apart and opens on the one being read. Choosing one moves to the chapter that holds that share of the book by the same weights as the progress estimate, and within it to the block at the matching share of the chapter's blocks, so the page reached is approximate. Return from jump goes back.
+
+Settings, Status line shows the progress estimate at the bottom left of the reading page and the battery charge with a small cell symbol at the bottom right. The layout keeps the bottom 32 rows free of book content for it (`LayoutConfig::footer`); these overlap the bottom margin, so a deeper margin is unchanged and a shallower one gives way. The line is drawn only when the page is, and adds no display refreshes. Changing the setting lays the book out again.
+
+The sleep page is the book's cover, reduced to fit the screen and centered; a smaller cover keeps its size. A book with no cover, or with one the image limits refuse (over 2 MiB encoded or one megapixel), shows its title, author and progress as before.
+
+Host tests cover all three. On the Picco the status line and Go to were checked from framebuffer dumps; the cover sleep page was not, because the framebuffer cannot be read while the reader sleeps.
+
 ## Persistent library metadata cache
 
 The simulator and Picco load `.femto-library-cache.json` from the configured library root without traversing folders or hashing books at startup. Cached paths, content IDs, titles, authors, and languages populate the library immediately. Rescan discovers additions and removals and verifies content hashes. The cache does not hold chapter layout or rendered pages.

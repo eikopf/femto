@@ -893,7 +893,7 @@ fn swipes_page_menus_and_power_sleeps_only_while_reading() {
     ui.set_sleep_available(true);
     ui.power(&mut reader).unwrap();
     assert!(!ui.is_open() && ui.take_sleep_request());
-    assert_eq!(ui.render_sleep(&reader, 2).unwrap().len(), 480 * 800);
+    assert_eq!(ui.render_sleep(&mut reader, 2).unwrap().len(), 480 * 800);
 
     ui.open();
     let first = ui.render(&mut reader, 2).unwrap();
@@ -2452,4 +2452,80 @@ fn reading_gestures_step_the_light_open_its_panel_and_are_configurable() {
     ui.choose(&mut reader, "Frontlight").unwrap();
     ui.back(&mut reader).unwrap();
     assert!(ui.is_open());
+}
+
+#[test]
+fn sleep_page_shows_the_cover_centered_and_falls_back_to_text() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    let mut covered = Reader::new(
+        Document::open(fixtures.join("cover.epub")).unwrap(),
+        Fonts::new(Font::load(fixtures.join("DejaVuSerif.ttf")).unwrap()),
+        ReaderState::default(),
+    )
+    .unwrap();
+    let ui = ReaderUi::default();
+    let pixels = ui.render_sleep(&mut covered, 4).unwrap();
+    // The 320x240 gradient runs from black to white inside a white page.
+    let at = |x: usize, y: usize| pixels[y * 480 + x];
+    assert_eq!(at(10, 10), 255);
+    assert_eq!(at(240, 100), 255);
+    assert_eq!(at(82, 282), 0);
+    assert!((0..800).all(|y| at(79, y) == 255 && at(400, y) == 255));
+    // A book without a cover names itself instead.
+    let mut plain = reader();
+    let text = ui.render_sleep(&mut plain, 4).unwrap();
+    assert!(text.contains(&0));
+    assert_eq!(text[100 * 480 + 240], 255);
+}
+
+#[test]
+fn status_line_takes_the_rows_below_the_text_and_shows_progress_and_battery() {
+    let mut reader = reader();
+    let mut ui = ReaderUi::default();
+    ui.set_battery(Some(60));
+    ui.choose(&mut reader, "Settings").unwrap();
+    ui.choose(&mut reader, "Status line").unwrap();
+    while ui.is_reflowing() {
+        ui.poll_reflow(&mut reader);
+    }
+    assert_eq!(reader.state.layout.footer, 32);
+    while ui.is_open() {
+        ui.back(&mut reader).unwrap();
+    }
+    let shown = ui.render(&mut reader, 2).unwrap();
+    // The text ends above the line and leaves a gap.
+    assert!(shown[..768 * 480].contains(&0));
+    assert!(
+        shown[768 * 480..778 * 480]
+            .iter()
+            .all(|pixel| *pixel == 255)
+    );
+    let ink = |columns: std::ops::Range<usize>| {
+        (778..800)
+            .flat_map(|y| columns.clone().map(move |x| y * 480 + x))
+            .filter(|i| shown[*i] == 0)
+            .count()
+    };
+    assert!(ink(24..120) > 10, "progress at the left");
+    assert!(ink(360..456) > 40, "battery at the right");
+    assert_eq!(ink(160..320), 0);
+}
+
+#[test]
+fn go_to_moves_to_a_share_of_the_book_and_back_returns() {
+    let mut reader = reader();
+    let mut ui = ReaderUi::default();
+    let start = reader.position();
+    ui.choose(&mut reader, "This book").unwrap();
+    ui.choose(&mut reader, "Go to").unwrap();
+    ui.choose(&mut reader, "50%").unwrap();
+    assert!(!ui.is_open());
+    let middle = reader.position();
+    assert!(middle > start);
+    let percent = reader.book_progress_percent().unwrap();
+    assert!((40..=60).contains(&percent), "{percent}");
+    reader
+        .dispatch(femto_reader::controller::Action::Back)
+        .unwrap();
+    assert_eq!(reader.position(), start);
 }

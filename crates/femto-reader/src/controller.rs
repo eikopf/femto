@@ -21,11 +21,16 @@ pub enum Action {
     Link(usize),
     Bookmark(usize),
     Clipping(usize),
+    /// Go to the given percentage of the book.
+    Progress(u8),
     ToggleBookmark,
     Back,
     Reflow(LayoutConfig),
     Rotate(crate::state::Rotation),
-    Tap { x: u32, y: u32 },
+    Tap {
+        x: u32,
+        y: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,6 +79,12 @@ fn chapter_indexer(
 }
 
 type CellKey = (String, u32, u32, u16, CellStyle);
+
+/// The block that starts nearest below the given share of a chapter. Blocks
+/// stand in for length, which is only known once the chapter is laid out.
+fn block_at(chapter: &Chapter, share: f64) -> usize {
+    ((chapter.blocks.len() as f64 * share) as usize).min(chapter.blocks.len().saturating_sub(1))
+}
 
 /// How a menu cell's text is set.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -673,6 +684,21 @@ impl Reader {
                 Some(target) => (*target, false, true),
                 None => return Ok(None),
             },
+            Action::Progress(percent) => {
+                let (target, share) = self.progress_position(percent)?;
+                if target == chapter {
+                    return Ok(None);
+                }
+                let destination = self.document.chapter(target)?;
+                let target = Locator {
+                    chapter: target,
+                    block: block_at(&destination, share),
+                    byte: 0,
+                };
+                return self
+                    .navigation_job(target, true, false, std::sync::Arc::new(destination))
+                    .map(Some);
+            }
             Action::Next
                 if self.page_index + 1 == self.page_count()
                     && self.pagination.is_complete()
@@ -712,6 +738,11 @@ impl Reader {
             self.navigation_job(target, remember, back, std::sync::Arc::new(destination))?;
         job.clipping = clipping;
         Ok(Some(job))
+    }
+    fn progress_position(&self, percent: u8) -> Result<(usize, f64)> {
+        self.document
+            .position_at(percent)
+            .ok_or_else(|| Error::Document("this book has no measure of progress".into()))
     }
     fn navigation_job(
         &self,
@@ -1805,6 +1836,7 @@ impl Reader {
                 font_size: 18.0,
                 line_height: 1.2,
                 hyphenation: crate::layout::Hyphenation::Off,
+                footer: 0,
             })?;
             if pages != 1 {
                 return Err(Error::Layout("menu row exceeds viewport"));
@@ -1823,6 +1855,7 @@ impl Reader {
             font_size: size as f32,
             line_height,
             hyphenation: crate::layout::Hyphenation::Off,
+            footer: 0,
         })?;
         let fitting = ((height as f32 / (size as f32 * line_height)) as usize).max(1);
         let shown = &lines[..lines.len().min(fitting)];
@@ -1961,6 +1994,18 @@ impl Reader {
             Action::Clipping(index) => {
                 let clipping = self.verified_clipping(index)?;
                 self.move_to(clipping.range.start, true)
+            }
+            Action::Progress(percent) => {
+                let (chapter, share) = self.progress_position(percent)?;
+                let block = block_at(&self.pagination.chapter(), share);
+                self.move_to(
+                    Locator {
+                        chapter,
+                        block,
+                        byte: 0,
+                    },
+                    true,
+                )
             }
             Action::ToggleBookmark => {
                 let page = self.page();

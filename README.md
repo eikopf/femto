@@ -8,13 +8,14 @@ Femto is a prototype. It has run on one Picco and has not been tried on any othe
 
 - **Reads EPUB and plain text** from the SD card, with a library sorted by title, recent books, folders and search.
 - **Typography you can adjust**: text size, line spacing, margins, hyphenation, stroke weight and edge darkness, with the Libron typeface built in and your own font families loaded from the card.
-- **Navigation**: table of contents, chapters, bookmarks, footnote previews, links with a way back, dictionary lookup with StarDict dictionaries, and saved excerpts.
+- **Navigation**: table of contents, chapters, going to a percentage of the book, bookmarks, footnote previews, links with a way back, dictionary lookup with StarDict dictionaries, and saved excerpts.
+- **On the page**: an optional status line with book progress and battery charge, and the book's cover while the reader sleeps.
 - **Frontlight** brightness and warmth, from the menu or by swiping up and down on the page.
 - **OPDS catalogs**: browse, search and download books over Wi-Fi.
-- **KOReader sync**: share reading positions with KOReader and compatible servers.
+- **KOReader sync**: share reading positions with KOReader and compatible servers, by hand or automatically when a book opens and before the reader sleeps. When two devices have both read on, the reader asks which position to keep.
 - **Buttons and touch** are both complete ways to use it; page buttons, gestures and screen orientation are configurable.
-- **Updates from the SD card**, with no computer needed after the first installation.
-- **Optional tailnet access**: a built-in Tailscale-compatible client reaches a catalog or sync server on your tailnet. This has been tested against fixtures on a computer, not yet on the device.
+- **Updates over Wi-Fi** from the project's releases, checked when you ask or automatically, or from the SD card. No computer is needed after the first installation.
+- **Optional tailnet access**: a built-in Tailscale-compatible client reaches a catalog or sync server on your tailnet. It has been used on the device against one tailnet, over direct and relayed paths.
 
 ## Getting started
 
@@ -36,7 +37,7 @@ In menus, the page buttons move the selection, the power button selects, and hol
 
 - One device has run it. Treat everything as unproven on yours.
 - EPUB support covers reflowable text, images, lists and a subset of CSS. Embedded fonts and fixed-layout books are not supported.
-- HTTPS and tailnet connections have not been exercised on the device; catalogs and sync have been used over plain HTTP on a local network.
+- On the device, HTTPS has been exercised for update checks and downloads, and catalogs and sync over plain HTTP on a local network and through the tailnet. HTTPS to a catalog or sync server has only been tested on a computer.
 - There is no way back to the stock reader other than your own backup.
 
 ## Documentation

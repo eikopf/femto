@@ -16,6 +16,7 @@ mod catalog;
 mod clock;
 mod console;
 pub mod control;
+mod crash;
 pub mod identity;
 mod input;
 mod light_command;
@@ -42,8 +43,10 @@ fn main() {
     esp_idf_svc::log::EspLogger::initialize_default();
     log::info!("Book SHA-256 backend: {}", femto_reader::hashing::BACKEND);
     report_heap("boot");
+    crash::install();
     if let Err(error) = run() {
         log::error!("Reader stopped: {error}");
+        crash::stopped(&error);
     }
     loop {
         std::thread::sleep(Duration::from_secs(10));
@@ -74,6 +77,7 @@ const OPENING_MARKER: &str = "/sdcard/femto/.opening";
 
 fn run() -> Result<(), String> {
     let mut screen = panel::open()?;
+    crash::note_restart();
     // The input task above keeps its internal stack; workers started from
     // here on get theirs in external RAM.
     threads::use_external_stacks()?;
@@ -340,6 +344,7 @@ fn run() -> Result<(), String> {
                     timed_sleep = Some(Duration::from_secs(seconds.into()));
                     None
                 }
+                Command::Fault => panic!("requested over USB"),
                 Command::Relay => {
                     tailnet::RELAY_ONLY.store(true, std::sync::atomic::Ordering::Relaxed);
                     log::info!("USB relay: new tailnet sessions use relays only until restart");
@@ -369,7 +374,7 @@ fn run() -> Result<(), String> {
                     None
                 }
                 Command::Reboot => unsafe { esp_idf_svc::sys::esp_restart() },
-                Command::Put { .. } | Command::List(_) | Command::Remove(_) => {
+                Command::Put { .. } | Command::List(_) | Command::Show(_) | Command::Remove(_) => {
                     console.files(&command);
                     updater.rescan();
                     ui.set_update(Some(updater.view()));

@@ -72,6 +72,7 @@ impl Console {
         let result = match command {
             Command::Put { len, crc, path } => put(*len, *crc, &target(path)),
             Command::List(path) => list(&target(path)),
+            Command::Show(path) => show(&target(path)),
             Command::Remove(path) => fs::remove_file(target(path)).map_err(|e| e.to_string()),
             _ => return,
         };
@@ -99,6 +100,20 @@ fn list(directory: &Path) -> Result<(), String> {
             metadata.len(),
             entry.file_name().to_string_lossy()
         );
+    }
+    Ok(())
+}
+
+/// Prints the first lines of a text file, such as the crash record. Lines
+/// are cut to what a log line carries.
+fn show(file: &Path) -> Result<(), String> {
+    use std::io::{BufRead, Read};
+    const SHOWN: u64 = 16 * 1024;
+    let file = fs::File::open(file).map_err(|e| e.to_string())?;
+    for line in std::io::BufReader::new(file.take(SHOWN)).split(b'\n') {
+        let line = line.map_err(|e| e.to_string())?;
+        let text = String::from_utf8_lossy(&line[..line.len().min(200)]);
+        log::info!("USB cat: {}", text.trim_end());
     }
     Ok(())
 }

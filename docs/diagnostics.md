@@ -18,6 +18,8 @@ The USB Serial/JTAG console accepts newline-terminated commands from a physicall
 | `femto swipe up`, `femto swipe down`, `femto hold` | Injects a reading gesture: a vertical swipe or a touch held in place |
 | `femto awake` | Suppresses automatic sleep until restart; deep sleep disconnects USB and needs the power button to wake. Automatic sleep is also suppressed while a USB host is connected |
 | `femto sleep SECONDS` | Sleeps as the power button would and wakes unaided after the given time, at least 5 seconds. If the wake fails, only the power button brings the reader back |
+| `femto cat PATH` | Prints the first 16 KiB of a text file below `/sdcard/femto`, one log line per line, each cut to 200 bytes |
+| `femto fault` | Panics, to test the crash record; the reader restarts |
 | `femto relay` | Makes tailnet sessions opened afterwards discard direct datagrams other than STUN until restart, so that peers are reached through relays only |
 | `femto reboot` | Restarts the application |
 | `femto update` | Installs the firmware package waiting on the card; see [Updates](picco-firmware.md#updates) |
@@ -33,6 +35,10 @@ The parser retains at most 192 bytes per line and discards overlong input throug
 Each redraw logs input handling, rendering, panel update and state-save times in milliseconds.
 
 Startup and ten-second runtime reports include free bytes, largest free block, and minimum free bytes for internal RAM and PSRAM separately. The stack low-water mark reports minimum unused bytes for the main reader task. Its allocation is 64 KiB, and ESP-IDF's end-of-stack watchpoint is enabled. Other tasks have separate stacks; these reports do not measure them. The first physical boot with the previous 16 KiB allocation overflowed during layout and reported an apparent allocation failure despite available PSRAM.
+
+## Crash record
+
+The Picco appends one line to `/sdcard/femto/crash.log` when it panics (thread, source location and message), when its main routine stops with an error, and at a start that follows a panic or processor exception, a watchdog or a brownout. A fault that restarts the processor without running Rust code, such as a watchdog, leaves only the line written at the next start. Each line carries the firmware version, seconds since start and the Unix time when the clock was set. Past 64 KiB the file becomes `crash.old` and a new one starts. Writing fails silently, since the card may be what failed. `femto cat crash.log` prints it over USB and `femto fault` produces a panic to test it; on the tested Picco that panic and the restart after it were both recorded, and the book reopened on its page.
 
 ## Network diagnostics
 

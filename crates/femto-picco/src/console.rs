@@ -23,6 +23,8 @@ pub enum Command {
     Awake,
     /// Reach tailnet peers through relays only in sessions opened from now on.
     Relay,
+    /// Fail as a programming error would, to test what a fault leaves behind.
+    Fault,
     /// Sleep as the power button would, and wake unaided after this many
     /// seconds, so that a sleep can be tested with nobody at the device.
     Sleep(u16),
@@ -50,6 +52,8 @@ pub enum Command {
         path: String,
     },
     List(String),
+    /// Print the start of a text file below the device data directory.
+    Show(String),
     Remove(String),
     Reboot,
     /// Install the firmware package waiting on the card.
@@ -77,6 +81,7 @@ fn parse(line: &str) -> Option<Command> {
         ("power", "") => Command::Power,
         ("awake", "") => Command::Awake,
         ("relay", "") => Command::Relay,
+        ("fault", "") => Command::Fault,
         ("sleep", seconds) => Command::Sleep(seconds.parse().ok().filter(|n| *n >= MIN_SLEEP)?),
         ("swipe", "next") => Command::Swipe(crate::input::Turn::Next),
         ("swipe", "prev") => Command::Swipe(crate::input::Turn::Previous),
@@ -115,6 +120,7 @@ fn parse(line: &str) -> Option<Command> {
         }
         ("ls", "") => Command::List(String::new()),
         ("ls", directory) => Command::List(path(directory)?),
+        ("cat", file) => Command::Show(path(file)?),
         ("rm", file) => Command::Remove(path(file)?),
         _ => return None,
     })
@@ -219,6 +225,10 @@ mod tests {
         assert_eq!(
             commands(b"femto sleep 4\nfemto sleep\nfemto sleep 70000\nfemto sleep 30\n"),
             [Command::Sleep(30)]
+        );
+        assert_eq!(
+            commands(b"femto fault\nfemto cat ../state\nfemto cat crash.log\n"),
+            [Command::Fault, Command::Show("crash.log".into())]
         );
         assert_eq!(
             commands("femto tap 12 479\nfemto put 5 0000ABCD b\u{fc}cher/a b.epub\n".as_bytes()),

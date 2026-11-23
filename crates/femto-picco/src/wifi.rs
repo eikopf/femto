@@ -199,6 +199,12 @@ impl Retry {
     pub fn failed(&mut self, now: u64) {
         self.wait(now);
     }
+    /// Records a connection attempt begun outside [`Self::poll`].
+    pub fn begun(&mut self, now: u64) {
+        self.phase = Phase::Connecting;
+        self.attempts = self.attempts.saturating_add(1);
+        self.next = now.saturating_add(30000);
+    }
     pub fn poll(&mut self, now: u64, up: bool) -> Action {
         if now < self.last {
             self.phase = Phase::Disabled;
@@ -241,5 +247,22 @@ impl Retry {
             Phase::Online => "Wi-Fi online",
             Phase::Disabled => "Wi-Fi stopped",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_attempt_begun_elsewhere_is_given_its_time_before_another() {
+        let mut retry = Retry::default();
+        retry.begun(0);
+        assert_eq!(retry.poll(100, false), Action::None);
+        assert_eq!(retry.poll(200, true), Action::None);
+        assert!(retry.is_online());
+        let mut retry = Retry::default();
+        retry.begun(0);
+        assert_eq!(retry.poll(30000, false), Action::Disconnect);
     }
 }

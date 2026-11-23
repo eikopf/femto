@@ -3,14 +3,25 @@ use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::modem::WifiModemPeripheral,
     sys,
-    wifi::{AuthMethod, ClientConfiguration, Configuration, EspWifi, config::ScanConfig},
+    wifi::{
+        AuthMethod, ClientConfiguration, Configuration, EspWifi, ScanMethod, config::ScanConfig,
+    },
 };
 use femto_picco_board::wifi::{Action, Credentials, Retry, Saved};
-use std::time::{Duration, Instant};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
+};
 use zeroize::Zeroize;
 
 /// Internal settings key of the remembered networks.
 const SETTING: &str = "wifi";
+/// Internal settings key of the access point last joined: its channel, its
+/// address, then the name of its network. None is secret.
+const LAST: &str = "wifi_last";
 const LEGACY_FILE: &str = "/sdcard/femto/wifi.json";
 const MAX_VISIBLE: usize = 16;
 
@@ -21,12 +32,19 @@ pub struct Visible {
 }
 
 type Driver = EspWifi<'static>;
+type Watch = esp_idf_svc::eventloop::EspSubscription<'static, esp_idf_svc::eventloop::System>;
 
 pub struct Station {
     /// Creates the driver on first use; the radio stack stays unallocated
     /// while Wi-Fi is off.
-    create: Option<Box<dyn FnOnce() -> Result<Driver, String>>>,
+    create: Option<Box<dyn FnOnce() -> Result<(Driver, Watch), String>>>,
     driver: Option<Driver>,
+    _watch: Option<Watch>,
+    /// Set by the driver when a connection attempt or the link ends.
+    dropped: Arc<AtomicBool>,
+    /// The target is the one access point last joined, taken without a scan
+    /// to confirm it is in range or still the strongest.
+    direct: bool,
     saved: Saved,
     visible: Vec<Visible>,
     scanning: bool,
@@ -54,18 +72,30 @@ impl Station {
             }
         };
         let now = Instant::now();
+        let dropped = Arc::new(AtomicBool::new(false));
+        let observed = dropped.clone();
         let mut station = Self {
             create: Some(Box::new(move || {
                 let event_loop = EspSystemEventLoop::take().map_err(|e| e.to_string())?;
+                let watch = event_loop
+                    .subscribe::<esp_idf_svc::wifi::WifiEvent, _>(move |event| {
+                        if let esp_idf_svc::wifi::WifiEvent::StaDisconnected(_) = event {
+                            observed.store(true, Ordering::Release);
+                        }
+                    })
+                    .map_err(|e| e.to_string())?;
                 let driver = EspWifi::new(modem, event_loop, None).map_err(|e| e.to_string())?;
                 // The driver must not keep its own copy of credentials in NVS.
                 sys::esp!(unsafe {
                     sys::esp_wifi_set_storage(sys::wifi_storage_t_WIFI_STORAGE_RAM)
                 })
                 .map_err(|e| e.to_string())?;
-                Ok(driver)
+                Ok((driver, watch))
             })),
             driver: None,
+            _watch: None,
+            dropped,
+            direct: false,
             saved,
             visible: Vec::new(),
             scanning: false,
@@ -91,7 +121,8 @@ impl Station {
     fn start(&mut self) -> Result<(), String> {
         if self.driver.is_none() {
             let create = self.create.take().ok_or("Wi-Fi driver unavailable")?;
-            let mut driver = create()?;
+            let (mut driver, watch) = create()?;
+            self._watch = Some(watch);
             driver
                 .set_configuration(&Configuration::Client(ClientConfiguration::default()))
                 .map_err(|e| e.to_string())?;
@@ -105,7 +136,34 @@ impl Station {
         }
         self.next_scan = Instant::now();
         self.changed = true;
+        self.rejoin();
         Ok(())
+    }
+
+    /// Goes straight to the access point last joined, on the channel it was
+    /// on. The scan that otherwise comes first takes about three seconds, and
+    /// waits for the event loop, which a book being opened holds up for
+    /// longer. If the access point does not answer, or the link to it is
+    /// lost later, [`Self::poll`] scans and chooses again.
+    fn rejoin(&mut self) {
+        if self.target.is_some() {
+            return;
+        }
+        let Some((point, ssid)) = last() else {
+            return;
+        };
+        if self.apply(&ssid, Some(point)).is_err() {
+            return;
+        }
+        self.dropped.store(false, Ordering::Release);
+        let driver = self.driver.as_mut().expect("applied to a driver");
+        match driver.connect() {
+            Ok(()) => {
+                self.retry.begun(0);
+                self.direct = true;
+            }
+            Err(_) => self.target = None,
+        }
     }
 
     /// Keeps the radio awake while network work is in flight. Modem sleep
@@ -134,7 +192,11 @@ impl Station {
         store(&self.saved)?;
         if enabled {
             self.start()?;
-            self.scan()
+            // Unless the network last joined is already being rejoined.
+            if self.target.is_none() {
+                self.scan()?;
+            }
+            Ok(())
         } else {
             self.target = None;
             self.online = false;
@@ -179,7 +241,7 @@ impl Station {
                 .map_err(|error| format!("Invalid network or password: {error:?}"))?;
             store(&self.saved)?;
         }
-        self.apply(ssid)
+        self.apply(ssid, None)
     }
 
     pub fn forget(&mut self, ssid: &str) -> Result<(), String> {
@@ -197,7 +259,7 @@ impl Station {
         Ok(())
     }
 
-    fn apply(&mut self, ssid: &str) -> Result<(), String> {
+    fn apply(&mut self, ssid: &str, point: Option<Point>) -> Result<(), String> {
         let password = self
             .saved
             .password(ssid)
@@ -213,6 +275,14 @@ impl Station {
             } else {
                 AuthMethod::WPA2Personal
             },
+            // One access point is joined without listening for others;
+            // otherwise the strongest after every channel has been heard.
+            bssid: point.map(|point| point.address),
+            channel: point.map(|point| point.channel),
+            scan_method: match point {
+                Some(_) => ScanMethod::FastScan,
+                None => ScanMethod::default(),
+            },
             ..Default::default()
         });
         let configured = driver.set_configuration(&configuration);
@@ -226,6 +296,7 @@ impl Station {
         configured.map_err(|e| e.to_string())?;
         let now = Instant::now();
         self.target = Some(ssid.into());
+        self.direct = false;
         self.online = false;
         self.retry = Retry::default();
         self.started = now;
@@ -276,7 +347,7 @@ impl Station {
                 .choose(self.visible.iter().map(|n| (n.ssid.as_str(), n.signal)))
                 .map(str::to_owned);
             if let Some(ssid) = choice
-                && let Err(error) = self.apply(&ssid)
+                && let Err(error) = self.apply(&ssid, None)
             {
                 log::warn!("Wi-Fi: {error}");
             }
@@ -292,6 +363,14 @@ impl Station {
         if self.scanning {
             self.finish_scan();
             return;
+        }
+        if self.direct && self.dropped.swap(false, Ordering::AcqRel) {
+            // The access point last joined is not there; see what is.
+            self.target = None;
+            self.direct = false;
+            self.online = false;
+            self.next_scan = now;
+            self.changed = true;
         }
         if self.target.is_none() {
             // Look for a remembered network now and then while idle.
@@ -312,6 +391,9 @@ impl Station {
         if up != self.online {
             self.online = up;
             self.changed = true;
+            if up {
+                remember(self.target.as_deref().expect("target checked"));
+            }
         }
         if up && self.clock.is_none() && now >= self.next_clock_attempt {
             self.next_clock_attempt = now + Duration::from_secs(60);
@@ -414,6 +496,45 @@ fn load() -> Result<Saved, String> {
     match crate::nvs::get(SETTING)? {
         Some(bytes) => Saved::parse(&bytes).map_err(|error| format!("{error:?}")),
         None => Ok(Saved::default()),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Point {
+    channel: u8,
+    address: [u8; 6],
+}
+
+/// The access point last joined and the name of its network.
+fn last() -> Option<(Point, String)> {
+    let bytes = crate::nvs::get(LAST).ok()??;
+    let (channel, rest) = bytes.split_first()?;
+    let (address, ssid) = rest.split_first_chunk()?;
+    let point = Point {
+        channel: *channel,
+        address: *address,
+    };
+    Some((point, std::str::from_utf8(ssid).ok()?.to_owned()))
+}
+
+/// Records the joined access point, if it changed.
+fn remember(ssid: &str) {
+    let mut info = sys::wifi_ap_record_t::default();
+    if unsafe { sys::esp_wifi_sta_get_ap_info(&mut info) } != sys::ESP_OK {
+        return;
+    }
+    let point = Point {
+        channel: info.primary,
+        address: info.bssid,
+    };
+    if last().is_some_and(|(known, name)| known == point && name == ssid) {
+        return;
+    }
+    let mut bytes = vec![point.channel];
+    bytes.extend_from_slice(&point.address);
+    bytes.extend_from_slice(ssid.as_bytes());
+    if let Err(error) = crate::nvs::set(LAST, &bytes) {
+        log::warn!("Cannot remember the Wi-Fi access point: {error}");
     }
 }
 

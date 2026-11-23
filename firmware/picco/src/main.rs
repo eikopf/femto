@@ -444,14 +444,12 @@ fn run() -> Result<(), String> {
                     if catalog_tailnet && let Err(error) = screen.tailnet.ensure() {
                         ui.show_error(error);
                     }
-                    let driver = screen.tailnet.driver().map(|driver| driver.downgrade());
+                    let session = screen.tailnet.session();
                     catalog.set_transport_factory(std::sync::Arc::new(move |origins| {
                         let refs: Vec<_> = origins.iter().map(String::as_str).collect();
                         Ok(Box::new(femto_catalog::routing::Routed::new(
                             network::Transport,
-                            tailnet_http::Transport(
-                                driver.as_ref().and_then(|driver| driver.upgrade()),
-                            ),
+                            tailnet_http::Transport(session.clone()),
                             &refs,
                         )?))
                     }));
@@ -466,14 +464,12 @@ fn run() -> Result<(), String> {
                 if sync_tailnet && let Err(error) = screen.tailnet.ensure() {
                     ui.show_error(error);
                 }
-                let driver = screen.tailnet.driver().map(|driver| driver.downgrade());
+                let session = screen.tailnet.session();
                 let transport = std::sync::Arc::new(move |origins: &[String]| {
                     let refs: Vec<_> = origins.iter().map(String::as_str).collect();
                     Ok(Box::new(femto_catalog::routing::Routed::new(
                         network::Transport,
-                        tailnet_http::Transport(
-                            driver.as_ref().and_then(|driver| driver.upgrade()),
-                        ),
+                        tailnet_http::Transport(session.clone()),
                         &refs,
                     )?)
                         as Box<dyn femto_catalog::http::Transport>)

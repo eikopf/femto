@@ -40,7 +40,12 @@ pub fn require_ready() -> io::Result<()> {
         ))
     }
 }
-pub struct Service(Option<EspSntp<'static>>);
+pub struct Service {
+    sntp: Option<EspSntp<'static>>,
+    /// When the server was last asked, and how long to wait for its answer.
+    asked: Instant,
+    patience: std::time::Duration,
+}
 impl Service {
     pub fn start() -> Result<Self, String> {
         let server = match File::open("/sdcard/femto/time-server") {
@@ -73,13 +78,31 @@ impl Service {
             }
         })
         .map_err(|e| format!("Time service initialization: {e}"))?;
-        Ok(Self(Some(sntp)))
+        Ok(Self {
+            sntp: Some(sntp),
+            asked: Instant::now(),
+            patience: FIRST_PATIENCE,
+        })
+    }
+    /// Asks again when the answer is overdue. An answer takes well under a
+    /// second, and one lost packet is common on a weak link, but the
+    /// platform client waits fifteen seconds before it repeats a query, and
+    /// until then nothing that needs the time can start. The wait doubles, so
+    /// a silent server is asked five times in its first minute.
+    pub fn poll(&mut self) {
+        if ready() || self.asked.elapsed() < self.patience {
+            return;
+        }
+        unsafe { esp_idf_svc::sys::sntp_restart() };
+        self.asked = Instant::now();
+        self.patience *= 2;
     }
 }
+const FIRST_PATIENCE: std::time::Duration = std::time::Duration::from_secs(2);
 impl Drop for Service {
     fn drop(&mut self) {
         // Unsubscribe first so an in-flight callback cannot restore readiness.
-        self.0.take();
+        self.sntp.take();
         clear();
     }
 }

@@ -107,7 +107,14 @@ fn connect_inner(
         .filter(|port| *port != 0)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid request port"))?;
     if url.scheme() == "https" {
-        crate::clock::require_ready()?;
+        // In the first seconds after waking the clock is not yet set; it is
+        // about a second after Wi-Fi connects. That is one wait.
+        budget
+            .retry(|| crate::clock::require_ready().map_err(|_| io::ErrorKind::WouldBlock.into()))
+            .map_err(|error| match error.kind() {
+                io::ErrorKind::TimedOut => crate::clock::require_ready().unwrap_err(),
+                _ => error,
+            })?;
     }
     let certificate_name = peer
         .map(|(_, name)| {

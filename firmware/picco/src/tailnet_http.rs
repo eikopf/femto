@@ -1,4 +1,5 @@
 //! Catalog HTTP over the reader's selected tailnet runtime generation.
+use crate::tailnet_menu::Session;
 use femto_catalog::{
     deadline::Limit,
     http::{self, Stream, Url},
@@ -9,9 +10,10 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::{Duration, Instant},
 };
 
-pub struct Transport(pub Option<crate::tailnet_menu::Driver>);
+pub struct Transport(pub crate::tailnet_menu::Lookup);
 impl http::Transport for Transport {
     fn connect(
         &mut self,
@@ -40,15 +42,28 @@ impl http::Transport for Transport {
             .port_or_known_default()
             .filter(|port| *port != 0)
             .ok_or(io::ErrorKind::InvalidInput)?;
-        if url.scheme() == "https" {
-            crate::clock::require_ready()?;
-        }
-        let driver = self.0.clone().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotConnected,
-                "Connect the reader tailnet first",
-            )
-        })?;
+        let until = limit.wait();
+        let driver = loop {
+            match (self.0)() {
+                Session::Open(driver) => break driver,
+                Session::Absent => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotConnected,
+                        "Connect the reader tailnet first",
+                    ));
+                }
+                Session::Awaited if cancelled.load(Ordering::Acquire) => {
+                    return Err(io::ErrorKind::Interrupted.into());
+                }
+                Session::Awaited if Instant::now() >= until => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "The clock is not set yet",
+                    ));
+                }
+                Session::Awaited => std::thread::sleep(Duration::from_millis(20)),
+            }
+        };
         let limit = match limit {
             Limit::Until(deadline) => femto_microlink::application_tcp::Limit::Until(deadline),
             Limit::Stall(limit) => femto_microlink::application_tcp::Limit::Stall(limit),

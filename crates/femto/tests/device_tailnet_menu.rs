@@ -259,6 +259,36 @@ fn a_routed_service_opens_one_session_without_showing_the_panel() {
     assert!(manager.close_and_wait(Duration::ZERO));
 }
 #[test]
+fn a_service_asking_before_the_clock_is_set_gets_its_session_when_it_is() {
+    use tailnet_menu::Session;
+    let dir = configuration();
+    let mut manager = tailnet_menu::Manager::new(dir.path().join("tailnet.json"));
+    let mut ui = ReaderUi::default();
+    let session = manager.session();
+    assert!(matches!(session(), Session::Absent));
+    STATE.with_borrow_mut(|s| s.clock_bad = true);
+    manager.ensure().unwrap();
+    manager.poll(&mut ui);
+    assert!(matches!(session(), Session::Awaited));
+    assert_eq!(STATE.with_borrow(|s| s.starts), 0);
+    STATE.with_borrow_mut(|s| s.clock_bad = false);
+    manager.poll(&mut ui);
+    let Session::Open(driver) = session() else {
+        panic!("session not open");
+    };
+    drop(driver);
+    assert_eq!(STATE.with_borrow(|s| (s.starts, s.opened)), (1, 1));
+    STATE.with_borrow_mut(|s| s.joined = true);
+    assert!(manager.close_and_wait(Duration::ZERO));
+    assert!(matches!(session(), Session::Absent));
+    // Without a configuration nothing is awaited.
+    std::fs::remove_file(dir.path().join("tailnet.json")).unwrap();
+    STATE.with_borrow_mut(|s| s.clock_bad = true);
+    assert!(manager.ensure().is_err());
+    assert!(matches!(session(), Session::Absent));
+    STATE.with_borrow_mut(|s| s.clock_bad = false);
+}
+#[test]
 fn explicit_actions_preserve_runtime_until_shutdown_finishes() {
     let dir = configuration();
     let mut manager = tailnet_menu::Manager::new(dir.path().join("tailnet.json"));

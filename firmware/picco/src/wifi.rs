@@ -320,6 +320,9 @@ impl Station {
                 Err(error) => log::warn!("{error}"),
             }
         }
+        if let Some(clock) = &mut self.clock {
+            clock.poll();
+        }
         match self.retry.poll(elapsed, up) {
             Action::None => {}
             Action::Connect => {

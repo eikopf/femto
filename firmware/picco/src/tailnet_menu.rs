@@ -7,6 +7,7 @@ use std::{
     fs::File,
     io::Read,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use zeroize::Zeroizing;
@@ -20,6 +21,24 @@ const IDLE_POLL: Duration = Duration::from_millis(100);
 
 pub type Driver = femto_microlink::application_tcp::ThreadShared<crate::tailnet::Runtime>;
 
+/// What a request finds when it looks for the session.
+pub enum Session {
+    Absent,
+    /// A session will start once the clock is set, which follows Wi-Fi
+    /// connecting by about a second.
+    Awaited,
+    Open(Driver),
+}
+/// Looks the session up from a request's thread.
+pub type Lookup = Arc<dyn Fn() -> Session + Send + Sync>;
+#[derive(Default)]
+enum Slot {
+    #[default]
+    Absent,
+    Awaited,
+    Open(femto_microlink::application_tcp::ThreadWeak<crate::tailnet::Runtime>),
+}
+
 pub struct Manager {
     local_address: femto_microlink::endpoints::LocalAddress,
     runtime: Option<Driver>,
@@ -30,6 +49,10 @@ pub struct Manager {
     /// edited settings apply to the next connection.
     source: Box<dyn Fn() -> Result<Config, String>>,
     stopping: bool,
+    /// A service asked for a session before the clock was set.
+    awaited: bool,
+    /// The session as requests see it; see [`Self::publish`].
+    slot: Arc<Mutex<Slot>>,
     /// When the session is next polled from the main loop.
     next_poll: Instant,
     rows: Vec<String>,
@@ -53,6 +76,8 @@ impl Manager {
             followup: None,
             source: Box::new(source),
             stopping: false,
+            awaited: false,
+            slot: Default::default(),
             next_poll: Instant::now(),
             rows: vec!["Disconnected".into()],
         }
@@ -69,6 +94,7 @@ impl Manager {
             }
             TailnetEvent::Renew => self.renew(),
             TailnetEvent::Stop => {
+                self.awaited = false;
                 self.followup = None;
                 self.rotation_followup = None;
                 self.rows = vec!["Disconnecting".into()];
@@ -79,16 +105,50 @@ impl Manager {
             }
         };
         ui.set_tailnet_status(&self.rows);
+        self.publish();
         result
     }
     /// Opens a session for a service routed through the tailnet when none
     /// is open or closing, without showing the Tailnet panel. A request made
-    /// right away waits for the session within its own deadline.
+    /// right away waits for the session. Before the clock is set, as in the
+    /// first seconds after waking, the session starts when it is.
     pub fn ensure(&mut self) -> Result<(), String> {
         if self.stopping || self.runtime.is_some() || self.rotation.is_some() {
             return Ok(());
         }
-        self.start(false)
+        let result = if crate::clock::require_ready().is_ok() {
+            self.start(false)
+        } else {
+            // A missing or invalid configuration fails now, not later.
+            (self.source)().map(|_| self.awaited = true)
+        };
+        self.publish();
+        result
+    }
+    /// Shows requests the current session. They look from their own threads,
+    /// so every change made here on the main loop is copied out.
+    fn publish(&self) {
+        let slot = match (&self.runtime, self.stopping, self.awaited) {
+            (Some(runtime), false, _) => Slot::Open(runtime.downgrade()),
+            (None, false, true) => Slot::Awaited,
+            _ => Slot::Absent,
+        };
+        *self
+            .slot
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = slot;
+    }
+    /// A request retains the runtime generation it finds; later reconnects
+    /// do not replace it.
+    pub fn session(&self) -> Lookup {
+        let slot = self.slot.clone();
+        Arc::new(
+            move || match &*slot.lock().unwrap_or_else(|poison| poison.into_inner()) {
+                Slot::Absent => Session::Absent,
+                Slot::Awaited => Session::Awaited,
+                Slot::Open(runtime) => runtime.upgrade().map_or(Session::Absent, Session::Open),
+            },
+        )
     }
     fn start(&mut self, provision: bool) -> Result<(), String> {
         if self.runtime.is_some() || self.rotation.is_some() {
@@ -127,6 +187,12 @@ impl Manager {
     }
     pub fn poll(&mut self, ui: &mut ReaderUi) -> bool {
         let previous = self.rows.clone();
+        if self.awaited && crate::clock::require_ready().is_ok() {
+            self.awaited = false;
+            if let Err(error) = self.start(false) {
+                self.rows = vec![error];
+            }
+        }
         if self.stopping {
             if self.close_and_wait(Duration::ZERO)
                 && self.rows.first().is_some_and(|s| s == "Disconnecting")
@@ -192,6 +258,7 @@ impl Manager {
                 self.close_and_wait(Duration::ZERO);
             }
         }
+        self.publish();
         let changed = self.rows != previous;
         if changed {
             ui.set_tailnet_status(&self.rows);
@@ -279,6 +346,8 @@ impl Manager {
     /// Keep the manager and platform services alive after a timeout.
     pub fn close_and_wait(&mut self, timeout: Duration) -> bool {
         self.stopping = true;
+        self.awaited = false;
+        self.publish();
         let started = Instant::now();
         if let Some(rotation) = &mut self.rotation {
             if !rotation.close_and_wait(timeout) {

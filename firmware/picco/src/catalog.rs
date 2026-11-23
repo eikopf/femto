@@ -425,7 +425,17 @@ impl CatalogMenu {
         worker: &mut Jobs,
         ui: &mut ReaderUi,
     ) -> Result<(), String> {
-        // Back, or any input during a download, abandons what was asked for.
+        // The view under a download stays as it was; its entries other than
+        // the way back do nothing until the book has arrived.
+        let downloading = matches!(self.wanted, Some(Request::Download(_)))
+            || matches!(self.pending, Some((_, Pending::Download)));
+        if downloading
+            && let CatalogEvent::Activate(index) = event
+            && !matches!(self.actions.get(index), Some(Action::Back))
+        {
+            return Ok(());
+        }
+        // Back abandons what was asked for.
         if self.wanted.is_some()
             || matches!(self.pending, Some((_, Pending::Enter | Pending::Download)))
         {
@@ -472,9 +482,8 @@ impl CatalogMenu {
                 Some(Action::Download(source)) => {
                     let source = source.clone();
                     self.want(Request::Download(source), worker, ui)?;
-                    ui.set_catalog_busy(false);
-                    ui.set_catalog_view("Downloading book", &["Cancel".into()])
-                        .map_err(|e| e.to_string())
+                    ui.set_catalog_title("Downloading book");
+                    Ok(())
                 }
                 Some(Action::Search(index)) => {
                     self.search = Some(*index);
@@ -535,7 +544,8 @@ impl CatalogMenu {
                     .as_mut()
                     .and_then(|p| p.title(Instant::now()))
             {
-                return ui.set_catalog_view(&title, &["Cancel".into()]).is_ok();
+                ui.set_catalog_title(&title);
+                return true;
             }
             self.fetch_ahead(worker, ui);
             return false;
@@ -872,10 +882,13 @@ mod download_progress_tests {
         });
         let mut ui = ReaderUi::default();
         assert!(!menu.poll(&mut worker, &mut ui, 6));
-        ui.set_catalog_view("Downloading book", &["Cancel".into()])
+        ui.set_catalog_view("Publication", &["Download EPUB".into()])
             .unwrap();
         assert!(menu.poll(&mut worker, &mut ui, 6));
         assert!(!menu.poll(&mut worker, &mut ui, 6));
+        menu.event(CatalogEvent::Activate(0), &mut worker, &mut ui)
+            .unwrap();
+        assert!(menu.pending.is_some());
         menu.event(CatalogEvent::Back, &mut worker, &mut ui)
             .unwrap();
         assert!(menu.pending.is_none());

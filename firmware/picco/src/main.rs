@@ -406,6 +406,7 @@ fn run() -> Result<(), String> {
             let mut effect = match effect {
                 Ok(effect) => effect,
                 Err(error) => {
+                    log::warn!("Input failed: {error}");
                     ui.open();
                     ui.show_error(error.to_string());
                     Effect::Redraw

@@ -855,6 +855,10 @@ impl ReaderUi {
         self.error = None;
         Ok(())
     }
+    /// Retitles the catalog view in place, for progress on what it waits for.
+    pub fn set_catalog_title(&mut self, title: &str) {
+        self.catalog_title = rows_clean(title);
+    }
     /// Replaces the rows of the catalog list without moving the selection,
     /// for a list that grows while it is being read.
     pub fn set_catalog_rows(&mut self, rows: &[String]) -> Result<()> {

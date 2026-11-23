@@ -276,6 +276,27 @@ fn run() -> Result<(), String> {
             }
         };
     }
+    // How sync requests reach their server: directly, or through the tailnet
+    // for the origins the settings route there.
+    macro_rules! sync_transport {
+        () => {{
+            let session = screen.tailnet.session();
+            std::sync::Arc::new(move |origins: &[String]| {
+                let refs: Vec<_> = origins.iter().map(String::as_str).collect();
+                Ok(Box::new(femto_catalog::routing::Routed::new(
+                    network::Transport,
+                    tailnet_http::Transport(session.clone()),
+                    &refs,
+                )?) as Box<dyn femto_catalog::http::Transport>)
+            })
+        }};
+    }
+    // The book automatic sync has compared with the server since it opened.
+    let mut reconciled = None::<String>;
+    // A sleep that waits, behind the sleep page already shown, for the
+    // reading position to reach the sync server: when the timer should wake
+    // the reader, and a checksum of that page.
+    let mut retiring = None::<(Option<Duration>, u32)>;
     loop {
         std::thread::sleep(Duration::from_millis(10));
         screen.poll_wifi();
@@ -369,6 +390,16 @@ fn run() -> Result<(), String> {
                     .remote_turn(&reader.state, !ui.is_open())
                     .map(input::Event::Turn)
             });
+        // A press while the position is still being sent wakes the reader.
+        if retiring.is_some() && event.is_some() {
+            retiring = None;
+            if let Some(sync) = kosync.as_mut() {
+                sync.cancel_and_wait(Duration::ZERO);
+            }
+            render(&mut reader, &ui, &mut plane)?;
+            screen.present(&plane)?;
+            continue;
+        }
         // Text typed over USB changes the view without an input event.
         if event.is_none() && dirty {
             dirty = false;
@@ -473,17 +504,7 @@ fn run() -> Result<(), String> {
                 if sync_tailnet && let Err(error) = screen.tailnet.ensure() {
                     ui.show_error(error);
                 }
-                let session = screen.tailnet.session();
-                let transport = std::sync::Arc::new(move |origins: &[String]| {
-                    let refs: Vec<_> = origins.iter().map(String::as_str).collect();
-                    Ok(Box::new(femto_catalog::routing::Routed::new(
-                        network::Transport,
-                        tailnet_http::Transport(session.clone()),
-                        &refs,
-                    )?)
-                        as Box<dyn femto_catalog::http::Transport>)
-                });
-                if let Err(error) = sync.event(event, &reader, &mut ui, transport) {
+                if let Err(error) = sync.event(event, &reader, &mut ui, sync_transport!()) {
                     ui.show_error(error);
                 }
                 effect = Effect::Redraw;
@@ -617,6 +638,9 @@ fn run() -> Result<(), String> {
                 render(&mut reader, &ui, &mut plane)?;
                 screen.present(&plane)?;
             }
+            if let Some(outcome) = sync.take_outcome() {
+                log::info!("Sync: {outcome}");
+            }
         }
         if ui.poll_scan() == Effect::Redraw {
             render(&mut reader, &ui, &mut plane)?;
@@ -709,6 +733,20 @@ fn run() -> Result<(), String> {
             busy_since = Some((Instant::now(), false));
         }
         let online = screen.wifi().is_some_and(|wifi| wifi.connected().is_some()) && clock::ready();
+        if reader.state.sync_automatically
+            && online
+            && retiring.is_none()
+            && !ui.is_opening()
+            && reconciled.as_deref() != Some(reader.document.metadata.id.as_str())
+            && let Some(sync) = kosync.as_mut()
+            && !sync.is_busy()
+        {
+            reconciled = Some(reader.document.metadata.id.clone());
+            if !sync_tailnet || screen.tailnet.ensure().is_ok() {
+                let started = sync.reconcile(&reader, sync_transport!(), false);
+                log::info!("Sync on opening: started={started}");
+            }
+        }
         if reader.state.check_updates && !update_checked && online {
             update_checked = true;
             if let Err(error) = updater.check(true) {
@@ -813,8 +851,54 @@ fn run() -> Result<(), String> {
         // device awake; it is then powered and usually being driven over USB.
         let hosted = unsafe { esp_idf_svc::sys::usb_serial_jtag_is_connected() };
         let wake_after = timed_sleep.take();
-        if manual_sleep || wake_after.is_some() || (automatic_sleep && !stay_awake && !hosted) {
+        let asked =
+            manual_sleep || wake_after.is_some() || (automatic_sleep && !stay_awake && !hosted);
+        // When to sleep now, and the checksum of a sleep page already shown.
+        let mut sleeping = None::<(Option<Duration>, Option<u32>)>;
+        if let Some((wake_after, shown)) = retiring {
+            if !kosync.as_ref().is_some_and(|sync| sync.is_busy()) {
+                log::info!("Sync before sleep: finished");
+                retiring = None;
+                sleeping = Some((wake_after, Some(shown)));
+            }
+        } else if asked {
             idle.suppress_until_activity();
+            // The position goes to the sync server first, behind the sleep
+            // page, so that sleeping looks immediate.
+            let unsent = reader.state.sync_automatically
+                && online
+                && journal.is_some()
+                && kosync
+                    .as_ref()
+                    .is_some_and(|sync| !sync.is_busy() && sync.has_unsent(&reader));
+            let shown = unsent
+                .then(|| -> Result<u32, String> {
+                    power::wait_for_release()?;
+                    ui.release_dictionary();
+                    let levels = if cfg!(feature = "grayscale") { 4 } else { 2 };
+                    let pixels = ui
+                        .render_sleep(&mut reader, levels)
+                        .map_err(|e| format!("Sleep screen failed: {e}"))?;
+                    pack_pixels(&pixels, reader.state.rotation, &mut plane)?;
+                    screen.present_clean(&plane)?;
+                    Ok(femto_picco_board::console::crc32(0, &plane))
+                })
+                .and_then(Result::ok)
+                .filter(|_| {
+                    (!sync_tailnet || screen.tailnet.ensure().is_ok())
+                        && kosync
+                            .as_mut()
+                            .is_some_and(|sync| sync.reconcile(&reader, sync_transport!(), true))
+                });
+            match shown {
+                Some(shown) => {
+                    log::info!("Sync before sleep: started");
+                    retiring = Some((wake_after, shown));
+                }
+                None => sleeping = Some((wake_after, None)),
+            }
+        }
+        if let Some((wake_after, shown)) = sleeping {
             let prepared = (|| -> Result<(), String> {
                 power::wait_for_release()?;
                 if kosync
@@ -844,7 +928,10 @@ fn run() -> Result<(), String> {
                     .render_sleep(&mut reader, levels)
                     .map_err(|e| format!("Sleep screen failed: {e}"))?;
                 pack_pixels(&pixels, reader.state.rotation, &mut plane)?;
-                screen.present_clean(&plane)?;
+                // Unless it is what the panel already shows.
+                if shown != Some(femto_picco_board::console::crc32(0, &plane)) {
+                    screen.present_clean(&plane)?;
+                }
                 screen.prepare_sleep()
             })();
             match prepared {

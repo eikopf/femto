@@ -72,7 +72,28 @@ Existing reader JSON files and device journal slots retain local positions, book
 
 ## Reader menus
 
-The simulator accepts `--kosync-config kosync.json`. Picco loads `/sdcard/femto/kosync.json` with the same schema. FAT storage does not provide host-style private-file permissions. Credentials remain on the card. A valid configuration enables the KOReader sync menu with upload, download, account check and account creation actions. Transfers are explicit; automatic background sync is not implemented.
+The simulator accepts `--kosync-config kosync.json`. Picco loads `/sdcard/femto/kosync.json` with the same schema. FAT storage does not provide host-style private-file permissions. Credentials remain on the card. A valid configuration enables the KOReader sync menu with upload, download, account check and account creation actions.
+
+## Automatic sync
+
+Sync automatically, in the KOReader sync menu, is off until switched on. With it on, the Picco compares the open book with the server once after the book opens, as soon as Wi-Fi is up and the clock is set, and again before it sleeps.
+
+Each book keeps the position it had when it last agreed with the server, and which device wrote the server's record then and when (`synced` in the book's saved state). The reader has moved if its position differs from that one. The other side has moved if the server's record was written by another device and is not that record; a record this reader wrote is never news. From these:
+
+| Reader | Other device | After opening | Before sleep |
+| --- | --- | --- | --- |
+| unmoved | unmoved | nothing | nothing |
+| moved | unmoved | upload | upload |
+| unmoved | moved | go to the other position | nothing |
+| moved | moved | the setting decides | nothing |
+
+If both moved offers ask (the default), take the other and keep this one. Asking opens a menu with Go to N% and Stay at N%; leaving it changes nothing, and the question returns when the book is next opened. It is not put over a menu the user is in. A reader that turned a page while the comparison was on its way counts as having moved. A book never synced counts as moved, so the first comparison with a record from another device asks.
+
+Before sleep the reader shows the sleep page at once and uploads behind it, then sleeps; a press in that time brings the page back. The upload is subject to the same 30-second silence limit as any request and to no other. What the reader left for the next opening (a moved other device) is not touched. The agreed position is saved as soon as it is set, since a reader that forgot it would take its own upload for a position it had yet to send.
+
+Automatic requests show nothing on screen unless they move the page or ask. Each logs `Sync: OUTCOME`.
+
+Measured on the Picco against a Grimmory server over the tailnet, with a host `femto kosync` as the other device: a first opening uploaded; after the host uploaded a position the restarted reader went to it without asking; with both moved it asked and each answer did what it says; and a timed sleep after two page turns uploaded in 4.4 seconds behind the sleep page, after which the server showed the reader's record and the next opening had nothing to exchange. Grimmory answers 404 for a book that is not in its library, which automatic sync logs and otherwise ignores. The session and its decision table have host tests.
 
 One worker owns each request. It reopens the book and checks its full local identity against the displayed document before exchanging progress. The worker never writes reader state. Download results are discarded if the active book or reading position changed. The UI prepares the destination one page per poll, preserves current annotations, saves through the host atomic file or device journal, and then replaces the visible page. Failed saves retain the previous visible and in-memory state. Account and network errors remain available in the menu; credentials and server error bodies are excluded.
 

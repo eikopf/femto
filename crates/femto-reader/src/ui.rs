@@ -32,6 +32,8 @@ enum Panel {
     Contents,
     Chapters,
     GoTo,
+    /// Asks which position to keep when two devices have both moved.
+    SyncConflict,
     Bookmarks,
     Clippings,
     Clipping(usize),
@@ -68,7 +70,7 @@ impl Panel {
     /// The panel Back returns to; `None` leaves the menu.
     fn parent(self) -> Option<Self> {
         Some(match self {
-            Self::Root => return None,
+            Self::Root | Self::SyncConflict => return None,
             Self::Book
             | Self::Contents
             | Self::Bookmarks
@@ -164,6 +166,8 @@ enum Command {
     Set(Setting, usize),
     SwapPageButtons,
     StatusLine,
+    SyncAutomatically,
+    SyncConflict,
     SwapMenuButtons,
 }
 
@@ -383,6 +387,9 @@ pub enum KosyncEvent {
     Auth,
     Register,
     Back,
+    /// Answers to the question of which position to keep.
+    TakeRemote,
+    KeepLocal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -444,6 +451,9 @@ pub struct ReaderUi {
     kosync_event: Option<KosyncEvent>,
     kosync_status: String,
     kosync_busy: bool,
+    /// The other device's progress and this reader's, while it is asked
+    /// which to keep.
+    sync_conflict: (u8, Option<u8>),
     selected: usize,
     error: Option<String>,
     device_status: Option<String>,
@@ -489,6 +499,14 @@ impl ReaderUi {
             .collect();
         self.kosync_busy = busy;
         self.panel = Some(Panel::Kosync);
+        self.selected = 0;
+        self.error = None;
+    }
+    /// Asks which of two positions to keep: the other device's, at
+    /// `remote` percent of the book, or this reader's.
+    pub fn ask_sync_conflict(&mut self, remote: u8, local: Option<u8>) {
+        self.sync_conflict = (remote.min(100), local);
+        self.panel = Some(Panel::SyncConflict);
         self.selected = 0;
         self.error = None;
     }
@@ -1043,6 +1061,7 @@ impl ReaderUi {
             },
             Command::SwapPageButtons => Control::Toggle(state.swap_page_buttons),
             Command::StatusLine => Control::Toggle(state.layout.footer != 0),
+            Command::SyncAutomatically => Control::Toggle(state.sync_automatically),
             Command::SwapMenuButtons => Control::Toggle(state.swap_menu_buttons),
             Command::AutoUpdate => Control::Toggle(state.check_updates),
             Command::Update => match self.update.as_ref().map(|view| &view.step) {
@@ -1799,6 +1818,17 @@ impl ReaderUi {
         let result = match command {
             Command::Kosync(event) => {
                 self.kosync_event = Some(event);
+                if matches!(event, KosyncEvent::TakeRemote | KosyncEvent::KeepLocal) {
+                    self.panel = None;
+                }
+                Ok(Effect::Redraw)
+            }
+            Command::SyncAutomatically => {
+                reader.state.sync_automatically = !reader.state.sync_automatically;
+                Ok(Effect::Redraw)
+            }
+            Command::SyncConflict => {
+                reader.state.sync_conflict = reader.state.sync_conflict.next();
                 Ok(Effect::Redraw)
             }
             Command::Rotation(rotation) => {
@@ -2174,12 +2204,13 @@ impl ReaderUi {
                             "Create account".into(),
                             Command::Kosync(KosyncEvent::Register),
                         ),
+                        ("Sync automatically".into(), Command::SyncAutomatically),
+                        (
+                            format!("If both moved: {}", reader.state.sync_conflict.label()),
+                            Command::SyncConflict,
+                        ),
                     ]);
                 }
-                rows.push((
-                    if self.kosync_busy { "Cancel" } else { "Back" }.into(),
-                    Command::Kosync(KosyncEvent::Back),
-                ));
                 rows
             }
             Panel::Catalog => self
@@ -2717,6 +2748,22 @@ impl ReaderUi {
                 .enumerate()
                 .map(|(i, c)| (c.title.clone(), Command::Reader(Action::Contents(i))))
                 .collect(),
+            Panel::SyncConflict => {
+                let (remote, local) = self.sync_conflict;
+                vec![
+                    (
+                        format!("Go to {remote}%"),
+                        Command::Kosync(KosyncEvent::TakeRemote),
+                    ),
+                    (
+                        local.map_or_else(
+                            || "Stay here".into(),
+                            |local| format!("Stay at {local}%"),
+                        ),
+                        Command::Kosync(KosyncEvent::KeepLocal),
+                    ),
+                ]
+            }
             Panel::GoTo => (0..100)
                 .step_by(GO_TO_STEP)
                 .map(|percent| {
@@ -3039,6 +3086,7 @@ impl ReaderUi {
             Panel::Contents => "Contents",
             Panel::Chapters => "Chapters",
             Panel::GoTo => "Go to",
+            Panel::SyncConflict => "Keep which position?",
             Panel::Bookmarks => "Bookmarks",
             Panel::Clippings => "Clippings",
             Panel::Clipping(_) => "Saved excerpt",

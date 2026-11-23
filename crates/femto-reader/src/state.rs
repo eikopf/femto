@@ -77,6 +77,48 @@ pub struct BookState {
     pub clippings: Vec<crate::clipping::Clipping>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub typography: Option<BookTypography>,
+    /// Where the book stood when it last agreed with the sync server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synced: Option<Synced>,
+}
+
+/// The reading position and the server's record of it at the last sync.
+/// A different position since means this reader has moved; a different
+/// record written by another device means that one has.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Synced {
+    pub position: Locator,
+    /// The device that wrote the server's record, and when.
+    pub device_id: String,
+    pub timestamp: u64,
+}
+
+/// What automatic sync does when this reader and another device have both
+/// moved since they last agreed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SyncConflict {
+    #[default]
+    Ask,
+    /// Go to the other device's position.
+    Remote,
+    /// Keep this reader's position and upload it.
+    Local,
+}
+impl SyncConflict {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Ask => Self::Remote,
+            Self::Remote => Self::Local,
+            Self::Local => Self::Ask,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Remote => "take the other",
+            Self::Local => "keep this one",
+        }
+    }
 }
 
 /// Book preferences exclude physical viewport dimensions and device rotation.
@@ -259,6 +301,12 @@ pub struct ReaderState {
     /// Exchanges the two page buttons while they move a menu selection.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub swap_menu_buttons: bool,
+    /// Exchanges reading positions with the sync server when a book opens
+    /// and before the reader sleeps.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sync_automatically: bool,
+    #[serde(default)]
+    pub sync_conflict: SyncConflict,
     /// Display updates between full e-paper refreshes that clear residue.
     #[serde(default = "default_full_refresh_interval")]
     pub full_refresh_interval: u8,
@@ -281,6 +329,8 @@ impl Default for ReaderState {
             check_updates: false,
             swap_page_buttons: false,
             swap_menu_buttons: false,
+            sync_automatically: false,
+            sync_conflict: SyncConflict::default(),
             full_refresh_interval: default_full_refresh_interval(),
             books: BTreeMap::new(),
         }

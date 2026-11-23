@@ -155,7 +155,8 @@ fn download_commits_current_annotations_and_rejects_stale_failed_and_cancelled_r
             !session.is_busy()
         });
         if case == "success" {
-            assert_eq!(saves, 1);
+            // The position, then the record it now agrees with.
+            assert_eq!(saves, 2);
             assert_eq!(
                 reader.position(),
                 femto_reader::layout::Locator {
@@ -192,4 +193,83 @@ fn changed_source_file_is_rejected_before_network_access() {
         !session.is_busy()
     });
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn automatic_sync_asks_when_both_moved_follows_the_answer_and_uploads_before_sleep() {
+    use femto_reader::state::SyncConflict;
+    let run = |session: &mut Session, reader: &mut Reader, ui: &mut ReaderUi| {
+        let mut saves = 0;
+        until(|| {
+            session.poll(reader, ui, 20, |_| {
+                saves += 1;
+                Ok(())
+            });
+            !session.is_busy()
+        });
+        (saves, session.take_outcome())
+    };
+    let (mut reader, mut session, mut ui, factory, ready, _) = setup(&fixture("sample.epub"));
+    ready.store(true, Ordering::SeqCst);
+    reader.record_position(10);
+    let original = reader.position();
+    let synced = |reader: &Reader| reader.state.books.values().next().unwrap().synced.clone();
+    // A book never synced meets another device's record: the user is asked.
+    assert!(session.has_unsent(&reader));
+    assert!(session.reconcile(&reader, factory.clone(), false));
+    let (saves, outcome) = run(&mut session, &mut reader, &mut ui);
+    assert_eq!((saves, reader.position()), (0, original));
+    assert_eq!(outcome.as_deref(), Some("Asked which position to keep"));
+    assert!(ui.is_open() && !ui.is_kosync_open());
+    // No second question is put while the first stands.
+    assert!(!session.reconcile(&reader, factory.clone(), false));
+    ui.choose(&mut reader, "Go to 10%").unwrap();
+    let event = ui.take_kosync_event().unwrap();
+    assert!(!ui.is_open());
+    session
+        .event(event, &reader, &mut ui, factory.clone())
+        .unwrap();
+    let (saves, _) = run(&mut session, &mut reader, &mut ui);
+    assert_eq!(saves, 2);
+    assert_ne!(reader.position(), original);
+    let agreed = synced(&reader).unwrap();
+    assert_eq!(
+        (agreed.position, agreed.device_id.as_str(), agreed.timestamp),
+        (reader.position(), "peer", 123)
+    );
+    assert!(!ui.is_open() && !session.has_unsent(&reader));
+    // The same record again is not news.
+    assert!(session.reconcile(&reader, factory.clone(), false));
+    let (saves, outcome) = run(&mut session, &mut reader, &mut ui);
+    assert_eq!(
+        (saves, outcome.as_deref()),
+        (0, Some("Nothing to exchange"))
+    );
+    // After reading on, the reader uploads before it sleeps, without a menu.
+    reader.dispatch(Action::Chapter(1)).unwrap();
+    assert!(session.has_unsent(&reader));
+    assert!(session.reconcile(&reader, factory.clone(), true));
+    let (saves, outcome) = run(&mut session, &mut reader, &mut ui);
+    assert_eq!(
+        (saves, outcome.as_deref()),
+        (1, Some("Reading position uploaded"))
+    );
+    let agreed = synced(&reader).unwrap();
+    assert_eq!(
+        (agreed.position, agreed.device_id.as_str()),
+        (reader.position(), "test")
+    );
+    assert!(!ui.is_open() && !session.has_unsent(&reader));
+
+    // With the setting to take the other device's position, nothing is asked.
+    let (mut reader, mut session, mut ui, factory, ready, _) = setup(&fixture("sample.epub"));
+    ready.store(true, Ordering::SeqCst);
+    reader.record_position(10);
+    reader.state.sync_conflict = SyncConflict::Remote;
+    let original = reader.position();
+    assert!(session.reconcile(&reader, factory, false));
+    run(&mut session, &mut reader, &mut ui);
+    assert!(!ui.is_open());
+    assert_ne!(reader.position(), original);
+    assert_eq!(synced(&reader).unwrap().device_id, "peer");
 }

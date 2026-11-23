@@ -46,9 +46,7 @@ fn hold(pin: i32, high: bool) -> Result<(), String> {
 pub fn enter(wake_after: Option<Duration>) -> ! {
     let result = (|| -> Result<(), String> {
         if let Some(wake_after) = wake_after {
-            check(unsafe {
-                sys::esp_sleep_enable_timer_wakeup(wake_after.as_micros() as u64)
-            })?;
+            check(unsafe { sys::esp_sleep_enable_timer_wakeup(wake_after.as_micros() as u64) })?;
         }
         check(unsafe {
             sys::esp_sleep_enable_ext1_wakeup(

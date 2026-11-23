@@ -1,6 +1,5 @@
 //! Device enrollment and authenticated map-worker ownership.
 use femto_microlink::{
-    control_session::Endpoint,
     control_worker::{ControlledNetwork, Reconnect, ReconnectProgress, StopReason},
     coordinator::Clock,
     device_config::Config,
@@ -43,6 +42,19 @@ struct Setup {
 /// datagrams, which leaves only relayed paths to test.
 pub static RELAY_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Internal-storage name of the home relay region last connected.
+#[cfg(target_os = "espidf")]
+const HOME_RELAY: &str = "home_relay";
+fn stored_home() -> Option<u64> {
+    #[cfg(target_os = "espidf")]
+    {
+        let stored = crate::nvs::get(HOME_RELAY).ok()??;
+        Some(u64::from_le_bytes(stored.as_slice().try_into().ok()?))
+    }
+    #[cfg(not(target_os = "espidf"))]
+    None
+}
+
 fn setup_worker(
     setup: Arc<Setup>,
     sender: SyncSender<Registration>,
@@ -60,23 +72,11 @@ fn setup_worker(
         let previously_authorized = setup.authorized.load(Ordering::Acquire);
         let mut reported = false;
         let result = (|| {
-            let control_key = crate::control::fetch_control_key(
+            let (endpoint, mut control) = crate::control::open_session(
                 &config.host,
                 config.port,
                 CAPABILITY_VERSION,
-                Instant::now() + Duration::from_secs(15),
-                cancel.clone(),
-            )?;
-            let endpoint = Endpoint {
-                host: config.host.clone(),
-                port: config.port,
-                control_key,
-                version: CAPABILITY_VERSION,
-            };
-            let mut control = crate::control::connect_session(
-                &endpoint,
                 identity.machine_key(),
-                Duration::from_secs(60),
                 cancel.clone(),
             )?;
             let mut host = HostInfo::esp32(&config.hostname, "");
@@ -178,6 +178,16 @@ pub struct Runtime {
     reconnecting: bool,
     stopped: bool,
     next_diagnostics_ms: u64,
+    /// The home relay region last logged.
+    #[cfg(target_os = "espidf")]
+    home: Option<u64>,
+    /// The peer paths last logged.
+    #[cfg(target_os = "espidf")]
+    paths: Vec<(
+        femto_microlink::protocol::key::PublicKey<femto_microlink::protocol::key::Node>,
+        Option<femto_microlink::discovery::Route>,
+        bool,
+    )>,
     /// The last poll moved no packet on an established session.
     quiet: bool,
     /// Endpoints have been published since the address was assigned.
@@ -207,7 +217,8 @@ impl Runtime {
             .map_err(|e| e.to_string())?
             .as_secs();
         let timestamps = TimestampClock::open(store, unix).map_err(|e| e.to_string())?;
-        let network = Network::new(&identity, timestamps, 64, 4).map_err(|e| e.to_string())?;
+        let mut network = Network::new(&identity, timestamps, 64, 4).map_err(|e| e.to_string())?;
+        network.set_previous_home(stored_home());
         let mut udp =
             UdpTransport::bind("0.0.0.0:0".parse().unwrap()).map_err(|e| e.to_string())?;
         if RELAY_ONLY.load(std::sync::atomic::Ordering::Relaxed) {
@@ -249,6 +260,10 @@ impl Runtime {
             reconnecting: false,
             stopped: false,
             next_diagnostics_ms: 30_000,
+            #[cfg(target_os = "espidf")]
+            home: None,
+            #[cfg(target_os = "espidf")]
+            paths: Vec::new(),
             quiet: false,
             announced: false,
         })
@@ -395,6 +410,24 @@ impl Runtime {
             self.owner.run(clock, |network| {
                 let now = clock().monotonic_ms;
                 let assigned = network.local_address(now)?;
+                #[cfg(target_os = "espidf")]
+                for trace in network.take_trace() {
+                    log::info!("Tailnet packet: {trace:?}");
+                }
+                #[cfg(target_os = "espidf")]
+                {
+                    let paths = network.paths(now)?;
+                    if paths != self.paths {
+                        for (peer, route, session) in &paths {
+                            log::info!(
+                                "Tailnet peer {:02x}{:02x}: {route:?}, session {session}",
+                                peer.as_bytes()[0],
+                                peer.as_bytes()[1],
+                            );
+                        }
+                        self.paths = paths;
+                    }
+                }
                 if now >= self.next_diagnostics_ms {
                     self.next_diagnostics_ms = now.saturating_add(30_000);
                     #[cfg(target_os = "espidf")]
@@ -406,6 +439,17 @@ impl Runtime {
                         let observed = network.observed_endpoints(now)?;
                         let local = self.local_address.endpoint(self.udp.local_addr()?.port());
                         let home = self.relays.home_region(network, now);
+                        #[cfg(target_os = "espidf")]
+                        if home != self.home {
+                            log::info!("Tailnet home relay: {home:?}");
+                            self.home = home;
+                            if let Some(region) = home
+                                && stored_home() != home
+                            {
+                                // Unstored, the next session measures again.
+                                let _ = crate::nvs::set(HOME_RELAY, &region.to_le_bytes());
+                            }
+                        }
                         let snapshot = Snapshot::new(local, &observed)?.with_home_relay(home)?;
                         // Each publication costs a control connection, and
                         // peers answer through the home relay, so the first

@@ -122,6 +122,17 @@ mod network {
         }
     }
 }
+mod nvs {
+    use std::{cell::RefCell, collections::BTreeMap};
+    thread_local! { pub static STORED: RefCell<BTreeMap<String, Vec<u8>>> = RefCell::default(); }
+    pub fn get(key: &str) -> Result<Option<Vec<u8>>, String> {
+        Ok(STORED.with_borrow(|stored| stored.get(key).cloned()))
+    }
+    pub fn set(key: &str, value: &[u8]) -> Result<(), String> {
+        STORED.with_borrow_mut(|stored| stored.insert(key.into(), value.into()));
+        Ok(())
+    }
+}
 #[path = "../../../firmware/picco/src/control.rs"]
 mod control;
 fn setup() {
@@ -223,6 +234,48 @@ fn device_noise_upgrade_rejects_non_upgrade_response() {
         .is_err()
     );
     assert_eq!(STATE.with_borrow(|s| s.calls), 1);
+}
+
+/// The fixture answers every connection with the key response, so no session
+/// opens; the connection count shows which steps a stored key causes.
+#[test]
+fn stored_coordinator_key_is_tried_first_and_fetched_again_only_once() {
+    let identity = femto_microlink::protocol::identity::DeviceIdentity::generate().unwrap();
+    let open = |stored: Option<(u8, &str)>| {
+        setup();
+        nvs::STORED.with_borrow_mut(|values| {
+            values.clear();
+            if let Some((byte, authority)) = stored {
+                let mut record = vec![byte; 32];
+                record.extend_from_slice(authority.as_bytes());
+                values.insert("control_key".into(), record);
+            }
+        });
+        assert!(
+            control::open_session(
+                "control.example",
+                443,
+                123,
+                identity.machine_key(),
+                Arc::new(AtomicBool::new(false)),
+            )
+            .is_err()
+        );
+        STATE.with_borrow(|s| s.calls)
+    };
+    // Nothing stored, or a key stored for another coordinator: fetch, then connect.
+    assert_eq!(open(None), 2);
+    assert_eq!(open(Some((2, "other.example"))), 2);
+    // The stored key fails and the coordinator still gives the same one:
+    // the key was not at fault, so no third connection.
+    assert_eq!(open(Some((1, "control.example"))), 2);
+    // A different key from the coordinator is tried.
+    assert_eq!(open(Some((2, "control.example"))), 3);
+    // A key that opened no session is not stored.
+    assert_eq!(
+        nvs::STORED.with_borrow(|values| values["control_key"][0]),
+        2
+    );
 }
 
 #[path = "../../../firmware/picco/src/relay.rs"]

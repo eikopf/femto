@@ -309,6 +309,7 @@ impl<T: Transport> Pool<T> {
                     {
                         existing.plan = plan;
                         self.prefer_peer = false;
+                        network.home_relay_connected(now_ms)?;
                     }
                     None
                 }
@@ -438,8 +439,12 @@ impl<T: Transport> Pool<T> {
             .retain(|(old, _)| !Self::same_endpoint(old, &connection.plan));
         self.restarts
             .retain(|restart| restart.plan.region() != region);
+        let home = connection.plan.is_home();
         self.connections.insert(region, connection);
         self.prefer_peer = false;
+        if home {
+            network.home_relay_connected(now_ms)?;
+        }
         Ok(())
     }
     /// As many events from each region as a poll takes datagrams from the

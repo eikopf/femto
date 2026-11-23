@@ -53,6 +53,7 @@ pub mod relay;
 pub mod relay_pool;
 pub mod relay_worker;
 pub mod rotation;
+pub mod sealed;
 #[cfg(all(unix, not(target_os = "espidf")))]
 pub mod store;
 pub mod stun;

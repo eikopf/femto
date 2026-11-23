@@ -23,7 +23,7 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread::JoinHandle,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 const RELEASE: &str = "https://github.com/eikopf/femto/releases/latest/download/";

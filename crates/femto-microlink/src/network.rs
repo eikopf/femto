@@ -148,8 +148,28 @@ pub struct Diagnostics {
     pub usable_peers: usize,
 }
 
+/// A handshake or discovery packet that crossed the network, kept for
+/// diagnostics. Data packets are not recorded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Trace {
+    pub at_ms: u64,
+    pub sent: bool,
+    pub kind: TraceKind,
+    pub relayed: bool,
+    /// False for a received packet that was rejected.
+    pub accepted: bool,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TraceKind {
+    Initiation,
+    Response,
+    Discovery,
+}
+const TRACES: usize = 64;
+
 pub struct Network<S: EpochStore> {
     diagnostics: Diagnostics,
+    trace: VecDeque<Trace>,
     local_node: Key,
     coordinator: Coordinator,
     discovery: Discovery,
@@ -172,6 +192,10 @@ pub struct Network<S: EpochStore> {
     /// these are probed for a direct path: a probe costs a key exchange, a
     /// reader talks to one or two peers, and a tailnet can hold hundreds.
     wanted: std::collections::BTreeSet<Key>,
+    previous_home: Option<u64>,
+    /// Addresses from which a wanted peer has verified a direct path to this
+    /// node, by a ping this node answered.
+    verified_from: std::collections::BTreeSet<(Key, SocketAddr)>,
     /// The relay region each STUN server measures.
     stun_regions: Vec<(u64, std::net::SocketAddrV4)>,
     handshake_retry: BTreeMap<Key, u64>,
@@ -202,6 +226,7 @@ impl<S: EpochStore> Network<S> {
     ) -> Result<Self, Error> {
         Ok(Self {
             diagnostics: Diagnostics::default(),
+            trace: VecDeque::new(),
             local_node: identity.node_key().public(),
             coordinator: match address {
                 Some(address) => Coordinator::new(
@@ -234,12 +259,63 @@ impl<S: EpochStore> Network<S> {
             endpoints: Default::default(),
             stun_regions: Vec::new(),
             wanted: Default::default(),
+            previous_home: None,
+            verified_from: Default::default(),
             handshake_retry: BTreeMap::new(),
             retry_series: BTreeMap::new(),
             keepalives: BTreeMap::new(),
             silence: BTreeMap::new(),
             next_handshake_ms: 0,
         })
+    }
+    /// Names the home relay region of this node's last session, which the
+    /// coordinator still announces to peers. Set before the first map.
+    pub fn set_previous_home(&mut self, region: Option<u64>) {
+        self.previous_home = region;
+    }
+    /// For diagnostics: the route chosen for each peer the application has
+    /// sent to in this session, and whether a session with it is established.
+    pub fn paths(&mut self, now_ms: u64) -> Result<Vec<(Key, Option<Route>, bool)>, Error> {
+        self.tick(now_ms)?;
+        let peers: Vec<Key> = self.wanted.iter().copied().collect();
+        peers
+            .into_iter()
+            .map(|peer| {
+                let route = self.discovery.select(&mut self.coordinator, peer, now_ms)?;
+                let session = self
+                    .coordinator
+                    .data_plane()
+                    .session_identity(peer, now_ms)?
+                    .is_some();
+                Ok((peer, route, session))
+            })
+            .collect()
+    }
+    /// Handshake and discovery packets since the last call, oldest first; the
+    /// oldest are dropped beyond a fixed number.
+    pub fn take_trace(&mut self) -> impl Iterator<Item = Trace> + '_ {
+        self.trace.drain(..)
+    }
+    fn note(&mut self, at_ms: u64, sent: bool, bytes: &[u8], relayed: bool, accepted: bool) {
+        let kind = if bytes.starts_with(b"TS\xf0\x9f\x92\xac") {
+            TraceKind::Discovery
+        } else if bytes.starts_with(&1u32.to_le_bytes()) {
+            TraceKind::Initiation
+        } else if bytes.starts_with(&2u32.to_le_bytes()) {
+            TraceKind::Response
+        } else {
+            return;
+        };
+        if self.trace.len() == TRACES {
+            self.trace.pop_front();
+        }
+        self.trace.push_back(Trace {
+            at_ms,
+            sent,
+            kind,
+            relayed,
+            accepted,
+        });
     }
     /// Allocation-free snapshot. Buffer capacities exclude container metadata,
     /// allocator overhead, protocol state and transport-adapter queues.
@@ -267,6 +343,7 @@ impl<S: EpochStore> Network<S> {
         self.retry_series.clear();
         self.keepalives.clear();
         self.wanted.clear();
+        self.verified_from.clear();
         self.silence.clear();
         self.udp_bindings.clear();
         self.endpoints.clear();
@@ -626,8 +703,14 @@ impl<S: EpochStore> Network<S> {
         mut accept: impl FnMut(&RelayPlan) -> bool,
     ) -> Result<Option<RelayPlan>, Error> {
         self.tick(now_ms)?;
-        // The home relay is the nearest one; wait for the first measurements.
-        if !self.endpoints.settled(now_ms) {
+        // Peers answer through the home the coordinator announces for this
+        // node, which is the one it published last. Keeping it means their
+        // first answer finds this node, and it needs no measurement. Another
+        // region is chosen only when that one is gone or cannot be set up.
+        let announced = self.previous_home;
+        let settled = self.endpoints.settled(now_ms);
+        if !settled && announced.is_none() {
+            // Otherwise the home is the nearest relay; wait to know which.
             return Ok(None);
         }
         let mut nearest: Vec<(u64, u64)> = self
@@ -642,21 +725,25 @@ impl<S: EpochStore> Network<S> {
             })
             .collect();
         nearest.sort_unstable();
-        let nearest: Vec<u64> = nearest.into_iter().map(|(_, region)| region).collect();
+        let nearest: Vec<u64> = announced
+            .into_iter()
+            .chain(nearest.into_iter().map(|(_, region)| region))
+            .collect();
         let authorization = self.coordinator.data_plane().authorization_identity();
         let local_node = self.local_node;
         let directory = self.coordinator.relay_identity();
         Ok(self
             .coordinator
             .home_relay_matching(now_ms, &nearest, |region, node| {
-                accept(&RelayPlan {
-                    region,
-                    home: true,
-                    node: node.clone(),
-                    local_node,
-                    authorization: authorization.clone(),
-                    directory: directory.clone(),
-                })
+                (settled || announced == Some(region))
+                    && accept(&RelayPlan {
+                        region,
+                        home: true,
+                        node: node.clone(),
+                        local_node,
+                        authorization: authorization.clone(),
+                        directory: directory.clone(),
+                    })
             })?
             .map(|(region, node)| RelayPlan {
                 region,
@@ -894,6 +981,27 @@ impl<S: EpochStore> Network<S> {
         self.handshake_retry.insert(peer, retry);
         Ok(true)
     }
+    /// Initiates again to a peer whose answer to the last initiation had no
+    /// way back until now. The peer answers through what it knows of this
+    /// node: a direct path it has verified, else this node's home relay. An
+    /// initiation sent before either existed is answered into the void, and
+    /// the timer would repeat it only five seconds later.
+    fn initiate_again(&mut self, peer: Key, now_ms: u64) -> Result<(), Error> {
+        if !self.wanted.contains(&peer) || !self.handshakes.abandon(peer) {
+            return Ok(());
+        }
+        self.handshake_retry.remove(&peer);
+        self.next_handshake_ms = now_ms;
+        self.schedule_handshake(peer, now_ms).map(|_| ())
+    }
+    /// The home relay has connected: peers can answer through it.
+    pub(crate) fn home_relay_connected(&mut self, now_ms: u64) -> Result<(), Error> {
+        self.tick(now_ms)?;
+        let peers: Vec<Key> = self.wanted.iter().copied().collect();
+        peers
+            .into_iter()
+            .try_for_each(|peer| self.initiate_again(peer, now_ms))
+    }
     /// Notes that the application is sending to this peer.
     fn want(&mut self, peer: Key) {
         // As many as the handshake retry table holds.
@@ -1104,6 +1212,13 @@ impl<S: EpochStore> Network<S> {
     pub fn receive(&mut self, source: Source, packet: &[u8], now_ms: u64) -> Result<(), Error> {
         self.diagnostics.receive_calls = self.diagnostics.receive_calls.saturating_add(1);
         let result = self.receive_inner(source, packet, now_ms);
+        self.note(
+            now_ms,
+            false,
+            packet,
+            matches!(source, Source::Relay(_)),
+            result.is_ok(),
+        );
         if result.is_err() {
             self.diagnostics.receive_rejected = self.diagnostics.receive_rejected.saturating_add(1);
         }
@@ -1137,6 +1252,16 @@ impl<S: EpochStore> Network<S> {
                             .reply(&mut self.coordinator, endpoint, packet, now_ms)
                     {
                         self.queue(peer, Destination::UdpReply(endpoint), reply, now_ms)?;
+                        // With this answer the peer verifies a direct path
+                        // to this node; the first time is news.
+                        if self.wanted.contains(&peer) {
+                            if self.verified_from.len() >= 64 {
+                                self.verified_from.clear();
+                            }
+                            if self.verified_from.insert((peer, endpoint)) {
+                                self.initiate_again(peer, now_ms)?;
+                            }
+                        }
                     } else {
                         self.discovery
                             .pong(&mut self.coordinator, endpoint, packet, now_ms)?;
@@ -1284,6 +1409,13 @@ impl<S: EpochStore> Network<S> {
                 Ok(()) => {
                     self.diagnostics.send_accepted =
                         self.diagnostics.send_accepted.saturating_add(1);
+                    self.note(
+                        now_ms,
+                        true,
+                        &packet.bytes,
+                        matches!(route, Route::Relay(_)),
+                        true,
+                    );
                     if packet.session.is_some() && packet.bytes.len() > 32 {
                         // Output was accepted; timer setup cannot undo the send.
                         let _ = self.arm_silence(&packet, now_ms);
@@ -2290,6 +2422,39 @@ mod tests {
         assert!(na.handshake_retry.is_empty());
     }
     #[test]
+    fn initiation_is_repeated_once_when_the_peer_gains_a_way_to_answer() {
+        let a = DeviceIdentity::generate().unwrap();
+        let b = DeviceIdentity::generate().unwrap();
+        let (ad, bk) = (a.disco_key().public(), b.node_key().public());
+        let mut na = network(&a, &b, 1, 2);
+        let initiations = |network: &Network<Store>| {
+            network
+                .outgoing
+                .iter()
+                .filter(|packet| packet.bytes.starts_with(&1u32.to_le_bytes()))
+                .count()
+        };
+        let source = Source::Udp("192.0.2.2:1234".parse().unwrap());
+        let ping = |id| crate::protocol::disco::seal_ping(b.disco_key(), ad, [id; 12], bk).unwrap();
+        // A ping from a peer this node is not sending to starts nothing.
+        na.receive(source, &ping(1), 0).unwrap();
+        assert_eq!(initiations(&na), 0);
+        assert!(!na.ensure_session(bk, 1).unwrap());
+        assert_eq!(initiations(&na), 1);
+        // The peer verifies a direct path: the unanswered initiation is
+        // replaced at once, not after the five-second timer.
+        na.receive(source, &ping(2), 2).unwrap();
+        assert_eq!(initiations(&na), 2);
+        assert_eq!(na.handshakes.pending_count(), 1);
+        // Further pings from there are not news.
+        na.receive(source, &ping(3), 3).unwrap();
+        assert_eq!(initiations(&na), 2);
+        // The home relay connecting is.
+        na.home_relay_connected(4).unwrap();
+        assert_eq!(initiations(&na), 3);
+        assert_eq!(na.handshakes.pending_count(), 1);
+    }
+    #[test]
     fn handshake_readiness_limits_global_initiation_rate() {
         let local = DeviceIdentity::generate().unwrap();
         let first = DeviceIdentity::generate().unwrap();
@@ -2717,6 +2882,42 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(last.region(), 9);
+    }
+    #[test]
+    fn previous_home_relay_is_kept_without_measuring() {
+        let a = DeviceIdentity::generate().unwrap();
+        let b = DeviceIdentity::generate().unwrap();
+        let mut owner = network(&a, &b, 1, 2);
+        owner.set_previous_home(Some(9));
+        let map = json!({"DERPMap":{"Regions":{
+                "4":{"RegionID":4,"Nodes":[{"Name":"4a","RegionID":4,"HostName":"near.example","IPv4":"192.0.2.4","STUNPort":3478}]},
+                "9":{"RegionID":9,"Nodes":[{"Name":"9a","RegionID":9,"HostName":"announced.example","IPv4":"192.0.2.9","STUNPort":3478}]}}}});
+        owner
+            .apply_map(&serde_json::to_vec(&map).unwrap(), clock(1))
+            .unwrap();
+        // Peers answer through region 9, so it is the home at once.
+        assert_eq!(owner.home_relay_plan(1).unwrap().unwrap().region(), 9);
+        // While it cannot be set up, another home waits for the measurements.
+        assert!(
+            owner
+                .home_relay_matching(1, |plan| plan.region() != 9)
+                .unwrap()
+                .is_none()
+        );
+        for now in [1, 2] {
+            assert!(owner.send_stun(now, |_, _| Ok(())).unwrap());
+        }
+        // No server answers; the round settles when its requests expire.
+        let settled = (3..20_000)
+            .step_by(500)
+            .find(|now| {
+                owner
+                    .home_relay_matching(*now, |plan| plan.region() != 9)
+                    .unwrap()
+                    .is_some()
+            })
+            .unwrap();
+        assert_eq!(owner.home_relay_plan(settled).unwrap().unwrap().region(), 9);
     }
     #[test]
     fn automatic_probes_cycle_peers_and_recheck_revocation() {

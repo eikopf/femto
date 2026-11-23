@@ -259,6 +259,20 @@ fn run() -> Result<(), String> {
     let mut setup = setup::Setup::default();
     let mut last_input = Instant::now();
     let mut busy_since: Option<(Instant, bool)> = None;
+    // Keeps the radio awake while network work is in flight, and while a
+    // menu is open, because a request starts from one.
+    macro_rules! attend {
+        () => {
+            let networking = ui.is_open()
+                || screen.catalog.is_busy()
+                || updater.is_busy()
+                || screen.tailnet.driver().is_some()
+                || kosync.as_ref().is_some_and(|sync| sync.is_busy());
+            if let Some(wifi) = screen.wifi() {
+                wifi.set_attentive(networking);
+            }
+        };
+    }
     loop {
         std::thread::sleep(Duration::from_millis(10));
         screen.poll_wifi();
@@ -485,6 +499,10 @@ fn run() -> Result<(), String> {
                     reader.state.frontlight = previous_light;
                 }
             }
+            // Work this input started needs the radio awake for its first
+            // packet; the drawing below would put that off by a second, and
+            // a name lookup sent to a dozing radio has failed.
+            attend!();
             dirty |= effect == Effect::Redraw;
             if dirty {
                 carry = screen.event();
@@ -769,13 +787,7 @@ fn run() -> Result<(), String> {
             render(&mut reader, &ui, &mut plane)?;
             screen.present(&plane)?;
         }
-        let networking = screen.catalog.is_busy()
-            || updater.is_busy()
-            || screen.tailnet.driver().is_some()
-            || kosync.as_ref().is_some_and(|sync| sync.is_busy());
-        if let Some(wifi) = screen.wifi() {
-            wifi.set_attentive(networking);
-        }
+        attend!();
         let manual_sleep = ui.take_sleep_request();
         let idle_now = idle_epoch.elapsed().as_millis().min(u64::MAX as u128) as u64;
         idle.configure(idle_now, reader.state.idle_sleep.minutes() * 60 * 1000);

@@ -6,6 +6,7 @@ use crate::{
         disco,
         key::{Disco, Node, PrivateKey, PublicKey},
     },
+    sealed::{Message, Sealer},
 };
 use std::{collections::BTreeMap, net::SocketAddr};
 type Key = PublicKey<Node>;
@@ -65,7 +66,7 @@ struct ProbeCursor {
 }
 pub struct Discovery {
     local_node: Key,
-    local_disco: PrivateKey<Disco>,
+    sealer: Sealer,
     pending: BTreeMap<[u8; 12], Path>,
     paths: BTreeMap<Key, Path>,
     candidates: BTreeMap<Key, Candidates>,
@@ -80,7 +81,7 @@ impl Discovery {
         }
         Ok(Self {
             local_node,
-            local_disco,
+            sealer: Sealer::new(local_disco),
             pending: BTreeMap::new(),
             paths: BTreeMap::new(),
             candidates: BTreeMap::new(),
@@ -90,6 +91,7 @@ impl Discovery {
         })
     }
     pub fn clear(&mut self) {
+        self.sealer.clear();
         self.pending.clear();
         self.paths.clear();
         self.candidates.clear();
@@ -272,7 +274,7 @@ impl Discovery {
         if self.pending.contains_key(&id) {
             return Err(Error::Random);
         }
-        let packet = disco::seal_ping(&self.local_disco, disco, id, self.local_node)?;
+        let packet = self.sealer.ping(disco, id, self.local_node)?;
         self.pending.insert(
             id,
             Path {
@@ -303,11 +305,7 @@ impl Discovery {
         if coordinator.peer_for_discovery(disco, now_ms)? != Some(peer) {
             return Err(Error::Invalid);
         }
-        Ok(disco::seal_call_me_maybe(
-            &self.local_disco,
-            disco,
-            &endpoints,
-        )?)
+        Ok(self.sealer.call_me_maybe(disco, &endpoints)?)
     }
     /// Only DERP adapters may call this entry point, using the relay's source
     /// node key. This never promotes an endpoint to a validated direct path.
@@ -322,13 +320,15 @@ impl Discovery {
         if !(98..=368).contains(&packet.len()) {
             return Err(Error::Invalid);
         }
-        let message = disco::open_call_me_maybe(&self.local_disco, packet)?;
         let peer = coordinator
-            .peer_for_discovery(message.sender_disco_key, now_ms)?
+            .peer_for_discovery(Sealer::sender(packet)?, now_ms)?
             .ok_or(Error::Unknown)?;
         if peer != relay_peer {
             return Err(Error::Invalid);
         }
+        let Message::CallMeMaybe(message) = self.sealer.open(packet)? else {
+            return Err(disco::DiscoError::NotCallMeMaybe.into());
+        };
         let endpoints = checked_endpoints(&message.endpoints)?;
         if !self.candidates.contains_key(&peer) && self.candidates.len() >= 256 {
             return Err(Error::Capacity);
@@ -381,10 +381,12 @@ impl Discovery {
         if !(92..=1536).contains(&packet.len()) {
             return Err(Error::Invalid);
         }
-        let ping = disco::open_ping(&self.local_disco, packet)?;
         let peer = coordinator
-            .peer_for_discovery(ping.sender_disco_key, now_ms)?
+            .peer_for_discovery(Sealer::sender(packet)?, now_ms)?
             .ok_or(Error::Unknown)?;
+        let Message::Ping(ping) = self.sealer.open(packet)? else {
+            return Err(disco::DiscoError::NotPing.into());
+        };
         if ping
             .node_key
             .is_some_and(|node| node != Key::zero() && node != peer)
@@ -393,12 +395,8 @@ impl Discovery {
         }
         Ok((
             peer,
-            disco::seal_pong(
-                &self.local_disco,
-                ping.sender_disco_key,
-                ping.transaction_id,
-                source,
-            )?,
+            self.sealer
+                .pong(ping.sender_disco_key, ping.transaction_id, source)?,
         ))
     }
     pub fn pong(
@@ -412,7 +410,13 @@ impl Discovery {
         if !(110..=1536).contains(&packet.len()) {
             return Err(Error::Invalid);
         }
-        let pong = disco::open_pong(&self.local_disco, packet)?;
+        // A stranger's packet is refused before any cryptography.
+        coordinator
+            .peer_for_discovery(Sealer::sender(packet)?, now_ms)?
+            .ok_or(Error::Unknown)?;
+        let Message::Pong(pong) = self.sealer.open(packet)? else {
+            return Err(disco::DiscoError::NotPong.into());
+        };
         let pending = self
             .pending
             .get(&pong.transaction_id)

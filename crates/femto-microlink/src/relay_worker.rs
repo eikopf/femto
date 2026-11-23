@@ -60,14 +60,17 @@ impl<T: Transport + Send + 'static> Dialer<T> {
         + Send
         + 'static,
     ) -> io::Result<bool> {
+        if self.job.is_some() || now_ms < self.next_ms {
+            return Ok(false);
+        }
+        // Deriving the public key is a scalar multiplication, about 50 ms on
+        // the reader; callers offer a plan on every poll, so it is done only
+        // when a setup would start.
         if key.public() != plan.local_node() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "relay identity mismatch",
             ));
-        }
-        if self.job.is_some() || now_ms < self.next_ms {
-            return Ok(false);
         }
         if !(64 * 1024..=2 * 1024 * 1024).contains(&stack_bytes) {
             return Err(io::Error::new(

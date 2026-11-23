@@ -189,7 +189,11 @@ fn connect_inner(
 fn connect_tcp(host: &str, port: u16, budget: &Budget) -> io::Result<TcpStream> {
     // Platform DNS is synchronous. Recheck the budget after it returns.
     let looked_up = Instant::now();
-    let addresses = (host.trim_start_matches('[').trim_end_matches(']'), port).to_socket_addrs()?;
+    // The resolver reports an unanswered query and an unknown name alike; an
+    // unanswered one is common on a weak link, so callers may try again.
+    let addresses = (host.trim_start_matches('[').trim_end_matches(']'), port)
+        .to_socket_addrs()
+        .map_err(|error| io::Error::new(io::ErrorKind::HostUnreachable, error))?;
     let lookup = looked_up.elapsed().as_millis();
     let mut last = io::Error::new(io::ErrorKind::NotFound, "no request address");
     for address in addresses.take(8) {

@@ -11,6 +11,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 getrandom = "=0.2.17"
+crypto_box = { version = "=0.9.1", default-features = false, features = ["alloc", "salsa20"] }
 httparse = "=1.10.1"
 sha2.workspace = true
 zeroize = { version = "=1.9.1", features = ["serde"] }
@@ -27,7 +28,6 @@ webpki-roots = "=1.0.11"
 
 [dev-dependencies]
 tempfile.workspace = true
-crypto_box = "=0.9.1"
 
 [target.'cfg(all(unix, not(target_os = "espidf")))'.dev-dependencies]
 rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring"] }

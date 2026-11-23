@@ -70,6 +70,18 @@ mod control {
     ) -> io::Result<femto_microlink::control_session::ControlSession<LocalStream>> {
         panic!("failed bootstrap must not proceed to session setup")
     }
+    pub fn open_session(
+        host: &str,
+        port: u16,
+        version: u16,
+        _: &PrivateKey<Machine>,
+        cancelled: Arc<AtomicBool>,
+    ) -> io::Result<(
+        femto_microlink::control_session::Endpoint,
+        femto_microlink::control_session::ControlSession<LocalStream>,
+    )> {
+        Err(fetch_control_key(host, port, version, Instant::now(), cancelled).unwrap_err())
+    }
 }
 pub struct Memory(Rc<RefCell<Option<Vec<u8>>>>);
 impl Backend for Memory {

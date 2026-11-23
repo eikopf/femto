@@ -156,6 +156,13 @@ impl Handshakes {
     pub fn pending_count(&self) -> usize {
         self.pending.len() + self.responding.len()
     }
+    /// Gives up an initiation to `peer` that has had no response. Whether
+    /// there was one.
+    pub(crate) fn abandon(&mut self, peer: Key) -> bool {
+        let before = self.pending.len();
+        self.pending.retain(|_, pending| pending.peer != peer);
+        self.pending.len() != before
+    }
     pub(crate) fn pending_for(&self, peer: Key) -> bool {
         self.pending.values().any(|p| p.peer == peer)
             || self.responding.values().any(|p| p.peer == peer)

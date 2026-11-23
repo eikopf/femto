@@ -76,6 +76,7 @@ impl Service {
             if let Ok(mut gate) = GATE.lock() {
                 gate.synchronized(monotonic_ms(), sample.as_secs());
             }
+            log::info!("Clock set from the time server");
         })
         .map_err(|e| format!("Time service initialization: {e}"))?;
         Ok(Self {

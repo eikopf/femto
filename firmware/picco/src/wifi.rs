@@ -79,9 +79,15 @@ impl Station {
                 let event_loop = EspSystemEventLoop::take().map_err(|e| e.to_string())?;
                 let watch = event_loop
                     .subscribe::<esp_idf_svc::wifi::WifiEvent, _>(move |event| {
-                        if let esp_idf_svc::wifi::WifiEvent::StaDisconnected(_) = event {
-                            observed.store(true, Ordering::Release);
-                        }
+                        let esp_idf_svc::wifi::WifiEvent::StaDisconnected(end) = event else {
+                            return;
+                        };
+                        log::info!(
+                            "Wi-Fi link ended: reason {} at {} dBm",
+                            end.reason(),
+                            end.rssi()
+                        );
+                        observed.store(true, Ordering::Release);
                     })
                     .map_err(|e| e.to_string())?;
                 let driver = EspWifi::new(modem, event_loop, None).map_err(|e| e.to_string())?;

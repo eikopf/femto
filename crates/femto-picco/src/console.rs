@@ -7,6 +7,9 @@ pub const MAX_FILE_BYTES: u32 = 256 * 1024 * 1024;
 /// Upload payload bytes between acknowledgements.
 pub const CHUNK_BYTES: usize = 2048;
 const LINE_BYTES: usize = 192;
+/// The shortest timed sleep: long enough for the host to see the USB device
+/// leave before it returns.
+const MIN_SLEEP: u16 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -20,6 +23,9 @@ pub enum Command {
     Awake,
     /// Reach tailnet peers through relays only in sessions opened from now on.
     Relay,
+    /// Sleep as the power button would, and wake unaided after this many
+    /// seconds, so that a sleep can be tested with nobody at the device.
+    Sleep(u16),
     Swipe(crate::input::Turn),
     /// A vertical swipe on the reading page.
     Slide {
@@ -71,6 +77,7 @@ fn parse(line: &str) -> Option<Command> {
         ("power", "") => Command::Power,
         ("awake", "") => Command::Awake,
         ("relay", "") => Command::Relay,
+        ("sleep", seconds) => Command::Sleep(seconds.parse().ok().filter(|n| *n >= MIN_SLEEP)?),
         ("swipe", "next") => Command::Swipe(crate::input::Turn::Next),
         ("swipe", "prev") => Command::Swipe(crate::input::Turn::Previous),
         ("swipe", "up") => Command::Slide { up: true },
@@ -208,6 +215,10 @@ mod tests {
                 Command::Update,
                 Command::Swipe(crate::input::Turn::Previous)
             ]
+        );
+        assert_eq!(
+            commands(b"femto sleep 4\nfemto sleep\nfemto sleep 70000\nfemto sleep 30\n"),
+            [Command::Sleep(30)]
         );
         assert_eq!(
             commands("femto tap 12 479\nfemto put 5 0000ABCD b\u{fc}cher/a b.epub\n".as_bytes()),

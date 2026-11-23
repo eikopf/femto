@@ -255,6 +255,8 @@ fn run() -> Result<(), String> {
     let mut console = console::Console::open();
     let (mut turning_forward, mut preparing) = (true, true);
     let mut stay_awake = false;
+    // A sleep asked for over USB, and how long it lasts.
+    let mut timed_sleep = None::<Duration>;
     let (mut carry, mut dirty) = (None::<input::Event>, false);
     let mut setup = setup::Setup::default();
     let mut last_input = Instant::now();
@@ -310,6 +312,10 @@ fn run() -> Result<(), String> {
                 Command::Awake => {
                     stay_awake = true;
                     log::info!("USB awake: automatic sleep suppressed until restart");
+                    None
+                }
+                Command::Sleep(seconds) => {
+                    timed_sleep = Some(Duration::from_secs(seconds.into()));
                     None
                 }
                 Command::Relay => {
@@ -804,7 +810,8 @@ fn run() -> Result<(), String> {
         // Deep sleep drops the USB connection, so an attached host keeps the
         // device awake; it is then powered and usually being driven over USB.
         let hosted = unsafe { esp_idf_svc::sys::usb_serial_jtag_is_connected() };
-        if manual_sleep || (automatic_sleep && !stay_awake && !hosted) {
+        let wake_after = timed_sleep.take();
+        if manual_sleep || wake_after.is_some() || (automatic_sleep && !stay_awake && !hosted) {
             idle.suppress_until_activity();
             let prepared = (|| -> Result<(), String> {
                 power::wait_for_release()?;
@@ -844,7 +851,7 @@ fn run() -> Result<(), String> {
                     drop(reader);
                     drop(journal);
                     drop(screen);
-                    power::enter();
+                    power::enter(wake_after);
                 }
                 Err(error) => {
                     log::warn!("{error}");

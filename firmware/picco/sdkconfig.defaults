@@ -59,3 +59,9 @@ CONFIG_FREERTOS_HZ=1000
 # round trip for every few packets.
 CONFIG_LWIP_TCP_WND_DEFAULT=32768
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+
+# Calibrate the radio at every start. With stored calibration data ESP-IDF
+# skips calibration after a wake from deep sleep, and the access point then
+# left the reader's first association request unanswered in every wake
+# measured, which cost a scan and about seven seconds.
+CONFIG_ESP_PHY_CALIBRATION_AND_DATA_STORAGE=n

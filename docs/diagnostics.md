@@ -17,6 +17,7 @@ The USB Serial/JTAG console accepts newline-terminated commands from a physicall
 | `femto power`, `femto swipe next`, `femto swipe prev` | Injects the power button or a swipe |
 | `femto swipe up`, `femto swipe down`, `femto hold` | Injects a reading gesture: a vertical swipe or a touch held in place |
 | `femto awake` | Suppresses automatic sleep until restart; deep sleep disconnects USB and needs the power button to wake. Automatic sleep is also suppressed while a USB host is connected |
+| `femto sleep SECONDS` | Sleeps as the power button would and wakes unaided after the given time, at least 5 seconds. If the wake fails, only the power button brings the reader back |
 | `femto relay` | Makes tailnet sessions opened afterwards discard direct datagrams other than STUN until restart, so that peers are reached through relays only |
 | `femto reboot` | Restarts the application |
 | `femto update` | Installs the firmware package waiting on the card; see [Updates](picco-firmware.md#updates) |
@@ -57,5 +58,7 @@ Queue capacity excludes container nodes, allocator metadata, TCP buffers, crypto
 The shared socket poller uses `UdpTransport::receive_into` with one 1,537-byte buffer per polling call. Each datagram is processed before the buffer is reused. The extra byte preserves oversized-datagram rejection. The allocating `receive` API remains available to callers that retain packets. The change removes the prior allocation and copy for each datagram in the shared poller; it does not eliminate allocations in cryptographic or application processing.
 
 An input event the reader could not carry out, such as `femto choose` naming an entry the current menu does not have, is logged as `Input failed: REASON`; the reader then shows the root menu with that message. Reopening a catalog that is already loaded shows it without a request and without a `Catalog view updated` line.
+
+The station logs `Wi-Fi link ended: reason N at S dBm` when a connection attempt or the link ends, with the ESP-IDF reason code, and the time service logs `Clock set from the time server` for each sample.
 
 Picco also logs, at information level, `Connection to HOST: lookup, TCP, TLS` times for every outgoing connection, `Tailnet connection to HOST: N ms` for each tailnet stream (including a join it waited for), `Tailnet peer KEY: route, session` when the route or session state of a peer in use changes, `Tailnet home relay: REGION` when the home relay changes, and `Tailnet packet: ...` for each handshake or discovery packet sent or received. `Network::take_trace()` holds the last 64 of those packets for other hosts.

@@ -158,6 +158,10 @@ pub fn send_packet(peer: PublicKey<Node>, packet: &[u8]) -> Result<Vec<u8>, Erro
 pub fn pong(value: [u8; 8]) -> Vec<u8> {
     frame(0x13, &value)
 }
+/// Tells the relay whether it is this node's home.
+pub fn note_preferred(preferred: bool) -> Vec<u8> {
+    frame(0x07, &[u8::from(preferred)])
+}
 
 #[cfg(test)]
 mod tests {

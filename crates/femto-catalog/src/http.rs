@@ -1,5 +1,5 @@
 //! Bounded HTTP/1 catalog requests over caller-supplied LAN or tailnet streams.
-use crate::{Catalog, MAX_FEED_BYTES};
+use crate::{Catalog, MAX_FEED_BYTES, deadline::Limit};
 use std::{
     collections::BTreeSet,
     io::{self, BufRead, BufReader, Read, Write},
@@ -7,19 +7,18 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Instant,
 };
 pub use url::Url;
 
 pub trait Stream: Read + Write {}
 impl<T: Read + Write> Stream for T {}
-/// Implementations enforce socket deadlines and cancellation, and must document
+/// Implementations enforce the limit on each wait and cancellation, and must document
 /// any uncancellable platform operations such as the host DNS resolver.
 pub trait Transport {
     fn connect(
         &mut self,
         url: &Url,
-        deadline: Instant,
+        wait: Limit,
         cancelled: Arc<AtomicBool>,
     ) -> io::Result<Box<dyn Stream>>;
 }
@@ -27,10 +26,10 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
     fn connect(
         &mut self,
         url: &Url,
-        deadline: Instant,
+        wait: Limit,
         cancelled: Arc<AtomicBool>,
     ) -> io::Result<Box<dyn Stream>> {
-        (**self).connect(url, deadline, cancelled)
+        (**self).connect(url, wait, cancelled)
     }
 }
 #[derive(Debug, thiserror::Error)]
@@ -52,14 +51,14 @@ fn invalid() -> io::Error {
         "invalid or oversized catalog HTTP response",
     )
 }
-fn check(deadline: Instant, cancelled: &AtomicBool) -> io::Result<()> {
+fn check(wait: Limit, cancelled: &AtomicBool) -> io::Result<()> {
     if cancelled.load(Ordering::Acquire) {
         return Err(io::Error::new(
             io::ErrorKind::ConnectionAborted,
             "catalog request cancelled",
         ));
     }
-    if Instant::now() >= deadline {
+    if wait.expired() {
         return Err(io::Error::new(
             io::ErrorKind::TimedOut,
             "catalog request deadline",
@@ -164,22 +163,22 @@ fn body(
     head: &Head,
     limit: usize,
     output: &mut impl Write,
-    deadline: Instant,
+    wait: Limit,
     cancelled: &AtomicBool,
 ) -> io::Result<usize> {
     fn copy_exact(
         reader: &mut impl Read,
         output: &mut impl Write,
         mut size: usize,
-        deadline: Instant,
+        wait: Limit,
         cancelled: &AtomicBool,
     ) -> io::Result<()> {
         let mut buffer = [0; 8192];
         while size > 0 {
-            check(deadline, cancelled)?;
+            check(wait, cancelled)?;
             let count = size.min(buffer.len());
             reader.read_exact(&mut buffer[..count])?;
-            check(deadline, cancelled)?;
+            check(wait, cancelled)?;
             output.write_all(&buffer[..count])?;
             size -= count;
         }
@@ -188,7 +187,7 @@ fn body(
     let mut total = 0;
     if head.chunked {
         for _ in 0..16_384 {
-            check(deadline, cancelled)?;
+            check(wait, cancelled)?;
             let chunk = line(reader, 256)?;
             let httparse::Status::Complete((_, size)) =
                 httparse::parse_chunk_size(&chunk).map_err(|_| invalid())?
@@ -210,7 +209,7 @@ fn body(
             if size > limit - total {
                 return Err(invalid());
             }
-            copy_exact(reader, output, size, deadline, cancelled)?;
+            copy_exact(reader, output, size, wait, cancelled)?;
             total += size;
             let mut end = [0; 2];
             reader.read_exact(&mut end)?;
@@ -220,12 +219,12 @@ fn body(
         }
         Err(invalid())
     } else if let Some(length) = head.length {
-        copy_exact(reader, output, length, deadline, cancelled)?;
+        copy_exact(reader, output, length, wait, cancelled)?;
         Ok(length)
     } else {
         let mut buffer = [0; 8192];
         loop {
-            check(deadline, cancelled)?;
+            check(wait, cancelled)?;
             let size = (limit - total + 1).min(buffer.len());
             let count = reader.read(&mut buffer[..size])?;
             if count == 0 {
@@ -234,7 +233,7 @@ fn body(
             if count > limit - total {
                 return Err(invalid());
             }
-            check(deadline, cancelled)?;
+            check(wait, cancelled)?;
             output.write_all(&buffer[..count])?;
             total += count;
         }
@@ -248,16 +247,16 @@ pub const MAX_EPUB_BYTES: usize = 64 * 1024 * 1024;
 pub fn read_json_response(
     stream: impl Read,
     limit: usize,
-    deadline: Instant,
+    wait: Limit,
     cancelled: &AtomicBool,
 ) -> Result<(u16, Vec<u8>), Error> {
     if limit > MAX_FEED_BYTES {
         return Err(invalid().into());
     }
-    check(deadline, cancelled)?;
+    check(wait, cancelled)?;
     let mut reader = BufReader::new(stream);
     let head = head(&mut reader, limit)?;
-    check(deadline, cancelled)?;
+    check(wait, cancelled)?;
     if !(200..300).contains(&head.status) {
         return Ok((head.status, Vec::new()));
     }
@@ -278,8 +277,8 @@ pub fn read_json_response(
         return Err(Error::ContentType);
     }
     let mut bytes = Vec::new();
-    body(&mut reader, &head, limit, &mut bytes, deadline, cancelled)?;
-    check(deadline, cancelled)?;
+    body(&mut reader, &head, limit, &mut bytes, wait, cancelled)?;
+    check(wait, cancelled)?;
     Ok((head.status, bytes))
 }
 #[derive(Debug)]
@@ -339,7 +338,7 @@ impl Kind {
 pub fn download_file(
     transport: &mut impl Transport,
     source: &str,
-    deadline: Instant,
+    wait: Limit,
     cancelled: Arc<AtomicBool>,
     limit: usize,
     offset: u64,
@@ -348,7 +347,7 @@ pub fn download_file(
     receive(
         transport,
         source,
-        deadline,
+        wait,
         cancelled,
         None,
         Kind::File { limit, offset },
@@ -361,36 +360,28 @@ pub fn download_file(
 pub fn download_epub(
     transport: &mut impl Transport,
     source: &str,
-    deadline: Instant,
+    wait: Limit,
     cancelled: Arc<AtomicBool>,
     auth: Option<&crate::auth::BasicAuth>,
     output: &mut impl Write,
 ) -> Result<Download, Error> {
-    receive(
-        transport,
-        source,
-        deadline,
-        cancelled,
-        auth,
-        Kind::Epub,
-        output,
-    )
+    receive(transport, source, wait, cancelled, auth, Kind::Epub, output)
 }
 
 pub fn fetch(
     transport: &mut impl Transport,
     source: &str,
-    deadline: Instant,
+    wait: Limit,
     cancelled: Arc<AtomicBool>,
 ) -> Result<Catalog, Error> {
-    fetch_authenticated(transport, source, deadline, cancelled, None)
+    fetch_authenticated(transport, source, wait, cancelled, None)
 }
 
 /// Loads search results, first reading the OpenSearch description if one is needed.
 pub fn fetch_search(
     transport: &mut impl Transport,
     search: &crate::search::Search,
-    deadline: Instant,
+    wait: Limit,
     cancelled: Arc<AtomicBool>,
     auth: Option<&crate::auth::BasicAuth>,
 ) -> Result<Catalog, Error> {
@@ -402,7 +393,7 @@ pub fn fetch_search(
             let found = receive(
                 transport,
                 description,
-                deadline,
+                wait,
                 cancelled.clone(),
                 auth,
                 Kind::Description,
@@ -411,13 +402,13 @@ pub fn fetch_search(
             crate::search::described_url(&bytes, &found.source, query)?
         }
     };
-    fetch_authenticated(transport, &source, deadline, cancelled, auth)
+    fetch_authenticated(transport, &source, wait, cancelled, auth)
 }
 
 pub fn fetch_authenticated(
     transport: &mut impl Transport,
     source: &str,
-    deadline: Instant,
+    wait: Limit,
     cancelled: Arc<AtomicBool>,
     auth: Option<&crate::auth::BasicAuth>,
 ) -> Result<Catalog, Error> {
@@ -425,7 +416,7 @@ pub fn fetch_authenticated(
     let result = receive(
         transport,
         source,
-        deadline,
+        wait,
         cancelled,
         auth,
         Kind::Feed,
@@ -437,7 +428,7 @@ pub fn fetch_authenticated(
 fn receive(
     transport: &mut impl Transport,
     source: &str,
-    deadline: Instant,
+    wait: Limit,
     cancelled: Arc<AtomicBool>,
     auth: Option<&crate::auth::BasicAuth>,
     kind: Kind,
@@ -448,12 +439,12 @@ fn receive(
     url.set_fragment(None);
     let mut visited = BTreeSet::new();
     for redirect in 0..=5 {
-        check(deadline, &cancelled)?;
+        check(wait, &cancelled)?;
         if !visited.insert(url.to_string()) {
             return Err(Error::Redirect);
         }
-        let mut stream = transport.connect(&url, deadline, cancelled.clone())?;
-        check(deadline, &cancelled)?;
+        let mut stream = transport.connect(&url, wait, cancelled.clone())?;
+        check(wait, &cancelled)?;
         let target = &url[url::Position::BeforePath..url::Position::AfterQuery];
         let authority = &url[url::Position::BeforeHost..url::Position::AfterPort];
         let accept = kind.accept();
@@ -497,15 +488,8 @@ fn receive(
         if !kind.accepts(media) {
             return Err(Error::ContentType);
         }
-        let bytes = body(
-            &mut reader,
-            &head,
-            kind.limit(),
-            output,
-            deadline,
-            &cancelled,
-        )?;
-        check(deadline, &cancelled)?;
+        let bytes = body(&mut reader, &head, kind.limit(), output, wait, &cancelled)?;
+        check(wait, &cancelled)?;
         return Ok(Download {
             source: url.to_string(),
             bytes,

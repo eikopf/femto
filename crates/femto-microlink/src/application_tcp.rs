@@ -31,29 +31,41 @@ pub trait Driver {
         })
     }
 }
+/// How long a stream may wait.
+#[derive(Clone, Copy, Debug)]
+pub enum Limit {
+    /// Everything the stream does ends at this instant.
+    Until(Instant),
+    /// Each wait for the peer may last this long; a stream that keeps moving
+    /// bytes is never ended for its age. Waiting for the session's first map
+    /// is not counted: the session ends that wait itself, by delivering the
+    /// map or by failing.
+    Stall(Duration),
+}
+impl Limit {
+    fn wait(self) -> Instant {
+        match self {
+            Self::Until(deadline) => deadline,
+            Self::Stall(limit) => Instant::now() + limit,
+        }
+    }
+}
 pub struct Stream<D: Driver> {
     driver: D,
     socket: Option<Socket>,
-    deadline: Instant,
+    limit: Limit,
+    /// When the wait in progress gives up.
+    until: Instant,
     cancelled: Arc<AtomicBool>,
     failed: bool,
 }
-fn boundary(deadline: Instant, cancelled: &AtomicBool) -> io::Result<()> {
-    if cancelled.load(Ordering::Acquire) {
-        return Err(io::ErrorKind::Interrupted.into());
-    }
-    if Instant::now() >= deadline {
-        return Err(io::ErrorKind::TimedOut.into());
-    }
-    Ok(())
-}
 impl<D: Driver> Stream<D> {
-    /// Deadline covers resolution, handshake, and every subsequent I/O operation.
+    /// The limit covers resolution, the handshake, and every later operation.
     pub fn connect(
         driver: D,
         name: &str,
         port: u16,
-        deadline: Instant,
+        limit: Limit,
         cancelled: Arc<AtomicBool>,
     ) -> io::Result<Self> {
         let name = crate::coordinator::dns_name(name)
@@ -65,29 +77,44 @@ impl<D: Driver> Stream<D> {
         let mut stream = Self {
             driver,
             socket: None,
-            deadline,
+            limit,
+            until: limit.wait(),
             cancelled,
             failed: false,
         };
         loop {
-            stream.check()?;
             if stream.socket.is_none() {
                 let result = stream.driver.run(|network, now| {
                     let Some((peer, address)) = network.resolve(&name, now)? else {
-                        return Ok(None);
+                        return Ok(Err(network.local_address(now)?.is_some()));
                     };
-                    Ok(Some(network.connect_tcp(
+                    Ok(Ok(network.connect_tcp(
                         peer,
                         SocketAddrV4::new(address, port),
                         now,
                     )?))
                 });
                 match result {
-                    Ok(socket) => stream.socket = socket,
+                    Ok(Ok(socket)) => {
+                        stream.socket = Some(socket);
+                        stream.begin();
+                    }
+                    // No map yet: the session is still joining.
+                    Ok(Err(false)) => stream.begin(),
+                    // The map does not offer the name. It may yet arrive in
+                    // an update, so this waits as for a silent peer.
+                    Ok(Err(true)) if Instant::now() >= stream.until => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::NotFound,
+                            "no such device on the tailnet",
+                        ));
+                    }
+                    Ok(Err(true)) => (),
                     Err(error) if error.kind() == io::ErrorKind::WouldBlock => (),
                     Err(error) => return Err(error),
                 }
             }
+            stream.check()?;
             if let Some(socket) = stream.socket.as_ref() {
                 let result = stream.driver.run(|network, now| {
                     network.poll_tcp(socket, now)?;
@@ -118,6 +145,7 @@ impl<D: Driver> Stream<D> {
     }
     /// Revalidates a stream before exposing plaintext retained by a TLS adapter.
     pub fn authorize(&mut self) -> io::Result<()> {
+        self.begin();
         loop {
             self.check()?;
             let socket = self.socket.as_ref().ok_or(io::ErrorKind::NotConnected)?;
@@ -138,11 +166,19 @@ impl<D: Driver> Stream<D> {
         if self.failed {
             return Err(io::ErrorKind::NotConnected.into());
         }
-        if let Err(error) = boundary(self.deadline, &self.cancelled) {
-            self.abort();
-            return Err(error);
-        }
-        Ok(())
+        let error = if self.cancelled.load(Ordering::Acquire) {
+            io::ErrorKind::Interrupted
+        } else if Instant::now() >= self.until {
+            io::ErrorKind::TimedOut
+        } else {
+            return Ok(());
+        };
+        self.abort();
+        Err(error.into())
+    }
+    /// Starts the clock of a new wait.
+    fn begin(&mut self) {
+        self.until = self.limit.wait();
     }
     fn abort(&mut self) {
         self.failed = true;
@@ -160,7 +196,7 @@ impl<D: Driver> Stream<D> {
         }
         self.check()?;
         std::thread::sleep(
-            Duration::from_millis(1).min(self.deadline.saturating_duration_since(Instant::now())),
+            Duration::from_millis(1).min(self.until.saturating_duration_since(Instant::now())),
         );
         Ok(())
     }
@@ -168,6 +204,7 @@ impl<D: Driver> Stream<D> {
         &mut self,
         mut operation: impl FnMut(&mut Network<D::Store>, &Socket, u64) -> Result<usize, network::Error>,
     ) -> io::Result<usize> {
+        self.begin();
         loop {
             self.check()?;
             let socket = self.socket.as_ref().ok_or(io::ErrorKind::NotConnected)?;
@@ -206,6 +243,7 @@ impl<D: Driver> Write for Stream<D> {
     }
     /// Matches socket flush semantics: accepted data remains in the TCP send buffer.
     fn flush(&mut self) -> io::Result<()> {
+        self.begin();
         self.check()
     }
 }
@@ -479,7 +517,7 @@ mod thread_tests {
                         other,
                         "peer.example",
                         80,
-                        Instant::now() + Duration::from_millis(20),
+                        Limit::Until(Instant::now() + Duration::from_millis(20)),
                         Arc::new(AtomicBool::new(false)),
                     )
                     .err()

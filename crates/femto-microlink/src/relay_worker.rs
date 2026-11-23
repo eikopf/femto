@@ -128,8 +128,12 @@ impl<T: Transport + Send + 'static> Dialer<T> {
             }
             _ => Progress::Failed,
         };
-        if progress == Progress::Failed {
-            pool.setup_failed(job.plan, now_ms);
+        match progress {
+            // A relay that connected shows the network works, so the next
+            // region starts at once; the pause paces attempts that fail.
+            Progress::Connected => self.next_ms = now_ms,
+            Progress::Failed => pool.setup_failed(job.plan, now_ms),
+            _ => (),
         }
         Ok(progress)
     }

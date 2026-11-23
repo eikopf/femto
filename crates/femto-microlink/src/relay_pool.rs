@@ -265,8 +265,8 @@ impl<T: Transport> Pool<T> {
         Ok(!self.failures.iter().any(|(plan, _)| plan.is_home())
             && network.offers_home_relay(now_ms)?)
     }
-    /// Home setup has priority over peer destinations, including an existing
-    /// ordinary connection to the same region that needs replacement.
+    /// Home setup has priority over peer destinations. An ordinary connection
+    /// to the home's server is promoted in place.
     pub fn next_plan<S: crate::timestamp::EpochStore>(
         &mut self,
         network: &mut crate::network::Network<S>,
@@ -296,6 +296,25 @@ impl<T: Transport> Pool<T> {
             network.home_relay_matching(now_ms, |plan| self.ready(plan, now_ms))?
         } else {
             None
+        };
+        // An ordinary connection to the home's own server becomes the home
+        // by saying so; a second connection would only repeat the setup.
+        let home = match home {
+            Some(plan) => match self.connections.get_mut(&plan.region()) {
+                Some(existing) if Self::same_endpoint(&existing.plan, &plan) => {
+                    if existing
+                        .connection
+                        .enqueue(derp_frames::note_preferred(true), now_ms)
+                        .is_ok()
+                    {
+                        existing.plan = plan;
+                        self.prefer_peer = false;
+                    }
+                    None
+                }
+                _ => Some(plan),
+            },
+            None => None,
         };
         if home.is_some() && !self.prefer_peer {
             return Ok(home);
@@ -865,11 +884,9 @@ mod tests {
         assert_eq!(retry.region(), 1);
         pool.setup_failed(retry, 29_000);
         assert!(pool.next_plan(&mut network, 30_009).unwrap().is_none());
-        let alternate = pool.next_plan(&mut network, 30_010).unwrap().unwrap();
-        assert_eq!(alternate.region(), 2);
-        assert!(alternate.is_home());
-        pool.insert(connection(alternate), &mut network, 30_010)
-            .unwrap();
+        // The other region is already connected, so it becomes the home
+        // without a second connection.
+        assert!(pool.next_plan(&mut network, 30_010).unwrap().is_none());
         assert!(pool.restarts.is_empty());
         assert_eq!(pool.home_region(&mut network, 34_000), Some(2));
     }
@@ -937,7 +954,7 @@ mod tests {
         assert!(pool.failures.is_empty());
     }
     #[test]
-    fn home_reserves_capacity_and_replaces_an_ordinary_same_region_connection() {
+    fn home_reserves_capacity_and_promotes_an_ordinary_same_region_connection() {
         let (mut network, peers) = network();
         let mut pool = Pool::default();
         for peer in &peers[1..] {
@@ -966,8 +983,11 @@ mod tests {
         pool.close();
         pool.insert(connection(ordinary), &mut network, 0).unwrap();
         assert_eq!(pool.home_region(&mut network, 0), None);
-        let home = pool.next_plan(&mut network, 0).unwrap().unwrap();
-        pool.insert(connection(home), &mut network, 0).unwrap();
+        assert!(pool.next_plan(&mut network, 0).unwrap().is_none());
+        assert_eq!(
+            pool.connections[&1].connection.output[0].bytes,
+            [7, 0, 0, 0, 1, 1]
+        );
         assert_eq!(pool.len(), 1);
         assert_eq!(pool.home_region(&mut network, 0), Some(1));
         network.disconnect();

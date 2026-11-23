@@ -13,7 +13,7 @@ impl Transport for Loopback {
     fn connect(
         &mut self,
         url: &Url,
-        _: Instant,
+        _: femto_catalog::deadline::Limit,
         _: Arc<AtomicBool>,
     ) -> io::Result<Box<dyn Stream>> {
         assert_eq!(url.scheme(), "http");
@@ -40,17 +40,33 @@ fn official_server_accepts_auth_and_progress_and_returns_missing_documents() {
     let client = Client::new(&server, credentials, true).unwrap();
     let mut transport = Loopback;
     assert!(matches!(
-        client.authorize(&mut transport, deadline(), cancel()),
+        client.authorize(
+            &mut transport,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel()
+        ),
         Err(Error::Unauthorized)
     ));
     client
-        .register(&mut transport, deadline(), cancel())
+        .register(
+            &mut transport,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel(),
+        )
         .unwrap();
     client
-        .authorize(&mut transport, deadline(), cancel())
+        .authorize(
+            &mut transport,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel(),
+        )
         .unwrap();
     assert!(matches!(
-        client.register(&mut transport, deadline(), cancel()),
+        client.register(
+            &mut transport,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel()
+        ),
         Err(Error::Status(402))
     ));
     let wrong = Client::new(
@@ -60,13 +76,22 @@ fn official_server_accepts_auth_and_progress_and_returns_missing_documents() {
     )
     .unwrap();
     assert!(matches!(
-        wrong.authorize(&mut transport, deadline(), cancel()),
+        wrong.authorize(
+            &mut transport,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel()
+        ),
         Err(Error::Unauthorized)
     ));
     let id = DocumentId::filename("fixture.epub").unwrap();
     assert!(
         client
-            .pull(&mut transport, &id, deadline(), cancel())
+            .pull(
+                &mut transport,
+                &id,
+                femto_catalog::deadline::Limit::Until(deadline()),
+                cancel()
+            )
             .unwrap()
             .is_none()
     );
@@ -78,21 +103,41 @@ fn official_server_accepts_auth_and_progress_and_returns_missing_documents() {
         device_id: "device-1".into(),
     };
     let first = client
-        .push(&mut transport, &progress, deadline(), cancel())
+        .push(
+            &mut transport,
+            &progress,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel(),
+        )
         .unwrap();
     let remote = client
-        .pull(&mut transport, &id, deadline(), cancel())
+        .pull(
+            &mut transport,
+            &id,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel(),
+        )
         .unwrap()
         .unwrap();
     assert_eq!(remote.position, progress);
     assert_eq!(remote.timestamp, first.timestamp);
     assert!(matches!(
-        wrong.push(&mut transport, &progress, deadline(), cancel()),
+        wrong.push(
+            &mut transport,
+            &progress,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel()
+        ),
         Err(Error::Unauthorized)
     ));
     assert_eq!(
         client
-            .pull(&mut transport, &id, deadline(), cancel())
+            .pull(
+                &mut transport,
+                &id,
+                femto_catalog::deadline::Limit::Until(deadline()),
+                cancel()
+            )
             .unwrap()
             .unwrap(),
         remote
@@ -101,11 +146,21 @@ fn official_server_accepts_auth_and_progress_and_returns_missing_documents() {
     progress.percentage = 0.75;
     progress.device_id = "device-2".into();
     client
-        .push(&mut transport, &progress, deadline(), cancel())
+        .push(
+            &mut transport,
+            &progress,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel(),
+        )
         .unwrap();
     assert_eq!(
         client
-            .pull(&mut transport, &id, deadline(), cancel())
+            .pull(
+                &mut transport,
+                &id,
+                femto_catalog::deadline::Limit::Until(deadline()),
+                cancel()
+            )
             .unwrap()
             .unwrap()
             .position,

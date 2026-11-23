@@ -26,7 +26,7 @@ fn book_identity_and_parser_share_the_opened_handle_after_path_replacement() {
         &path,
         file,
         Checksum::Binary,
-        Instant::now() + Duration::from_secs(5),
+        femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(5)),
         &AtomicBool::new(false),
     )
     .unwrap();
@@ -69,7 +69,7 @@ fn cancelled_book_preparation_does_not_parse_or_hash() {
             &path,
             fs::File::open(&path).unwrap(),
             Checksum::Binary,
-            Instant::now() + Duration::from_secs(5),
+            femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(5)),
             &AtomicBool::new(true)
         )
         .is_err()

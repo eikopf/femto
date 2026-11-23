@@ -7,7 +7,10 @@ pub mod config;
 #[cfg(feature = "reader")]
 pub mod session;
 
-use femto_catalog::http::{Transport, Url, read_json_response};
+use femto_catalog::{
+    deadline::Limit,
+    http::{Transport, Url, read_json_response},
+};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -16,7 +19,6 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Instant,
 };
 use zeroize::Zeroizing;
 
@@ -156,7 +158,7 @@ impl Client {
     pub fn register(
         &self,
         transport: &mut impl Transport,
-        deadline: Instant,
+        limit: Limit,
         cancelled: Arc<AtomicBool>,
     ) -> Result<(), Error> {
         #[derive(Serialize)]
@@ -177,7 +179,7 @@ impl Client {
             "users/create",
             &body,
             &[201],
-            deadline,
+            limit,
             cancelled,
         )?;
         #[derive(Deserialize)]
@@ -193,7 +195,7 @@ impl Client {
     pub fn authorize(
         &self,
         transport: &mut impl Transport,
-        deadline: Instant,
+        limit: Limit,
         cancelled: Arc<AtomicBool>,
     ) -> Result<(), Error> {
         // Like KOReader's own client, accept the status alone: the official
@@ -205,7 +207,7 @@ impl Client {
             "users/auth",
             &[],
             &[200],
-            deadline,
+            limit,
             cancelled,
         )
         .map(|_| ())
@@ -214,7 +216,7 @@ impl Client {
         &self,
         transport: &mut impl Transport,
         document: &DocumentId,
-        deadline: Instant,
+        limit: Limit,
         cancelled: Arc<AtomicBool>,
     ) -> Result<Option<RemoteProgress>, Error> {
         // The official server answers an unknown document with an empty
@@ -225,7 +227,7 @@ impl Client {
             &format!("syncs/progress/{}", document.as_str()),
             &[],
             &[200, 404],
-            deadline,
+            limit,
             cancelled,
         )?;
         if status == 404 {
@@ -247,7 +249,7 @@ impl Client {
         &self,
         transport: &mut impl Transport,
         progress: &Progress,
-        deadline: Instant,
+        limit: Limit,
         cancelled: Arc<AtomicBool>,
     ) -> Result<Receipt, Error> {
         progress.validate()?;
@@ -258,7 +260,7 @@ impl Client {
             "syncs/progress",
             &body,
             &[200],
-            deadline,
+            limit,
             cancelled.clone(),
         )?;
         // The official server returns the stored document and timestamp.
@@ -267,7 +269,7 @@ impl Client {
             Ok(receipt) => receipt,
             Err(_) => {
                 let stored = self
-                    .pull(transport, &progress.document, deadline, cancelled)?
+                    .pull(transport, &progress.document, limit, cancelled)?
                     .ok_or(Error::Response)?;
                 Receipt {
                     document: stored.position.document,
@@ -289,16 +291,16 @@ impl Client {
         path: &str,
         body: &[u8],
         accepted: &[u16],
-        deadline: Instant,
+        limit: Limit,
         cancelled: Arc<AtomicBool>,
     ) -> Result<(u16, Vec<u8>), Error> {
-        check(deadline, &cancelled)?;
+        check(limit, &cancelled)?;
         let url = self
             .base
             .join(path)
             .map_err(|_| Error::Invalid("endpoint"))?;
-        let mut stream = transport.connect(&url, deadline, cancelled.clone())?;
-        check(deadline, &cancelled)?;
+        let mut stream = transport.connect(&url, limit, cancelled.clone())?;
+        check(limit, &cancelled)?;
         let authority = &url[url::Position::BeforeHost..url::Position::AfterPort];
         write!(
             stream,
@@ -317,8 +319,8 @@ impl Client {
         stream.write_all(b"\r\n")?;
         stream.write_all(body)?;
         stream.flush()?;
-        let reply = read_json_response(stream, MAX_RESPONSE_BYTES, deadline, &cancelled);
-        check(deadline, &cancelled)?;
+        let reply = read_json_response(stream, MAX_RESPONSE_BYTES, limit, &cancelled);
+        check(limit, &cancelled)?;
         let (actual, bytes) = reply?;
         if actual == 401 {
             return Err(Error::Unauthorized);
@@ -329,7 +331,7 @@ impl Client {
         Ok((actual, bytes))
     }
 }
-fn check(deadline: Instant, cancelled: &AtomicBool) -> Result<(), Error> {
+fn check(limit: Limit, cancelled: &AtomicBool) -> Result<(), Error> {
     if cancelled.load(Ordering::Acquire) {
         return Err(io::Error::new(
             io::ErrorKind::ConnectionAborted,
@@ -337,7 +339,7 @@ fn check(deadline: Instant, cancelled: &AtomicBool) -> Result<(), Error> {
         )
         .into());
     }
-    if Instant::now() >= deadline {
+    if limit.expired() {
         return Err(io::Error::new(io::ErrorKind::TimedOut, "KOReader request deadline").into());
     }
     Ok(())

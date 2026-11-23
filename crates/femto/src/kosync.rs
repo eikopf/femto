@@ -106,7 +106,7 @@ impl Prepared {
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<Self> {
-        boundary(deadline, cancelled)?;
+        boundary(femto_catalog::deadline::Limit::Until(deadline), cancelled)?;
         let requires_book = matches!(
             operation,
             Operation::Push | Operation::Pull | Operation::Status
@@ -121,7 +121,13 @@ impl Prepared {
                 .read(true)
                 .custom_flags(libc::O_NONBLOCK)
                 .open(path)?;
-            let book = Book::from_file(path, file, settings.checksum, deadline, cancelled)?;
+            let book = Book::from_file(
+                path,
+                file,
+                settings.checksum,
+                femto_catalog::deadline::Limit::Until(deadline),
+                cancelled,
+            )?;
             let lock = crate::state_file::StateFile::acquire(state)?;
             let state = ReaderState::load(lock.path())?;
             Some((book, lock, state))
@@ -141,36 +147,62 @@ impl Prepared {
         cancelled: Arc<AtomicBool>,
     ) -> Result<serde_json::Value> {
         let client = &self.settings.client;
-        boundary(self.deadline, &cancelled)?;
+        boundary(
+            femto_catalog::deadline::Limit::Until(self.deadline),
+            &cancelled,
+        )?;
         match self.operation {
             Operation::Register => {
-                client.register(transport, self.deadline, cancelled)?;
+                client.register(
+                    transport,
+                    femto_catalog::deadline::Limit::Until(self.deadline),
+                    cancelled,
+                )?;
                 Ok(serde_json::json!({"status":"registered"}))
             }
             Operation::Auth => {
-                client.authorize(transport, self.deadline, cancelled)?;
+                client.authorize(
+                    transport,
+                    femto_catalog::deadline::Limit::Until(self.deadline),
+                    cancelled,
+                )?;
                 Ok(serde_json::json!({"status":"authenticated"}))
             }
             Operation::Push => {
                 let (book, _, state) = self.book.as_mut().context("book required")?;
                 let progress = book.prepare_push(state, &self.settings)?;
-                boundary(self.deadline, &cancelled)?;
-                let receipt = client.push(transport, &progress, self.deadline, cancelled)?;
+                boundary(
+                    femto_catalog::deadline::Limit::Until(self.deadline),
+                    &cancelled,
+                )?;
+                let receipt = client.push(
+                    transport,
+                    &progress,
+                    femto_catalog::deadline::Limit::Until(self.deadline),
+                    cancelled,
+                )?;
                 Ok(
                     serde_json::json!({"status":"uploaded","document":receipt.document,"timestamp":receipt.timestamp,"percentage":progress.percentage}),
                 )
             }
             Operation::Pull | Operation::Status => {
                 let (book, lock, state) = self.book.as_mut().context("book required")?;
-                let Some(remote) =
-                    client.pull(transport, &book.id, self.deadline, cancelled.clone())?
+                let Some(remote) = client.pull(
+                    transport,
+                    &book.id,
+                    femto_catalog::deadline::Limit::Until(self.deadline),
+                    cancelled.clone(),
+                )?
                 else {
                     return Ok(
                         serde_json::json!({"status":"no_remote_progress","document":book.id}),
                     );
                 };
                 let location = book.resolve_remote(&remote)?;
-                boundary(self.deadline, &cancelled)?;
+                boundary(
+                    femto_catalog::deadline::Limit::Until(self.deadline),
+                    &cancelled,
+                )?;
                 if matches!(self.operation, Operation::Pull) {
                     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
                     state.set_position(&book.document.metadata.id, location, now);

@@ -1,5 +1,8 @@
 //! Catalog and progress HTTP transport over an existing authenticated tailnet runtime.
-use crate::http::{Stream, Transport, Url};
+use crate::{
+    deadline::Limit,
+    http::{Stream, Transport, Url},
+};
 use femto_microlink::{
     host_tcp::{Driver, Shared},
     host_tcp_tls::Connector,
@@ -10,7 +13,6 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Instant,
 };
 
 /// Creates request-local adapters on worker threads without retaining a runtime.
@@ -95,13 +97,13 @@ impl<D: Driver + 'static> Transport for Tailnet<D> {
     fn connect(
         &mut self,
         url: &Url,
-        deadline: Instant,
+        limit: Limit,
         cancelled: Arc<AtomicBool>,
     ) -> io::Result<Box<dyn Stream>> {
         if cancelled.load(Ordering::Acquire) {
             return Err(io::ErrorKind::Interrupted.into());
         }
-        if Instant::now() >= deadline {
+        if limit.expired() {
             return Err(io::ErrorKind::TimedOut.into());
         }
         if !matches!(url.scheme(), "http" | "https")
@@ -124,7 +126,7 @@ impl<D: Driver + 'static> Transport for Tailnet<D> {
                 self.runtime.clone(),
                 host,
                 port,
-                deadline,
+                limit.into(),
                 cancelled,
             )?))
         } else {
@@ -132,7 +134,7 @@ impl<D: Driver + 'static> Transport for Tailnet<D> {
                 self.runtime.clone(),
                 host,
                 port,
-                deadline,
+                limit.into(),
                 cancelled,
             )?))
         }
@@ -147,7 +149,11 @@ mod tests {
         timestamp::EpochStore,
     };
     use std::sync::atomic::AtomicUsize;
-    use std::{cell::Cell, rc::Rc, time::Duration};
+    use std::{
+        cell::Cell,
+        rc::Rc,
+        time::{Duration, Instant},
+    };
 
     struct ThreadDriver {
         calls: Arc<AtomicUsize>,
@@ -176,7 +182,7 @@ mod tests {
         fn connect(
             &mut self,
             _: &Url,
-            _: Instant,
+            _: Limit,
             _: Arc<AtomicBool>,
         ) -> io::Result<Box<dyn Stream>> {
             self.0.fetch_add(1, Ordering::Relaxed);
@@ -187,7 +193,7 @@ mod tests {
         transport
             .connect(
                 &Url::parse(url).unwrap(),
-                Instant::now() + Duration::from_secs(2),
+                Limit::Until(Instant::now() + Duration::from_secs(2)),
                 Arc::new(AtomicBool::new(false)),
             )
             .err()
@@ -297,7 +303,7 @@ mod tests {
     fn validation_precedes_resolution_and_named_targets_use_the_runtime() {
         let calls = Rc::new(Cell::new(0));
         let mut transport = Tailnet::new(Shared::new(NoDial(calls.clone()))).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let limit = Limit::Until(Instant::now() + Duration::from_secs(2));
         let cancelled = Arc::new(AtomicBool::new(false));
         for url in [
             "ftp://peer.example",
@@ -309,7 +315,7 @@ mod tests {
         ] {
             assert_eq!(
                 transport
-                    .connect(&Url::parse(url).unwrap(), deadline, cancelled.clone())
+                    .connect(&Url::parse(url).unwrap(), limit, cancelled.clone())
                     .err()
                     .unwrap()
                     .kind(),
@@ -320,7 +326,7 @@ mod tests {
         let url = Url::parse("https://peer.example/feed").unwrap();
         assert_eq!(
             transport
-                .connect(&url, Instant::now(), cancelled.clone())
+                .connect(&url, Limit::Until(Instant::now()), cancelled.clone())
                 .err()
                 .unwrap()
                 .kind(),
@@ -329,7 +335,7 @@ mod tests {
         cancelled.store(true, Ordering::Release);
         assert_eq!(
             transport
-                .connect(&url, deadline, cancelled.clone())
+                .connect(&url, limit, cancelled.clone())
                 .err()
                 .unwrap()
                 .kind(),
@@ -340,7 +346,7 @@ mod tests {
         for url in ["http://peer.example/feed", "https://peer.example/feed"] {
             assert_eq!(
                 transport
-                    .connect(&Url::parse(url).unwrap(), deadline, cancelled.clone())
+                    .connect(&Url::parse(url).unwrap(), limit, cancelled.clone())
                     .err()
                     .unwrap()
                     .kind(),

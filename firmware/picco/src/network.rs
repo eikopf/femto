@@ -4,7 +4,7 @@ use esp_idf_svc::{
     tls::{EspTls, Socket},
 };
 use femto_catalog::{
-    deadline::{Bounded, Budget},
+    deadline::{Bounded, Budget, Limit},
     http::{self, Stream, Url},
 };
 use std::{
@@ -26,10 +26,10 @@ impl http::Transport for Transport {
     fn connect(
         &mut self,
         url: &Url,
-        deadline: Instant,
+        limit: Limit,
         cancelled: Arc<AtomicBool>,
     ) -> io::Result<Box<dyn Stream>> {
-        Ok(Box::new(connect(url, deadline, cancelled)?))
+        Ok(Box::new(connect(url, limit, cancelled)?))
     }
 }
 
@@ -59,16 +59,16 @@ impl Write for Connection {
         self.inner.flush()
     }
 }
-/// Connects a deadline-aware stream; coordinator callers must supply HTTPS.
-pub fn connect(url: &Url, deadline: Instant, cancelled: Arc<AtomicBool>) -> io::Result<Connection> {
-    connect_inner(url, deadline, cancelled, None)
+/// Connects a stream that enforces the limit; coordinator callers must supply HTTPS.
+pub fn connect(url: &Url, limit: Limit, cancelled: Arc<AtomicBool>) -> io::Result<Connection> {
+    connect_inner(url, limit, cancelled, None)
 }
 /// Connects an explicit relay address while verifying the supplied certificate name.
 pub fn connect_tls_at(
     url: &Url,
     address: std::net::SocketAddr,
     name: &str,
-    deadline: Instant,
+    limit: Limit,
     cancelled: Arc<AtomicBool>,
 ) -> io::Result<Connection> {
     if url.scheme() != "https" || url.port_or_known_default() != Some(address.port()) {
@@ -77,15 +77,15 @@ pub fn connect_tls_at(
             "invalid TLS endpoint",
         ));
     }
-    connect_inner(url, deadline, cancelled, Some((address, name)))
+    connect_inner(url, limit, cancelled, Some((address, name)))
 }
 fn connect_inner(
     url: &Url,
-    deadline: Instant,
+    limit: Limit,
     cancelled: Arc<AtomicBool>,
     peer: Option<(std::net::SocketAddr, &str)>,
 ) -> io::Result<Connection> {
-    let budget = Budget::new(deadline, cancelled);
+    let budget = Budget::new(limit, cancelled);
     budget.check()?;
     if url.as_str().len() > 4096
         || !matches!(url.scheme(), "http" | "https")
@@ -126,7 +126,8 @@ fn connect_inner(
         budget.check()?;
         let stream = TcpStream::connect_timeout(
             &address,
-            deadline
+            limit
+                .wait()
                 .saturating_duration_since(Instant::now())
                 .min(Duration::from_secs(5)),
         )?;
@@ -134,7 +135,7 @@ fn connect_inner(
         stream.set_nonblocking(true)?;
         stream
     } else {
-        connect_tcp(host, port, deadline, &budget)?
+        connect_tcp(host, port, &budget)?
     };
     if url.scheme() == "https" {
         let tls = EspTls::adopt(Adopted(Some(stream))).map_err(tls_error)?;
@@ -185,7 +186,7 @@ fn connect_inner(
     }
 }
 
-fn connect_tcp(host: &str, port: u16, deadline: Instant, budget: &Budget) -> io::Result<TcpStream> {
+fn connect_tcp(host: &str, port: u16, budget: &Budget) -> io::Result<TcpStream> {
     // Platform DNS is synchronous. Recheck the budget after it returns.
     let looked_up = Instant::now();
     let addresses = (host.trim_start_matches('[').trim_end_matches(']'), port).to_socket_addrs()?;
@@ -193,7 +194,9 @@ fn connect_tcp(host: &str, port: u16, deadline: Instant, budget: &Budget) -> io:
     let mut last = io::Error::new(io::ErrorKind::NotFound, "no request address");
     for address in addresses.take(8) {
         budget.check()?;
-        let timeout = deadline
+        let timeout = budget
+            .limit()
+            .wait()
             .saturating_duration_since(Instant::now())
             .min(Duration::from_secs(5));
         let dialled = Instant::now();

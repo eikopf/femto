@@ -4,7 +4,6 @@ use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned, pki_typ
 use std::{
     io::{self, Read, Write},
     sync::{Arc, atomic::AtomicBool},
-    time::Instant,
 };
 
 #[derive(Clone)]
@@ -47,7 +46,7 @@ impl Connector {
         driver: D,
         name: &str,
         port: u16,
-        deadline: Instant,
+        limit: crate::application_tcp::Limit,
         cancelled: Arc<AtomicBool>,
     ) -> io::Result<TlsStream<D>> {
         let identity =
@@ -55,7 +54,7 @@ impl Connector {
         let mut connection =
             ClientConnection::new(self.config.clone(), identity).map_err(io::Error::other)?;
         connection.set_buffer_limit(Some(16 * 1024));
-        let mut socket = Stream::connect(driver, name, port, deadline, cancelled)?;
+        let mut socket = Stream::connect(driver, name, port, limit, cancelled)?;
         while connection.is_handshaking() {
             socket.authorize()?;
             connection.complete_io(&mut socket)?;

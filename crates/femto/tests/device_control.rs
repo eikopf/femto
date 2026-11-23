@@ -41,7 +41,7 @@ mod network {
         url: &femto_catalog::http::Url,
         address: std::net::SocketAddr,
         name: &str,
-        deadline: Instant,
+        deadline: femto_catalog::deadline::Limit,
         cancel: Arc<AtomicBool>,
     ) -> io::Result<Connection> {
         STATE.with_borrow_mut(|s| {
@@ -64,7 +64,7 @@ mod network {
     }
     pub fn connect(
         url: &femto_catalog::http::Url,
-        _: Instant,
+        _: femto_catalog::deadline::Limit,
         cancel: Arc<AtomicBool>,
     ) -> io::Result<Connection> {
         assert_eq!(url.scheme(), "https");
@@ -106,7 +106,7 @@ mod network {
         fn connect(
             &mut self,
             url: &femto_catalog::http::Url,
-            _: Instant,
+            _: femto_catalog::deadline::Limit,
             cancel: Arc<AtomicBool>,
         ) -> io::Result<Box<dyn femto_catalog::http::Stream>> {
             assert_eq!(url.scheme(), "https");
@@ -317,7 +317,7 @@ fn nonblocking_relay_io_preserves_pending_and_withholds_cancelled_reads() {
     let cancel = Arc::new(AtomicBool::new(false));
     let stream = network::connect(
         &femto_catalog::http::Url::parse("https://relay.example").unwrap(),
-        Instant::now() + Duration::from_secs(1),
+        femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(1)),
         cancel,
     )
     .unwrap();

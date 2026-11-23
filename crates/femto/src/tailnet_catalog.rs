@@ -111,7 +111,7 @@ fn receive(
     let catalog = femto_catalog::http::fetch_authenticated(
         transport,
         &request.source,
-        request.deadline,
+        femto_catalog::deadline::Limit::Until(request.deadline),
         cancelled.clone(),
         request.auth.as_ref(),
     )
@@ -170,7 +170,7 @@ mod tests {
         fn connect(
             &mut self,
             url: &url::Url,
-            _: Instant,
+            _: femto_catalog::deadline::Limit,
             cancelled: Arc<AtomicBool>,
         ) -> io::Result<Box<dyn femto_catalog::http::Stream>> {
             let index = self.calls.len();

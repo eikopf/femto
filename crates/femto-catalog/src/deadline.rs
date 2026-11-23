@@ -1,4 +1,4 @@
-//! Deadline and cancellation adapter for nonblocking platform streams.
+//! Waiting limits and cancellation for nonblocking platform streams.
 use std::{
     io::{self, Read, Write},
     sync::{
@@ -8,17 +8,57 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// How long a request may wait.
+#[derive(Clone, Copy, Debug)]
+pub enum Limit {
+    /// The whole request ends at this instant: a caller that was itself
+    /// given a time limit, such as a command-line tool.
+    Until(Instant),
+    /// Each wait for the other end may last this long. A request that keeps
+    /// moving bytes never ends for its duration alone.
+    Stall(Duration),
+}
+impl Limit {
+    /// The reader's limit on a silent connection. A tailnet path that dies
+    /// takes this long to replace: WireGuard waits 15 s for a reply before it
+    /// starts a new handshake, an attempt takes up to 5 s, and a relay
+    /// connection took up to 8 s to make on the reader. A connection silent
+    /// for longer is not coming back.
+    pub const SILENCE: Self = Self::Stall(Duration::from_secs(30));
+    /// When a wait that starts now gives up.
+    pub fn wait(self) -> Instant {
+        match self {
+            Self::Until(deadline) => deadline,
+            Self::Stall(limit) => Instant::now() + limit,
+        }
+    }
+    /// Whether the request as a whole is over. A stall is judged by the
+    /// stream that waits, never between steps.
+    pub fn expired(self) -> bool {
+        matches!(self, Self::Until(deadline) if Instant::now() >= deadline)
+    }
+}
+#[cfg(feature = "tailnet")]
+impl From<Limit> for femto_microlink::application_tcp::Limit {
+    fn from(limit: Limit) -> Self {
+        match limit {
+            Limit::Until(deadline) => Self::Until(deadline),
+            Limit::Stall(limit) => Self::Stall(limit),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Budget {
-    deadline: Instant,
+    limit: Limit,
     cancelled: Arc<AtomicBool>,
 }
 impl Budget {
-    pub fn new(deadline: Instant, cancelled: Arc<AtomicBool>) -> Self {
-        Self {
-            deadline,
-            cancelled,
-        }
+    pub fn new(limit: Limit, cancelled: Arc<AtomicBool>) -> Self {
+        Self { limit, cancelled }
+    }
+    pub fn limit(&self) -> Limit {
+        self.limit
     }
     pub fn check(&self) -> io::Result<()> {
         if self.cancelled.load(Ordering::Acquire) {
@@ -27,13 +67,15 @@ impl Budget {
                 "request cancelled",
             ));
         }
-        if Instant::now() >= self.deadline {
+        if self.limit.expired() {
             return Err(io::Error::new(io::ErrorKind::TimedOut, "request deadline"));
         }
         Ok(())
     }
-    /// The operation must return promptly. WouldBlock and Interrupted are retried.
+    /// The operation must return promptly. WouldBlock and Interrupted are
+    /// retried until the limit on one wait runs out.
     pub fn retry<T>(&self, mut operation: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+        let until = self.limit.wait();
         loop {
             self.check()?;
             let result = operation();
@@ -45,11 +87,14 @@ impl Budget {
                         io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
                     ) =>
                 {
-                    std::thread::sleep(
-                        self.deadline
-                            .saturating_duration_since(Instant::now())
-                            .min(Duration::from_millis(5)),
-                    );
+                    let left = until.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return Err(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "no answer from the server",
+                        ));
+                    }
+                    std::thread::sleep(left.min(Duration::from_millis(5)));
                 }
                 result => return result,
             }
@@ -83,7 +128,7 @@ impl<S> Bounded<S> {
     }
     /// Sets the next operation deadline without reopening a closed stream.
     pub fn set_deadline(&mut self, deadline: Instant) {
-        self.budget.deadline = deadline;
+        self.budget.limit = Limit::Until(deadline);
     }
     fn operation<T>(
         &mut self,
@@ -128,7 +173,7 @@ mod renewal_tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let mut stream = Bounded::new(
             io::Cursor::new(b"hello".to_vec()),
-            Budget::new(Instant::now(), cancel.clone()),
+            Budget::new(Limit::Until(Instant::now()), cancel.clone()),
         );
         let mut byte = [0];
         assert_eq!(
@@ -142,7 +187,7 @@ mod renewal_tests {
         );
         let mut stream = Bounded::new(
             io::Cursor::new(b"hello".to_vec()),
-            Budget::new(Instant::now(), cancel.clone()),
+            Budget::new(Limit::Until(Instant::now()), cancel.clone()),
         );
         stream.set_deadline(Instant::now() + Duration::from_secs(1));
         assert_eq!(stream.read(&mut byte).unwrap(), 1);
@@ -163,7 +208,10 @@ mod handoff_tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let mut bounded = Bounded::new(
             io::Cursor::new(b"hello".to_vec()),
-            Budget::new(Instant::now() + Duration::from_secs(1), cancel.clone()),
+            Budget::new(
+                Limit::Until(Instant::now() + Duration::from_secs(1)),
+                cancel.clone(),
+            ),
         );
         let mut prefix = [0; 2];
         bounded.read_exact(&mut prefix).unwrap();
@@ -176,7 +224,7 @@ mod handoff_tests {
     #[test]
     fn failed_expired_and_cancelled_streams_cannot_be_handed_off() {
         let cancel = Arc::new(AtomicBool::new(false));
-        let expired = || Budget::new(Instant::now(), cancel.clone());
+        let expired = || Budget::new(Limit::Until(Instant::now()), cancel.clone());
         assert!(
             Bounded::new(io::empty(), expired())
                 .into_nonblocking()
@@ -193,12 +241,64 @@ mod handoff_tests {
         assert_eq!(
             Bounded::new(
                 io::empty(),
-                Budget::new(Instant::now() + Duration::from_secs(1), cancel)
+                Budget::new(
+                    Limit::Until(Instant::now() + Duration::from_secs(1)),
+                    cancel
+                )
             )
             .into_nonblocking()
             .unwrap_err()
             .kind(),
             io::ErrorKind::ConnectionAborted
         );
+    }
+}
+
+#[cfg(test)]
+mod stall_tests {
+    use super::*;
+    /// Yields a byte, then blocks `silent` times before the next one.
+    struct Halting {
+        silent: usize,
+        left: usize,
+    }
+    impl Read for Halting {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if self.left > 0 {
+                self.left -= 1;
+                return Err(io::ErrorKind::WouldBlock.into());
+            }
+            self.left = self.silent;
+            buffer[0] = 1;
+            Ok(1)
+        }
+    }
+    #[test]
+    fn stall_limit_ends_a_silent_stream_but_not_a_slow_one() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let limit = Limit::Stall(Duration::from_millis(40));
+        // Each byte arrives after about 10 ms: the transfer outlasts the
+        // limit several times over and still completes.
+        let mut slow = Bounded::new(
+            Halting { silent: 2, left: 0 },
+            Budget::new(limit, cancel.clone()),
+        );
+        let start = Instant::now();
+        let mut bytes = [0; 16];
+        slow.read_exact(&mut bytes).unwrap();
+        assert!(start.elapsed() > Duration::from_millis(80));
+        let mut silent = Bounded::new(
+            Halting {
+                silent: usize::MAX,
+                left: usize::MAX,
+            },
+            Budget::new(limit, cancel),
+        );
+        let start = Instant::now();
+        assert_eq!(
+            silent.read(&mut bytes).unwrap_err().kind(),
+            io::ErrorKind::TimedOut
+        );
+        assert!(start.elapsed() < Duration::from_secs(1));
     }
 }

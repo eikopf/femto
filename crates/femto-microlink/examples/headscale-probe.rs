@@ -303,7 +303,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 shared.clone(),
                 "femto-independent-peer.femto.test",
                 port,
-                started + Duration::from_secs(30),
+                femto_microlink::application_tcp::Limit::Until(started + Duration::from_secs(30)),
                 Arc::new(AtomicBool::new(false)),
             )?;
             stream.write_all(b"GET /fixture HTTP/1.1\r\nHost: femto-independent-peer.femto.test\r\nConnection: close\r\n\r\n")?;

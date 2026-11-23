@@ -51,7 +51,10 @@ fn fake() -> Fake {
     }
 }
 fn budget(cancel: Arc<AtomicBool>) -> Budget {
-    Budget::new(Instant::now() + Duration::from_secs(5), cancel)
+    Budget::new(
+        femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(5)),
+        cancel,
+    )
 }
 
 #[test]
@@ -80,7 +83,10 @@ fn cancellation_during_read_withholds_bytes_and_closes_stream() {
 fn pre_cancelled_and_expired_operations_do_not_touch_backend() {
     for budget in [
         budget(Arc::new(AtomicBool::new(true))),
-        Budget::new(Instant::now(), Arc::default()),
+        Budget::new(
+            femto_catalog::deadline::Limit::Until(Instant::now()),
+            Arc::default(),
+        ),
     ] {
         let backend = fake();
         let calls = backend.calls.clone();
@@ -114,7 +120,10 @@ fn stalled_operation_observes_absolute_deadline() {
     let drops = backend.drops.clone();
     let mut stream = Bounded::new(
         backend,
-        Budget::new(Instant::now() + Duration::from_millis(30), Arc::default()),
+        Budget::new(
+            femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_millis(30)),
+            Arc::default(),
+        ),
     );
     let mut bytes = [42];
     assert_eq!(

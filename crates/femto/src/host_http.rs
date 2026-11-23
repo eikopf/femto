@@ -1,4 +1,7 @@
-use femto_catalog::http::{Stream, Transport, Url};
+use femto_catalog::{
+    deadline::Limit,
+    http::{Stream, Transport, Url},
+};
 use femto_microlink::{derp::DeadlineIo, host_tls::TlsConnector, relay::Certificate};
 use std::{
     io::{self, Read, Write},
@@ -17,10 +20,10 @@ impl Transport for HostTransport {
     fn connect(
         &mut self,
         url: &Url,
-        deadline: Instant,
+        limit: Limit,
         cancelled: Arc<AtomicBool>,
     ) -> io::Result<Box<dyn Stream>> {
-        remaining(deadline, &cancelled)?;
+        remaining(limit.wait(), &cancelled)?;
         // Platform DNS is synchronous; the socket operations below remain bounded.
         let host = match url
             .host()
@@ -39,7 +42,7 @@ impl Transport for HostTransport {
         };
         let mut last = io::Error::other("no catalog address available");
         for address in addresses {
-            let remaining = remaining(deadline, &cancelled)?;
+            let remaining = remaining(limit.wait(), &cancelled)?;
             if url.scheme() == "https" {
                 match TlsConnector::mozilla(remaining.min(Duration::from_secs(5)))?.connect(
                     address,
@@ -47,10 +50,7 @@ impl Transport for HostTransport {
                     &Certificate::Name(host.clone()),
                     cancelled.clone(),
                 ) {
-                    Ok(mut stream) => {
-                        stream.set_deadline(deadline);
-                        return Ok(Box::new(stream));
-                    }
+                    Ok(stream) => return Ok(Box::new(Paced { stream, limit })),
                     Err(error) => last = error,
                 }
             } else {
@@ -58,7 +58,7 @@ impl Transport for HostTransport {
                     Ok(tcp) => {
                         return Ok(Box::new(Plain {
                             tcp,
-                            deadline,
+                            limit,
                             cancelled,
                         }));
                     }
@@ -81,9 +81,30 @@ pub(crate) fn remaining(deadline: Instant, cancelled: &AtomicBool) -> io::Result
         .filter(|d| !d.is_zero())
         .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "catalog deadline"))
 }
+/// Gives each read and write of a deadline stream the limit's full wait.
+struct Paced<S> {
+    stream: S,
+    limit: Limit,
+}
+impl<S: Read + DeadlineIo> Read for Paced<S> {
+    fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
+        self.stream.set_deadline(self.limit.wait());
+        self.stream.read(b)
+    }
+}
+impl<S: Write + DeadlineIo> Write for Paced<S> {
+    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+        self.stream.set_deadline(self.limit.wait());
+        self.stream.write(b)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.set_deadline(self.limit.wait());
+        self.stream.flush()
+    }
+}
 struct Plain {
     tcp: TcpStream,
-    deadline: Instant,
+    limit: Limit,
     cancelled: Arc<AtomicBool>,
 }
 impl Plain {
@@ -91,9 +112,9 @@ impl Plain {
         &mut self,
         mut operation: impl FnMut(&mut TcpStream) -> io::Result<T>,
     ) -> io::Result<T> {
+        let until = self.limit.wait();
         loop {
-            let timeout =
-                remaining(self.deadline, &self.cancelled)?.min(Duration::from_millis(100));
+            let timeout = remaining(until, &self.cancelled)?.min(Duration::from_millis(100));
             self.tcp.set_read_timeout(Some(timeout))?;
             self.tcp.set_write_timeout(Some(timeout))?;
             match operation(&mut self.tcp) {
@@ -128,7 +149,7 @@ impl Write for Plain {
 mod tests {
     use super::*;
     #[test]
-    fn stalled_plain_socket_observes_cancellation_and_absolute_deadline() {
+    fn stalled_plain_socket_observes_cancellation_and_its_limit() {
         use std::net::TcpListener;
         for cancel in [false, true] {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -137,7 +158,7 @@ mod tests {
             let flag = Arc::new(AtomicBool::new(false));
             let mut stream = Plain {
                 tcp,
-                deadline: Instant::now() + Duration::from_millis(if cancel { 2000 } else { 40 }),
+                limit: Limit::Stall(Duration::from_millis(if cancel { 2000 } else { 40 })),
                 cancelled: flag.clone(),
             };
             let worker = cancel.then(|| {

@@ -2,7 +2,6 @@ use femto_catalog::http::{self, Stream, Url};
 use std::{
     io::{self, Cursor, Read, Write},
     sync::{Arc, atomic::AtomicBool},
-    time::Instant,
 };
 pub struct Transport;
 struct Reply {
@@ -33,7 +32,7 @@ impl http::Transport for Transport {
     fn connect(
         &mut self,
         url: &Url,
-        _: Instant,
+        _: femto_catalog::deadline::Limit,
         _: Arc<AtomicBool>,
     ) -> io::Result<Box<dyn Stream>> {
         if url.path() == "/fail" {

@@ -1,5 +1,8 @@
 //! Verified TLS and authenticated DERP setup for a selected relay descriptor.
-use femto_catalog::{deadline::Budget, http::Url};
+use femto_catalog::{
+    deadline::{Budget, Limit},
+    http::Url,
+};
 use femto_microlink::{
     derp::RelaySession,
     protocol::key::{Node, PrivateKey},
@@ -34,10 +37,10 @@ pub fn connect(
     };
     let authority = femto_microlink::bootstrap::authority(&node.host_name, node.tls_port)?;
     let url = Url::parse(&format!("https://{authority}/")).map_err(io::Error::other)?;
-    let deadline = Instant::now() + timeout;
-    let budget = Budget::new(deadline, cancelled.clone());
+    let limit = Limit::Until(Instant::now() + timeout);
+    let budget = Budget::new(limit, cancelled.clone());
     budget.check()?;
-    let stream = crate::network::connect_tls_at(&url, address, name, deadline, cancelled)?;
+    let stream = crate::network::connect_tls_at(&url, address, name, limit, cancelled)?;
     let session =
         RelaySession::connect(stream, &authority, key, timeout).map_err(io::Error::other)?;
     budget.check()?;

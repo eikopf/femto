@@ -12,7 +12,7 @@
 //! fetches the manifest of the latest release, and downloads the image to
 //! the card when its version is newer. Installing is a separate step.
 use esp_idf_svc::sys;
-use femto_catalog::http;
+use femto_catalog::{deadline::Limit, http};
 use femto_reader::ui::{UpdateStep, UpdateView};
 use std::{
     fs,
@@ -132,13 +132,12 @@ fn fetch(
     name: &str,
     limit: usize,
     offset: u64,
-    seconds: u64,
     output: &mut impl Write,
 ) -> Result<(), http::Error> {
     http::download_file(
         &mut crate::network::Transport,
         &format!("{RELEASE}{name}"),
-        Instant::now() + Duration::from_secs(seconds),
+        Limit::SILENCE,
         Arc::new(AtomicBool::new(false)),
         limit,
         offset,
@@ -149,7 +148,7 @@ fn fetch(
 
 fn check() -> Result<Manifest, String> {
     let mut bytes = Vec::new();
-    fetch("femto-picco.json", 4096, 0, 60, &mut bytes).map_err(|e| e.to_string())?;
+    fetch("femto-picco.json", 4096, 0, &mut bytes).map_err(|e| e.to_string())?;
     let manifest: Manifest =
         serde_json::from_slice(&bytes).map_err(|_| "Release manifest is not valid")?;
     if numbers(&manifest.version).is_none()
@@ -200,7 +199,6 @@ fn download(manifest: &Manifest, received: &AtomicUsize) -> Result<(), String> {
             "femto-picco.bin",
             (manifest.bytes - offset) as usize,
             offset,
-            600,
             &mut file,
         );
         file.0.sync_all().map_err(|e| e.to_string())?;

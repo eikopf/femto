@@ -2,13 +2,13 @@ use crate::{
     DocumentId, Error, Progress, RemoteProgress,
     config::{Checksum, Settings},
 };
+use femto_catalog::deadline::Limit;
 use femto_reader::{document::Document, layout::Locator, state::ReaderState};
 use std::{
     fs::File,
     io,
     path::Path,
     sync::atomic::{AtomicBool, Ordering},
-    time::Instant,
 };
 
 pub struct Book {
@@ -20,10 +20,10 @@ impl Book {
         path: &Path,
         mut file: File,
         checksum: Checksum,
-        deadline: Instant,
+        limit: Limit,
         cancelled: &AtomicBool,
     ) -> Result<Self, Error> {
-        boundary(deadline, cancelled)?;
+        boundary(limit, cancelled)?;
         if !file.metadata()?.is_file() {
             return Err(Error::Invalid("book file"));
         }
@@ -35,8 +35,8 @@ impl Book {
                     .ok_or(Error::Invalid("UTF-8 book filename"))?,
             )?,
         };
-        let document = Document::from_file(path, file, || boundary(deadline, cancelled))?;
-        boundary(deadline, cancelled)?;
+        let document = Document::from_file(path, file, || boundary(limit, cancelled))?;
+        boundary(limit, cancelled)?;
         Ok(Self { document, id })
     }
     pub fn prepare_push(
@@ -71,14 +71,14 @@ impl Book {
             .resolve_koreader_position(&remote.position.progress)?)
     }
 }
-pub fn boundary(deadline: Instant, cancelled: &AtomicBool) -> io::Result<()> {
+pub fn boundary(limit: Limit, cancelled: &AtomicBool) -> io::Result<()> {
     if cancelled.load(Ordering::Acquire) {
         return Err(io::Error::new(
             io::ErrorKind::ConnectionAborted,
             "KOReader operation cancelled",
         ));
     }
-    if Instant::now() >= deadline {
+    if limit.expired() {
         return Err(io::Error::new(
             io::ErrorKind::TimedOut,
             "KOReader operation deadline",

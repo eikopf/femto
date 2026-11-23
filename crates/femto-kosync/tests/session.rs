@@ -48,7 +48,7 @@ impl Transport for Mock {
     fn connect(
         &mut self,
         _: &Url,
-        deadline: Instant,
+        deadline: femto_catalog::deadline::Limit,
         cancel: Arc<AtomicBool>,
     ) -> io::Result<Box<dyn Stream>> {
         self.calls.fetch_add(1, Ordering::SeqCst);

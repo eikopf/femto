@@ -3,19 +3,18 @@ use crate::{
     book::Book,
     config::{Route, Settings},
 };
-use femto_catalog::{deadline::Budget, http::Transport, worker::Worker};
+use femto_catalog::{
+    deadline::{Budget, Limit},
+    http::Transport,
+    worker::Worker,
+};
 use femto_reader::{
     controller::{Navigating, Reader},
     layout::Locator,
     state::ReaderState,
     ui::{KosyncEvent, ReaderUi},
 };
-use std::{
-    fs::File,
-    io,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{fs::File, io, sync::Arc, time::Duration};
 
 pub type TransportFactory = Arc<dyn Fn(&[String]) -> io::Result<Box<dyn Transport>> + Send + Sync>;
 struct Origin {
@@ -113,10 +112,10 @@ impl Session {
             None
         };
         let settings = self.settings.clone();
-        let deadline = Instant::now() + Duration::from_secs(30);
+        let limit = Limit::SILENCE;
         let id = self
             .jobs
-            .submit(deadline, move |budget, cancelled| {
+            .submit(limit, move |budget, cancelled| {
                 let exchange = || -> Result<Output, crate::Error> {
                     let origins = if settings.route == Route::Tailnet {
                         vec![
@@ -133,25 +132,18 @@ impl Session {
                         KosyncEvent::Auth => {
                             settings
                                 .client
-                                .authorize(&mut transport, deadline, cancelled)?;
+                                .authorize(&mut transport, limit, cancelled)?;
                             Ok(Output::Message("Account verified"))
                         }
                         KosyncEvent::Register => {
-                            settings
-                                .client
-                                .register(&mut transport, deadline, cancelled)?;
+                            settings.client.register(&mut transport, limit, cancelled)?;
                             Ok(Output::Message("Account created"))
                         }
                         KosyncEvent::Push | KosyncEvent::Pull => {
                             let path = path.ok_or(crate::Error::Invalid("book path"))?;
                             let file = open_book(&path)?;
-                            let mut book = Book::from_file(
-                                &path,
-                                file,
-                                settings.checksum,
-                                deadline,
-                                &cancelled,
-                            )?;
+                            let mut book =
+                                Book::from_file(&path, file, settings.checksum, limit, &cancelled)?;
                             if book.document.metadata.id != origin.book {
                                 return Err(crate::Error::Invalid("book changed on disk"));
                             }
@@ -162,7 +154,7 @@ impl Session {
                                 settings.client.push(
                                     &mut transport,
                                     &progress,
-                                    deadline,
+                                    limit,
                                     cancelled,
                                 )?;
                                 Ok(Output::Message("Reading position uploaded"))
@@ -170,7 +162,7 @@ impl Session {
                                 let Some(remote) = settings.client.pull(
                                     &mut transport,
                                     &book.id,
-                                    deadline,
+                                    limit,
                                     cancelled,
                                 )?
                                 else {

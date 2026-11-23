@@ -17,7 +17,7 @@ mod network {
         fn connect(
             &mut self,
             url: &url::Url,
-            deadline: std::time::Instant,
+            deadline: femto_catalog::deadline::Limit,
             cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
         ) -> std::io::Result<Box<dyn femto_catalog::http::Stream>> {
             femto_catalog::http::Transport::connect(

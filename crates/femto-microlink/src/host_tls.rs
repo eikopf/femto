@@ -952,8 +952,6 @@ mod tests {
             assert_eq!(pool.home_region(&mut network, 0), (mode >= 4).then_some(7));
             if mode >= 4 {
                 assert!(pool.next_plan(&mut network, 0).unwrap().is_none());
-            } else {
-                assert!(pool.next_plan(&mut network, 0).unwrap().unwrap().is_home());
             }
             if mode == 4 {
                 network

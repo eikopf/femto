@@ -150,7 +150,12 @@ fn main() -> anyhow::Result<()> {
     let auth = femto_catalog::auth::BasicAuth::from_json(url.as_str(), &auth_bytes)?;
     ensure!(
         matches!(
-            femto_catalog::http::fetch(&mut transport, url.as_str(), deadline, cancelled.clone()),
+            femto_catalog::http::fetch(
+                &mut transport,
+                url.as_str(),
+                femto_catalog::deadline::Limit::Until(deadline),
+                cancelled.clone()
+            ),
             Err(femto_catalog::http::Error::Status(401))
         ),
         "unauthenticated catalog access was not refused"
@@ -158,7 +163,7 @@ fn main() -> anyhow::Result<()> {
     let feed = femto_catalog::http::fetch_authenticated(
         &mut transport,
         url.as_str(),
-        deadline,
+        femto_catalog::deadline::Limit::Until(deadline),
         cancelled.clone(),
         Some(&auth),
     )?;

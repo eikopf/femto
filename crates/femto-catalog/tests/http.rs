@@ -36,7 +36,7 @@ impl Transport for Mock {
     fn connect(
         &mut self,
         url: &Url,
-        _: Instant,
+        _: femto_catalog::deadline::Limit,
         _: Arc<AtomicBool>,
     ) -> io::Result<Box<dyn Stream>> {
         self.urls.push(url.to_string());
@@ -52,7 +52,7 @@ fn fetch(mock: &mut Mock) -> Result<femto_catalog::Catalog, http::Error> {
     http::fetch(
         mock,
         SOURCE,
-        Instant::now() + Duration::from_secs(5),
+        femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(5)),
         Arc::new(AtomicBool::new(false)),
     )
 }
@@ -158,7 +158,7 @@ fn cancellation_and_deadline_prevent_connection() {
         http::fetch(
             &mut mock,
             SOURCE,
-            Instant::now() + Duration::from_secs(1),
+            femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(1)),
             Arc::new(AtomicBool::new(true))
         )
         .is_err()
@@ -167,7 +167,7 @@ fn cancellation_and_deadline_prevent_connection() {
         http::fetch(
             &mut mock,
             SOURCE,
-            Instant::now(),
+            femto_catalog::deadline::Limit::Until(Instant::now()),
             Arc::new(AtomicBool::new(false))
         )
         .is_err()
@@ -201,7 +201,7 @@ fn basic_credentials_follow_only_the_configured_origin() {
         http::fetch_authenticated(
             &mut mock,
             SOURCE,
-            Instant::now() + Duration::from_secs(5),
+            femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(5)),
             Arc::new(AtomicBool::new(false)),
             Some(&auth),
         )
@@ -246,7 +246,7 @@ fn authentication_rejection_does_not_retry_or_emit_a_partial_catalog() {
         http::fetch_authenticated(
             &mut mock,
             SOURCE,
-            Instant::now() + Duration::from_secs(5),
+            femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(5)),
             Arc::new(AtomicBool::new(false)),
             Some(&auth)
         ),
@@ -292,7 +292,7 @@ fn epub_download_streams_bounded_writes_and_honors_mid_body_cancellation() {
         let result = http::download_epub(
             &mut mock,
             SOURCE,
-            Instant::now() + Duration::from_secs(5),
+            femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(5)),
             flag,
             None,
             &mut sink,
@@ -318,7 +318,7 @@ fn oversized_or_truncated_downloads_and_storage_failures_are_errors() {
         b"HTTP/1.1 200 OK\r\nContent-Type: application/epub+zip\r\nContent-Length: 100\r\n\r\nshort".to_vec(),
     ] {
         let mut mock = Mock { responses: [response].into(), ..Default::default() };
-        assert!(http::download_epub(&mut mock, SOURCE, Instant::now() + Duration::from_secs(5), Arc::new(AtomicBool::new(false)), None, &mut Vec::new()).is_err());
+        assert!(http::download_epub(&mut mock, SOURCE, femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(5)), Arc::new(AtomicBool::new(false)), None, &mut Vec::new()).is_err());
     }
     struct FailedDisk;
     impl Write for FailedDisk {
@@ -331,7 +331,7 @@ fn oversized_or_truncated_downloads_and_storage_failures_are_errors() {
     }
     let mut mock = Mock { responses: [b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 2\r\n\r\nPK".to_vec()].into(), ..Default::default() };
     assert!(
-        matches!(http::download_epub(&mut mock, SOURCE, Instant::now() + Duration::from_secs(5), Arc::new(AtomicBool::new(false)), None, &mut FailedDisk), Err(http::Error::Io(error)) if error.to_string() == "disk failed")
+        matches!(http::download_epub(&mut mock, SOURCE, femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(5)), Arc::new(AtomicBool::new(false)), None, &mut FailedDisk), Err(http::Error::Io(error)) if error.to_string() == "disk failed")
     );
 }
 
@@ -346,7 +346,7 @@ fn file_downloads_accept_any_type_follow_redirects_and_enforce_the_callers_limit
         let result = http::download_file(
             &mut mock,
             SOURCE,
-            Instant::now() + Duration::from_secs(5),
+            femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(5)),
             Arc::new(AtomicBool::new(false)),
             limit,
             offset,

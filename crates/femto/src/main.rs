@@ -240,7 +240,9 @@ fn main() -> Result<()> {
             let result = femto_catalog::http::fetch_authenticated(
                 &mut transport,
                 &source,
-                std::time::Instant::now() + std::time::Duration::from_secs(timeout),
+                femto_catalog::deadline::Limit::Until(
+                    std::time::Instant::now() + std::time::Duration::from_secs(timeout),
+                ),
                 operation.flag(),
                 auth.as_ref(),
             )?;

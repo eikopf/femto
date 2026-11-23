@@ -1,9 +1,11 @@
 //! Exact-origin transport selection, including redirects, without fallback.
-use crate::http::{Stream, Transport, Url};
+use crate::{
+    deadline::Limit,
+    http::{Stream, Transport, Url},
+};
 use std::{
     io,
     sync::{Arc, atomic::AtomicBool},
-    time::Instant,
 };
 
 pub struct Routed<L, T> {
@@ -47,13 +49,13 @@ impl<L: Transport, T: Transport> Transport for Routed<L, T> {
     fn connect(
         &mut self,
         url: &Url,
-        deadline: Instant,
+        limit: Limit,
         cancelled: Arc<AtomicBool>,
     ) -> io::Result<Box<dyn Stream>> {
         if self.origins.contains(&url.origin()) {
-            self.tailnet.connect(url, deadline, cancelled)
+            self.tailnet.connect(url, limit, cancelled)
         } else {
-            self.lan.connect(url, deadline, cancelled)
+            self.lan.connect(url, limit, cancelled)
         }
     }
 }
@@ -66,7 +68,7 @@ mod tests {
         collections::VecDeque,
         io::{Cursor, Read, Write},
         rc::Rc,
-        time::Duration,
+        time::{Duration, Instant},
     };
     struct Wire(Cursor<Vec<u8>>);
     impl Read for Wire {
@@ -91,7 +93,7 @@ mod tests {
         fn connect(
             &mut self,
             url: &Url,
-            _: Instant,
+            _: Limit,
             _: Arc<AtomicBool>,
         ) -> io::Result<Box<dyn Stream>> {
             self.calls
@@ -119,12 +121,12 @@ mod tests {
             replies: [Ok(response), Err(io::ErrorKind::ConnectionRefused.into())].into(),
         };
         let mut router = Routed::new(lan, tailnet, &["http://BOOKS.example:80"]).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let limit = Limit::Until(Instant::now() + Duration::from_secs(2));
         let cancelled = Arc::new(AtomicBool::new(false));
         let catalog = crate::http::fetch(
             &mut router,
             "http://public.example/start",
-            deadline,
+            limit,
             cancelled.clone(),
         )
         .unwrap();
@@ -134,7 +136,7 @@ mod tests {
             router
                 .connect(
                     &Url::parse("http://books.example/fail").unwrap(),
-                    deadline,
+                    limit,
                     cancelled
                 )
                 .err()

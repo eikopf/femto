@@ -2,7 +2,7 @@
 use crate::{
     Catalog,
     auth::BasicAuth,
-    deadline::Budget,
+    deadline::{Budget, Limit},
     http::{self, Transport},
 };
 use std::{
@@ -43,7 +43,7 @@ impl Worker<Catalog> {
         &mut self,
         source: &str,
         auth: Option<BasicAuth>,
-        deadline: Instant,
+        limit: Limit,
         factory: impl FnOnce() -> io::Result<T> + Send + 'static,
     ) -> io::Result<u64> {
         if self.is_busy() {
@@ -60,10 +60,10 @@ impl Worker<Catalog> {
             ));
         }
         let source = url.to_string();
-        self.submit(deadline, move |budget, cancelled| {
+        self.submit(limit, move |budget, cancelled| {
             let mut transport = factory()?;
             budget.check()?;
-            http::fetch_authenticated(&mut transport, &source, deadline, cancelled, auth.as_ref())
+            http::fetch_authenticated(&mut transport, &source, limit, cancelled, auth.as_ref())
         })
     }
 }
@@ -72,7 +72,7 @@ impl<R: Send + 'static> Worker<R> {
     /// result must roll back any unpublished resources owned by that result.
     pub fn submit(
         &mut self,
-        deadline: Instant,
+        limit: Limit,
         operation: impl FnOnce(Budget, Arc<AtomicBool>) -> Result<R, http::Error> + Send + 'static,
     ) -> io::Result<u64> {
         if self.is_busy() {
@@ -82,7 +82,7 @@ impl<R: Send + 'static> Worker<R> {
             ));
         }
         let cancelled = Arc::new(AtomicBool::new(false));
-        let budget = Budget::new(deadline, cancelled.clone());
+        let budget = Budget::new(limit, cancelled.clone());
         budget.check()?;
         let id = self
             .next_id

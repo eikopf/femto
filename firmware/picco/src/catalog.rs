@@ -1,4 +1,6 @@
-use femto_catalog::{auth::BasicAuth, browser::Browser, search::Search, worker::Worker};
+use femto_catalog::{
+    auth::BasicAuth, browser::Browser, deadline::Limit, search::Search, worker::Worker,
+};
 use femto_reader::ui::{CatalogEvent, ReaderUi};
 use std::{
     fs::File,
@@ -258,13 +260,12 @@ impl CatalogMenu {
         let auth = self.auth.clone();
         let factory = self.transport.clone();
         let origins = self.origins.clone();
-        let deadline = Instant::now() + Duration::from_secs(30);
-        worker.submit(deadline, move |_, cancel| {
+        worker.submit(Limit::SILENCE, move |_, cancel| {
             let mut transport = request_transport(factory.as_ref(), &origins)?;
             let feed = femto_catalog::http::fetch_search(
                 &mut transport,
                 &target,
-                deadline,
+                Limit::SILENCE,
                 cancel,
                 auth.as_ref(),
             )?;
@@ -276,17 +277,16 @@ impl CatalogMenu {
         let auth = self.auth.clone();
         let factory = self.transport.clone();
         let origins = self.origins.clone();
-        let deadline = Instant::now() + Duration::from_secs(120);
         let count = Arc::new(DownloadCount::default());
         let observed = count.clone();
-        let id = worker.submit(deadline, move |budget, cancel| {
+        let id = worker.submit(Limit::SILENCE, move |budget, cancel| {
             let mut transport = request_transport(factory.as_ref(), &origins)?;
             let mut staged =
                 femto_reader::download::Staged::new(&directory).map_err(std::io::Error::other)?;
             femto_catalog::http::download_epub(
                 &mut transport,
                 &source,
-                deadline,
+                Limit::SILENCE,
                 cancel,
                 auth.as_ref(),
                 &mut Counted {
@@ -572,7 +572,15 @@ impl CatalogMenu {
                                 std::fs::hard_link(source, destination)
                             }
                         })
-                        .map_err(|e| e.to_string())
+                        .map_err(|error| match error {
+                            // Names are content hashes: the same book is there.
+                            femto_reader::Error::Io(error)
+                                if error.kind() == io::ErrorKind::AlreadyExists =>
+                            {
+                                "This book is already in the library".into()
+                            }
+                            error => error.to_string(),
+                        })
                 });
                 let _ = self.show(ui);
                 match result {
@@ -842,11 +850,14 @@ mod download_progress_tests {
         let (send, receive) = std::sync::mpsc::channel::<()>();
         let (started, ready) = std::sync::mpsc::channel();
         let id = worker
-            .submit(Instant::now() + Duration::from_secs(10), move |_, _| {
-                started.send(()).unwrap();
-                let _ = receive.recv();
-                Err(io::Error::other("test completion").into())
-            })
+            .submit(
+                femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(10)),
+                move |_, _| {
+                    started.send(()).unwrap();
+                    let _ = receive.recv();
+                    Err(io::Error::other("test completion").into())
+                },
+            )
             .unwrap();
         // Cancellation before entry correctly skips the operation. This test
         // needs an active operation whose completion remains under its control.

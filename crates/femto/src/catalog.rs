@@ -93,7 +93,7 @@ pub fn download(args: DownloadArgs) -> anyhow::Result<()> {
     let catalog = femto_catalog::http::fetch_authenticated(
         &mut transport,
         &args.source,
-        deadline,
+        femto_catalog::deadline::Limit::Until(deadline),
         cancelled.clone(),
         auth.as_ref(),
     )?;
@@ -178,7 +178,7 @@ impl AcquisitionFile {
         let result = femto_catalog::http::download_epub(
             transport,
             source,
-            deadline,
+            femto_catalog::deadline::Limit::Until(deadline),
             cancelled.clone(),
             auth,
             self.temporary.as_file_mut(),
@@ -316,7 +316,7 @@ pub(crate) fn browse_transport<T: Transport>(
         femto_catalog::http::fetch_authenticated(
             transport,
             source,
-            args.deadline(args.timeout),
+            femto_catalog::deadline::Limit::Until(args.deadline(args.timeout)),
             operation.flag(),
             auth,
         )
@@ -435,7 +435,7 @@ pub(crate) fn browse_transport<T: Transport>(
                         femto_catalog::http::fetch_search(
                             transport,
                             &search,
-                            args.deadline(args.timeout),
+                            femto_catalog::deadline::Limit::Until(args.deadline(args.timeout)),
                             operation.flag(),
                             auth,
                         )

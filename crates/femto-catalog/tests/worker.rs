@@ -24,7 +24,12 @@ impl Write for Reply {
 }
 struct Mock;
 impl Transport for Mock {
-    fn connect(&mut self, _: &Url, _: Instant, _: Arc<AtomicBool>) -> io::Result<Box<dyn Stream>> {
+    fn connect(
+        &mut self,
+        _: &Url,
+        _: femto_catalog::deadline::Limit,
+        _: Arc<AtomicBool>,
+    ) -> io::Result<Box<dyn Stream>> {
         let feed = include_bytes!("../../../tests/fixtures/catalog.json");
         let mut reply = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/opds+json\r\nContent-Length: {}\r\n\r\n",
@@ -52,14 +57,24 @@ fn completion(worker: &mut Worker) -> Completion {
 fn feeds_complete_and_identifiers_are_not_reused() {
     let mut worker = Worker::default();
     let first = worker
-        .fetch("https://example.com/feed", None, deadline(), || Ok(Mock))
+        .fetch(
+            "https://example.com/feed",
+            None,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            || Ok(Mock),
+        )
         .unwrap();
     let reply = completion(&mut worker);
     assert_eq!(reply.id, first);
     assert!(reply.result.is_ok());
     assert!(!worker.is_busy());
     let second = worker
-        .fetch("https://example.com/feed", None, deadline(), || Ok(Mock))
+        .fetch(
+            "https://example.com/feed",
+            None,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            || Ok(Mock),
+        )
         .unwrap();
     assert!(second > first);
     assert!(completion(&mut worker).result.is_ok());
@@ -70,17 +85,27 @@ fn blocked_platform_operation_retains_ownership_and_rejects_new_work() {
     let (entered_tx, entered_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     worker
-        .fetch("https://example.com/feed", None, deadline(), move || {
-            entered_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
-            Ok(Mock)
-        })
+        .fetch(
+            "https://example.com/feed",
+            None,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            move || {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(Mock)
+            },
+        )
         .unwrap();
     entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     assert!(worker.poll().is_none());
     assert_eq!(
         worker
-            .fetch("https://example.com/feed", None, deadline(), || Ok(Mock))
+            .fetch(
+                "https://example.com/feed",
+                None,
+                femto_catalog::deadline::Limit::Until(deadline()),
+                || Ok(Mock)
+            )
             .unwrap_err()
             .kind(),
         io::ErrorKind::WouldBlock
@@ -103,7 +128,12 @@ fn expired_and_invalid_requests_never_start_factory() {
     ] {
         assert!(
             worker
-                .fetch::<Mock>(url, None, end, || panic!("factory must not run"))
+                .fetch::<Mock>(
+                    url,
+                    None,
+                    femto_catalog::deadline::Limit::Until(end),
+                    || panic!("factory must not run")
+                )
                 .is_err()
         );
         assert!(!worker.is_busy());
@@ -113,13 +143,21 @@ fn expired_and_invalid_requests_never_start_factory() {
 fn worker_panic_becomes_an_error_and_slot_is_reusable() {
     let mut worker = Worker::default();
     worker
-        .fetch::<Mock>("https://example.com", None, deadline(), || {
-            panic!("injected failure")
-        })
+        .fetch::<Mock>(
+            "https://example.com",
+            None,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            || panic!("injected failure"),
+        )
         .unwrap();
     assert!(completion(&mut worker).result.is_err());
     worker
-        .fetch("https://example.com", None, deadline(), || Ok(Mock))
+        .fetch(
+            "https://example.com",
+            None,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            || Ok(Mock),
+        )
         .unwrap();
     assert!(completion(&mut worker).result.is_ok());
 }
@@ -135,7 +173,7 @@ impl Transport for Notifying {
     fn connect(
         &mut self,
         url: &Url,
-        end: Instant,
+        end: femto_catalog::deadline::Limit,
         cancel: Arc<AtomicBool>,
     ) -> io::Result<Box<dyn Stream>> {
         let _keep_alive = &self.1;
@@ -147,9 +185,12 @@ fn cancellation_discards_a_completed_feed_before_delivery() {
     let (done_tx, done_rx) = mpsc::channel();
     let mut worker = Worker::default();
     worker
-        .fetch("https://example.com", None, deadline(), move || {
-            Ok(Notifying(Mock, NotifyDrop(done_tx)))
-        })
+        .fetch(
+            "https://example.com",
+            None,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            move || Ok(Notifying(Mock, NotifyDrop(done_tx))),
+        )
         .unwrap();
     // Transport destruction follows the successful parse and task budget check.
     done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
@@ -166,12 +207,17 @@ fn dropping_owner_joins_platform_work_before_returning() {
     let (destroyed_tx, destroyed_rx) = mpsc::channel();
     let mut worker = Worker::default();
     worker
-        .fetch("https://example.com", None, deadline(), move || {
-            let _resource = NotifyDrop(destroyed_tx);
-            entered_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
-            Ok(Mock)
-        })
+        .fetch(
+            "https://example.com",
+            None,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            move || {
+                let _resource = NotifyDrop(destroyed_tx);
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(Mock)
+            },
+        )
         .unwrap();
     entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     let (dropping_tx, dropping_rx) = mpsc::channel();
@@ -207,11 +253,14 @@ fn cancelled_typed_results_are_dropped_without_delivery() {
     let (ready_tx, ready_rx) = mpsc::channel();
     let mut worker = Worker::default();
     worker
-        .submit(deadline(), move |_, _| {
-            let result = Prepared(result_drops);
-            ready_tx.send(()).unwrap();
-            Ok(result)
-        })
+        .submit(
+            femto_catalog::deadline::Limit::Until(deadline()),
+            move |_, _| {
+                let result = Prepared(result_drops);
+                ready_tx.send(()).unwrap();
+                Ok(result)
+            },
+        )
         .unwrap();
     ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     worker.cancel();

@@ -57,7 +57,11 @@ fn validation_precedes_peer_resolution_and_unavailable_tailnet_never_dials() {
     ] {
         assert_eq!(
             transport
-                .connect(&Url::parse(url).unwrap(), deadline, cancel.clone())
+                .connect(
+                    &Url::parse(url).unwrap(),
+                    femto_catalog::deadline::Limit::Until(deadline),
+                    cancel.clone()
+                )
                 .err()
                 .unwrap()
                 .kind(),
@@ -68,7 +72,7 @@ fn validation_precedes_peer_resolution_and_unavailable_tailnet_never_dials() {
         transport
             .connect(
                 &Url::parse("https://peer.example/").unwrap(),
-                deadline,
+                femto_catalog::deadline::Limit::Until(deadline),
                 cancel.clone()
             )
             .err()
@@ -79,7 +83,11 @@ fn validation_precedes_peer_resolution_and_unavailable_tailnet_never_dials() {
     let url = Url::parse("http://peer.example/feed").unwrap();
     assert_eq!(
         transport
-            .connect(&url, Instant::now(), cancel.clone())
+            .connect(
+                &url,
+                femto_catalog::deadline::Limit::Until(Instant::now()),
+                cancel.clone()
+            )
             .err()
             .unwrap()
             .kind(),
@@ -88,7 +96,11 @@ fn validation_precedes_peer_resolution_and_unavailable_tailnet_never_dials() {
     cancel.store(true, Ordering::Release);
     assert_eq!(
         transport
-            .connect(&url, deadline, cancel.clone())
+            .connect(
+                &url,
+                femto_catalog::deadline::Limit::Until(deadline),
+                cancel.clone()
+            )
             .err()
             .unwrap()
             .kind(),
@@ -98,7 +110,11 @@ fn validation_precedes_peer_resolution_and_unavailable_tailnet_never_dials() {
     assert_eq!(calls.load(Ordering::Relaxed), 1);
     assert_eq!(
         transport
-            .connect(&url, deadline, cancel.clone())
+            .connect(
+                &url,
+                femto_catalog::deadline::Limit::Until(deadline),
+                cancel.clone()
+            )
             .err()
             .unwrap()
             .kind(),
@@ -107,7 +123,11 @@ fn validation_precedes_peer_resolution_and_unavailable_tailnet_never_dials() {
     assert_eq!(calls.load(Ordering::Relaxed), 2);
     assert_eq!(
         tailnet_http::Transport(None)
-            .connect(&url, deadline, cancel)
+            .connect(
+                &url,
+                femto_catalog::deadline::Limit::Until(deadline),
+                cancel
+            )
             .err()
             .unwrap()
             .kind(),

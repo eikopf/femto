@@ -37,7 +37,7 @@ impl Transport for Fixture {
     fn connect(
         &mut self,
         url: &Url,
-        _: Instant,
+        _: femto_catalog::deadline::Limit,
         _: Arc<AtomicBool>,
     ) -> io::Result<Box<dyn Stream>> {
         self.urls.push(url.to_string());
@@ -80,7 +80,11 @@ fn position() -> Progress {
 fn registration_and_authorization_use_koreader_credentials() {
     let mut transport = fixture(201, r#"{"username":"alice"}"#);
     client()
-        .register(&mut transport, deadline(), cancel())
+        .register(
+            &mut transport,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel(),
+        )
         .unwrap();
     assert_eq!(transport.urls, ["https://peer.test/kosync/users/create"]);
     let bytes = transport.writes.lock().unwrap();
@@ -95,7 +99,11 @@ fn registration_and_authorization_use_koreader_credentials() {
     );
     let mut transport = fixture(200, r#"{"authorized":"OK"}"#);
     client()
-        .authorize(&mut transport, deadline(), cancel())
+        .authorize(
+            &mut transport,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel(),
+        )
         .unwrap();
     assert!(
         transport
@@ -110,7 +118,12 @@ fn progress_matches_wire_contract_and_missing_is_empty_object() {
     let mut transport = fixture(200, "{}");
     assert_eq!(
         client()
-            .pull(&mut transport, &id(), deadline(), cancel())
+            .pull(
+                &mut transport,
+                &id(),
+                femto_catalog::deadline::Limit::Until(deadline()),
+                cancel()
+            )
             .unwrap(),
         None
     );
@@ -118,7 +131,12 @@ fn progress_matches_wire_contract_and_missing_is_empty_object() {
     value["timestamp"] = 1730000000u64.into();
     let mut transport = fixture(200, &value.to_string());
     let remote = client()
-        .pull(&mut transport, &id(), deadline(), cancel())
+        .pull(
+            &mut transport,
+            &id(),
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel(),
+        )
         .unwrap()
         .unwrap();
     assert_eq!(remote.position, position());
@@ -129,7 +147,12 @@ fn progress_matches_wire_contract_and_missing_is_empty_object() {
         &serde_json::json!({"document": id(), "timestamp":1730000001}).to_string(),
     );
     let receipt = client()
-        .push(&mut transport, &position(), deadline(), cancel())
+        .push(
+            &mut transport,
+            &position(),
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel(),
+        )
         .unwrap();
     assert_eq!(receipt.timestamp, 1730000001);
     let request = String::from_utf8(transport.writes.lock().unwrap().clone()).unwrap();
@@ -147,7 +170,12 @@ fn server_cannot_redirect_credentials_or_substitute_a_document() {
         b"HTTP/1.1 302 Found\r\nLocation: https://elsewhere.test/\r\nContent-Length: 0\r\n\r\n"
             .to_vec();
     assert!(matches!(
-        client().pull(&mut transport, &id(), deadline(), cancel()),
+        client().pull(
+            &mut transport,
+            &id(),
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel()
+        ),
         Err(Error::Status(302))
     ));
     assert_eq!(transport.urls.len(), 1);
@@ -160,14 +188,23 @@ fn server_cannot_redirect_credentials_or_substitute_a_document() {
         let mut transport = fixture(200, invalid);
         assert!(
             client()
-                .pull(&mut transport, &id(), deadline(), cancel())
+                .pull(
+                    &mut transport,
+                    &id(),
+                    femto_catalog::deadline::Limit::Until(deadline()),
+                    cancel()
+                )
                 .is_err()
         );
     }
     let mut transport = fixture(401, "do not expose this response");
     assert_eq!(
         client()
-            .authorize(&mut transport, deadline(), cancel())
+            .authorize(
+                &mut transport,
+                femto_catalog::deadline::Limit::Until(deadline()),
+                cancel()
+            )
             .unwrap_err()
             .to_string(),
         "KOReader authentication failed"
@@ -187,14 +224,24 @@ fn bounds_and_framing_prevent_partial_results() {
         };
         assert!(
             client()
-                .pull(&mut transport, &id(), deadline(), cancel())
+                .pull(
+                    &mut transport,
+                    &id(),
+                    femto_catalog::deadline::Limit::Until(deadline()),
+                    cancel()
+                )
                 .is_err()
         );
     }
     let mut transport = Fixture { reply: b"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.koreader.v1+json\r\nTransfer-Encoding: chunked\r\n\r\n1\r\n{\r\n1\r\n}\r\n0\r\n\r\n".to_vec(), ..Default::default() };
     assert_eq!(
         client()
-            .pull(&mut transport, &id(), deadline(), cancel())
+            .pull(
+                &mut transport,
+                &id(),
+                femto_catalog::deadline::Limit::Until(deadline()),
+                cancel()
+            )
             .unwrap(),
         None
     );
@@ -219,19 +266,34 @@ fn validation_and_cancellation_precede_connection() {
     cancelled.store(true, Ordering::Release);
     assert!(
         client()
-            .pull(&mut transport, &id(), deadline(), cancelled)
+            .pull(
+                &mut transport,
+                &id(),
+                femto_catalog::deadline::Limit::Until(deadline()),
+                cancelled
+            )
             .is_err()
     );
     assert!(
         client()
-            .pull(&mut transport, &id(), Instant::now(), cancel())
+            .pull(
+                &mut transport,
+                &id(),
+                femto_catalog::deadline::Limit::Until(Instant::now()),
+                cancel()
+            )
             .is_err()
     );
     let mut invalid = position();
     invalid.percentage = f64::NAN;
     assert!(
         client()
-            .push(&mut transport, &invalid, deadline(), cancel())
+            .push(
+                &mut transport,
+                &invalid,
+                femto_catalog::deadline::Limit::Until(deadline()),
+                cancel()
+            )
             .is_err()
     );
     assert!(transport.urls.is_empty());
@@ -240,7 +302,12 @@ fn validation_and_cancellation_precede_connection() {
 /// Replies in order, one per connection.
 struct Sequence(Vec<Vec<u8>>);
 impl Transport for Sequence {
-    fn connect(&mut self, _: &Url, _: Instant, _: Arc<AtomicBool>) -> io::Result<Box<dyn Stream>> {
+    fn connect(
+        &mut self,
+        _: &Url,
+        _: femto_catalog::deadline::Limit,
+        _: Arc<AtomicBool>,
+    ) -> io::Result<Box<dyn Stream>> {
         Ok(Box::new(Connection {
             input: Cursor::new(self.0.remove(0)),
             output: Default::default(),
@@ -253,13 +320,22 @@ fn servers_that_only_acknowledge_are_accepted_like_koreader_does() {
     // Grimmory answers authorization with the user name.
     let mut transport = fixture(200, r#"{"username":"alice"}"#);
     client()
-        .authorize(&mut transport, deadline(), cancel())
+        .authorize(
+            &mut transport,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel(),
+        )
         .unwrap();
     // It answers 404 where the official server sends an empty object.
     let mut transport = fixture(404, r#"{"message":"No progress found","status":404}"#);
     assert_eq!(
         client()
-            .pull(&mut transport, &id(), deadline(), cancel())
+            .pull(
+                &mut transport,
+                &id(),
+                femto_catalog::deadline::Limit::Until(deadline()),
+                cancel()
+            )
             .unwrap(),
         None
     );
@@ -277,7 +353,12 @@ fn servers_that_only_acknowledge_are_accepted_like_koreader_does() {
     .to_string();
     let mut transport = Sequence(vec![acknowledged.clone(), fixture(200, &stored).reply]);
     let receipt = client()
-        .push(&mut transport, &position(), deadline(), cancel())
+        .push(
+            &mut transport,
+            &position(),
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel(),
+        )
         .unwrap();
     assert_eq!(receipt.timestamp, 1_795_295_654);
     assert!(transport.0.is_empty());
@@ -287,13 +368,22 @@ fn servers_that_only_acknowledge_are_accepted_like_koreader_does() {
         fixture(404, r#"{"message":"No progress found"}"#).reply,
     ]);
     assert!(matches!(
-        client().push(&mut transport, &position(), deadline(), cancel()),
+        client().push(
+            &mut transport,
+            &position(),
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel()
+        ),
         Err(Error::Response)
     ));
     // Other statuses remain errors.
     let mut transport = fixture(500, "{}");
     assert!(matches!(
-        client().authorize(&mut transport, deadline(), cancel()),
+        client().authorize(
+            &mut transport,
+            femto_catalog::deadline::Limit::Until(deadline()),
+            cancel()
+        ),
         Err(Error::Status(500))
     ));
 }

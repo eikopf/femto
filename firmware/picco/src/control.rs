@@ -1,6 +1,6 @@
 //! Coordinator key bootstrap over the device's certificate-verified TLS adapter.
 use femto_catalog::{
-    deadline::Budget,
+    deadline::{Budget, Limit},
     http::{Transport, Url},
 };
 use femto_microlink::{
@@ -22,9 +22,10 @@ pub fn fetch_control_key(
 ) -> io::Result<PublicKey<Machine>> {
     let authority = bootstrap::authority(host, port)?;
     let url = Url::parse(&format!("https://{authority}/")).map_err(io::Error::other)?;
-    let budget = Budget::new(deadline, cancelled.clone());
+    let limit = Limit::Until(deadline);
+    let budget = Budget::new(limit, cancelled.clone());
     budget.check()?;
-    let stream = crate::network::Transport.connect(&url, deadline, cancelled)?;
+    let stream = crate::network::Transport.connect(&url, limit, cancelled)?;
     let key = bootstrap::exchange(stream, host, port, version)?;
     budget.check()?;
     crate::clock::require_ready()?;
@@ -40,7 +41,11 @@ pub fn connect_session(
 ) -> io::Result<femto_microlink::control_session::ControlSession<crate::network::Connection>> {
     let authority = bootstrap::authority(&endpoint.host, endpoint.port)?;
     let url = Url::parse(&format!("https://{authority}/")).map_err(io::Error::other)?;
-    let stream = crate::network::connect(&url, Instant::now() + timeout, cancelled.clone())?;
+    let stream = crate::network::connect(
+        &url,
+        Limit::Until(Instant::now() + timeout),
+        cancelled.clone(),
+    )?;
     let session = femto_microlink::control_session::ControlSession::upgrade(
         stream, endpoint, machine, timeout, cancelled,
     )?;

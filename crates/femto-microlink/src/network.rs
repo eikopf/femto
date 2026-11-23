@@ -3455,7 +3455,7 @@ mod tests {
                     shared.clone(),
                     "peer.example",
                     80,
-                    Instant::now() + Duration::from_secs(2),
+                    crate::application_tcp::Limit::Until(Instant::now() + Duration::from_secs(2)),
                     cancelled.clone(),
                 )
                 .unwrap();
@@ -3487,7 +3487,7 @@ mod tests {
             shared.clone(),
             "peer.example",
             80,
-            Instant::now() + Duration::from_secs(2),
+            crate::application_tcp::Limit::Until(Instant::now() + Duration::from_secs(2)),
             cancel.clone(),
         )
         .unwrap();
@@ -3606,13 +3606,13 @@ mod tests {
             } else {
                 Duration::from_secs(2)
             };
-            let error = match Stream::connect(
-                driver,
-                "peer.example",
-                80,
-                Instant::now() + timeout,
-                cancelled,
-            ) {
+            // A handshake that stalls ends by either kind of limit.
+            let limit = if mode == 1 {
+                crate::application_tcp::Limit::Stall(timeout)
+            } else {
+                crate::application_tcp::Limit::Until(Instant::now() + timeout)
+            };
+            let error = match Stream::connect(driver, "peer.example", 80, limit, cancelled) {
                 Ok(_) => panic!("stalled connection succeeded"),
                 Err(error) => error,
             };
@@ -3626,6 +3626,63 @@ mod tests {
             );
             assert!(dropped.load(Ordering::Acquire));
         }
+    }
+    #[test]
+    #[cfg(all(unix, not(target_os = "espidf")))]
+    fn stall_limit_starts_with_the_map_and_names_a_missing_device() {
+        use crate::host_tcp::{Driver, Stream};
+        use std::{
+            sync::{
+                Arc,
+                atomic::{AtomicBool, Ordering},
+            },
+            time::{Duration, Instant},
+        };
+        /// Cancels the request after a number of pumps.
+        struct Idle(Network<Store>, Arc<AtomicBool>, u32);
+        impl Driver for Idle {
+            type Store = Store;
+            fn run<R>(
+                &mut self,
+                operation: impl FnOnce(&mut Network<Store>, u64) -> Result<R, Error>,
+            ) -> io::Result<R> {
+                operation(&mut self.0, 0).map_err(|e| match e {
+                    Error::Io(e) => e,
+                    e => io::Error::other(e),
+                })
+            }
+            fn pump(&mut self) -> io::Result<()> {
+                self.2 = self.2.saturating_sub(1);
+                if self.2 == 0 {
+                    self.1.store(true, Ordering::Release);
+                }
+                Ok(())
+            }
+        }
+        let limit = crate::application_tcp::Limit::Stall(Duration::from_millis(20));
+        let connect = |network, pumps| {
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let driver = Idle(network, cancelled.clone(), pumps);
+            match Stream::connect(driver, "peer.example", 80, limit, cancelled) {
+                Ok(_) => panic!("connected to an absent device"),
+                Err(error) => error.kind(),
+            }
+        };
+        let a = DeviceIdentity::generate().unwrap();
+        let b = DeviceIdentity::generate().unwrap();
+        // The map names no such device: the wait is the stall limit.
+        let start = Instant::now();
+        assert_eq!(
+            connect(network(&a, &b, 1, 2), u32::MAX),
+            io::ErrorKind::NotFound
+        );
+        assert!(start.elapsed() < Duration::from_secs(1));
+        // No map yet: the session is joining, and only it or the caller ends
+        // the wait, here well past the stall limit.
+        let joining = Network::new(&a, TimestampClock::open(Store, 100).unwrap(), 4, 2).unwrap();
+        let start = Instant::now();
+        assert_eq!(connect(joining, 100), io::ErrorKind::Interrupted);
+        assert!(start.elapsed() > Duration::from_millis(60));
     }
     #[test]
     #[cfg(all(unix, not(target_os = "espidf")))]
@@ -3791,7 +3848,7 @@ mod tests {
                 shared.clone(),
                 "peer.example",
                 443,
-                Instant::now() + Duration::from_secs(3),
+                crate::application_tcp::Limit::Until(Instant::now() + Duration::from_secs(3)),
                 cancelled.clone(),
             );
             if (1..=3).contains(&mode) {

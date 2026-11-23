@@ -12,7 +12,7 @@ use std::{
 ))]
 compile_error!("Tailnet TLS requires the certificate bundle and certificate date verification");
 
-/// The socket enforces its absolute deadline and cancellation in authorize and
+/// The socket enforces its waiting limit and cancellation in authorize and
 /// every I/O call. Blocking I/O must remain inside that operation budget.
 pub trait Socket: Read + Write {
     fn authorize(&mut self) -> io::Result<()>;

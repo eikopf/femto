@@ -523,6 +523,12 @@ fn last() -> Option<(Point, String)> {
     Some((point, std::str::from_utf8(ssid).ok()?.to_owned()))
 }
 
+/// The name of the network last joined: the one the reader is on while the
+/// link is up.
+pub fn last_network() -> Option<String> {
+    last().map(|(_, ssid)| ssid)
+}
+
 /// Records the joined access point, if it changed.
 fn remember(ssid: &str) {
     let mut info = sys::wifi_ap_record_t::default();

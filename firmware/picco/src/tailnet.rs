@@ -42,14 +42,19 @@ struct Setup {
 /// datagrams, which leaves only relayed paths to test.
 pub static RELAY_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Internal-storage name of the home relay region last connected.
+/// Internal-storage name of the home relay region last connected, followed
+/// by the name of the Wi-Fi network it was connected from.
 #[cfg(target_os = "espidf")]
 const HOME_RELAY: &str = "home_relay";
+/// The home relay last connected from the network the reader is on. Which
+/// relay is nearest depends on where the reader reaches the internet, so on
+/// another network the session measures again.
 fn stored_home() -> Option<u64> {
     #[cfg(target_os = "espidf")]
     {
         let stored = crate::nvs::get(HOME_RELAY).ok()??;
-        Some(u64::from_le_bytes(stored.as_slice().try_into().ok()?))
+        let (region, network) = stored.split_first_chunk()?;
+        (network == crate::wifi::last_network()?.as_bytes()).then(|| u64::from_le_bytes(*region))
     }
     #[cfg(not(target_os = "espidf"))]
     None
@@ -445,9 +450,12 @@ impl Runtime {
                             self.home = home;
                             if let Some(region) = home
                                 && stored_home() != home
+                                && let Some(network) = crate::wifi::last_network()
                             {
                                 // Unstored, the next session measures again.
-                                let _ = crate::nvs::set(HOME_RELAY, &region.to_le_bytes());
+                                let mut stored = region.to_le_bytes().to_vec();
+                                stored.extend_from_slice(network.as_bytes());
+                                let _ = crate::nvs::set(HOME_RELAY, &stored);
                             }
                         }
                         let snapshot = Snapshot::new(local, &observed)?.with_home_relay(home)?;

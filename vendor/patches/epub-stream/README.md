@@ -104,9 +104,17 @@ A read gives exactly the number of bytes the central directory states for the en
 - Evidence: observed failure. `a_name_finds_the_entry_of_exactly_that_name` in `crates/femto-reader/tests/archive.rs` fails before the change and passes after; found by a property test over generated archives. No book in circulation is known to have such names.
 - Upstream: upstreamable.
 
+### 0009-archive-read-into-exact-buffer
+
+`StreamingZip::read_file_with_scratch` (and `read_file`, `read_file_at_offset`) no longer refuses a deflated entry because its buffer is full while compressed bytes remain. Inflate consumes the end of the stream without writing. Inflate has no room past the stated size (0007), so a stream with more output than that makes no progress and is refused as `SizeMismatch`, where with a buffer of exactly that size it was `BufferTooSmall`; a buffer smaller than the entry's stated size is still `BufferTooSmall`.
+
+- Why: what remains when the buffer is full may be only the end marker. An empty file written with DEFLATE (as Python's `zipfile` writes one) and a file whose end marker falls in the 8 KiB read after its last data could not be read into a buffer of exactly the size they state. femto reaches this path through `validate_mimetype`, which allocates exactly that size; chapters and resources go through the writer path, which had no such check.
+- Evidence: observed failure. `an_entry_reads_into_a_buffer_of_exactly_its_size` in `crates/femto-reader/tests/archive.rs` fails before the change for the empty entry and the 8187-byte entry and passes after; `an_entry_larger_than_the_buffer_it_asked_for_is_refused` holds before and after. Found by a property test over generated archives. No book in circulation is known to be affected.
+- Upstream: upstreamable.
+
 ## Dependencies between patches
 
-0001 is independent of the rest. 0002 and 0003 are independent of each other in behaviour. 0004 applies on top of 0002 and 0003 because it touches neighbouring lines. 0006 is independent of the rest. 0007 is independent in behaviour and applies on top of 0006. 0008 is independent in behaviour and applies on top of 0007. 0005 depends on 0004 for one hunk (a test `match` that lists the new `StyledEventOrRun` variants was placed in 0004 so that each state compiles). The library type-checks after each patch.
+0001 is independent of the rest. 0002 and 0003 are independent of each other in behaviour. 0004 applies on top of 0002 and 0003 because it touches neighbouring lines. 0006 is independent of the rest. 0007 is independent in behaviour and applies on top of 0006. 0008 is independent in behaviour and applies on top of 0007. 0009 applies on top of 0008 and relies on 0007 for the error an oversized entry gets. 0005 depends on 0004 for one hunk (a test `match` that lists the new `StyledEventOrRun` variants was placed in 0004 so that each state compiles). The library type-checks after each patch.
 
 ## Verification
 
@@ -114,7 +122,7 @@ Applying 0001 to 0006 in order to the extracted archive reproduces every file un
 
 0007 was checked against the vendored tree and not against the archive: applied with `patch -p1 -F0` to the files as they were after 0006, it reproduces the files it touches byte for byte.
 
-With 0008 the whole series was checked against the archive again: 0001 to 0008 applied in order, with `patch -p1 -F0` and with `git apply`, reproduce every file under `vendor/epub-stream/src` and `LICENSE` byte for byte.
+With 0009 the whole series was checked against the archive again: 0001 to 0009 applied in order, with `patch -p1 -F0` and with `git apply`, reproduce every file under `vendor/epub-stream/src` and `LICENSE` byte for byte.
 
 ## Re-vendoring
 

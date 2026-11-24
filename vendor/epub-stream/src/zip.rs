@@ -654,10 +654,10 @@ impl<F: Read + Seek> StreamingZip<F> {
                         compressed_remaining -= take;
                     }
 
-                    if written >= buf.len() && (compressed_remaining > 0 || !pending.is_empty()) {
-                        return Err(ZipError::BufferTooSmall);
-                    }
-
+                    // A full buffer is not yet an error: what is left of the
+                    // stream may be only its end marker. With output still
+                    // to come and no room for it, inflate makes no progress,
+                    // which is refused below.
                     let result = miniz_oxide::inflate::stream::inflate(
                         &mut self.inflate_state,
                         pending,

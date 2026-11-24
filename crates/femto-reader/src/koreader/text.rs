@@ -131,7 +131,11 @@ fn decode(
                 }
                 continue;
             }
-            emit(ch, base + byte, true, &mut text, &mut origins, &mut column);
+            // The line break of CR LF is at the carriage return, where the
+            // document's source positions have it.
+            let pair = ch == '\n' && raw[..byte].ends_with('\r');
+            let origin = base + byte - usize::from(pair);
+            emit(ch, origin, true, &mut text, &mut origins, &mut column);
         } else if matches!(ch, ' ' | '\r' | '\n' | '\t') {
             if !space {
                 emit(

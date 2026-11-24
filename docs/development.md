@@ -71,6 +71,8 @@ Run on 2026-11-24 over the 110 EPUBs of one personal library (5,146 chapters), i
 
 Some books failed for more than one reason. All 110 now pass on the host, in 70 seconds; the slowest chapter took 0.4 seconds there. The largest chapter kept 3,116 blocks, 448 KiB of text and 6,285 spans. None of this was run on the Picco, where the larger limits also mean larger allocations: a chapter near them may exhaust memory where it was refused before.
 
+Images inside the same books, counted by loading every chapter and rendering all 135,163 pages: 3,036 are shown and 1,194 are left out, of which 951 exceed the one megapixel a page image may have, 160 are GIF, 73 are SVG, 7 exceed 2 MiB encoded and 3 are missing from their archive. Sixty-seven of the 110 books have at least one image left out, often the cover page inside the book. Showing larger images on a page needs their decoding time measured on the Picco first, since a page is rendered in the event loop.
+
 Covers in the same library: 106 books name one, and 98 decode on the host within the limits for an image decoded alone (`image::Limits::ALONE`). Of those, 55 are within the one megapixel a page image may have, which was the limit before; 21 are between one and 2.8 megapixels; and 22 are larger. Seven of the eight refused are progressive JPEGs over one megapixel, which need memory for every coefficient at once, or exceed four megapixels; one is in a format other than PNG and JPEG. The Picco has less memory than the limit allows for and refuses a cover it has no room for; with about 3.7 MiB in its largest free block while reading, that is expected above roughly 2.8 megapixels. This was not measured on the device.
 
 ## Firmware

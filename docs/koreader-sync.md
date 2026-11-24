@@ -74,6 +74,14 @@ Existing reader JSON files and device journal slots retain local positions, book
 
 The simulator accepts `--kosync-config kosync.json`. Picco loads `/sdcard/femto/kosync.json` with the same schema. FAT storage does not provide host-style private-file permissions. Credentials remain on the card. A valid configuration enables the KOReader sync menu with upload, download, account check and account creation actions.
 
+## Positions without a place in the source
+
+Not every reading position has an XPointer: text the reader generates and images the mapper does not know are not in the chapter's source. An upload from such a position used to fail. It now gives the nearest block before it that maps, looking back up to 32 blocks, and failing that the chapter's body (`/body/DocFragment[N]/body`), which resolves to the chapter's start. The other reader opens a little earlier and never later.
+
+A chapter that began with a byte-order mark made the mapper slice its source three bytes off, which panicked wherever that fell inside a character. The mark is now removed from the text the offsets index.
+
+Sampled on 2026-11-24 over one library of 110 EPUBs, at up to four page starts in each of 5,146 chapters: of 18,359 positions, 18,266 mapped and resolved back exactly, 82 failed to map and 11 panicked, the last all in one book. After these changes 18,316 map exactly, 7 resolve to another byte of the same block and 36 to an earlier block or the chapter's start; none fails. `crates/femto-reader/tests/circulation.rs` keeps the cases as a small fixture.
+
 ## Automatic sync
 
 Sync automatically, in the KOReader sync menu, is off until switched on. With it on, the Picco compares the open book with the server once after the book opens, as soon as Wi-Fi is up and the clock is set, and again before it sleeps.

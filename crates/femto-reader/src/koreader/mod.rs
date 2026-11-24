@@ -16,6 +16,12 @@ pub struct XPointer {
     pub(crate) steps: Vec<Step>,
     pub(crate) offset: Option<usize>,
 }
+/// The pointer to a chapter's body, for a chapter with nothing in it that a
+/// finer pointer could name.
+pub(crate) fn chapter_start(chapter: usize) -> String {
+    format!("/body/DocFragment[{}]/body", chapter + 1)
+}
+
 impl XPointer {
     /// Accepts both implicit first indexes and current explicit `[1]` indexes.
     pub fn parse(value: &str) -> Result<Self> {

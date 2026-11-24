@@ -185,3 +185,7 @@ fn write_all(path: &Path, data: &[u8]) -> io::Result<()> {
     file.write_all(data)?;
     file.sync_all()
 }
+
+#[cfg(test)]
+#[path = "page_index_prop.rs"]
+mod prop_tests;

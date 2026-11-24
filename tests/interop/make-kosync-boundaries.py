@@ -8,6 +8,7 @@ cases = {
     "kosync-entity-boundary.epub": "<body>" + "".join(
         "<p>" + "a" * 8190 + entity + "Z</p>" for entity in ["&amp;", "&#38;", "&#x26;"]
     ) + "</body>",
+    "kosync-line-endings.epub": "<body><pre>a\r\nb\n\rc\rd\ne</pre></body>",
 }
 for name, body in cases.items():
     xml = '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Sync boundaries</title></head>' + body + '</html>'

@@ -105,3 +105,45 @@ fn split_entities_leave_other_positions_in_the_chapter_available() {
         }
     }
 }
+
+#[test]
+fn preformatted_line_endings_resolve_to_themselves_or_earlier() {
+    // The source is "a\r\nb\n\rc\rd\ne". The engine reads "a\nb\nc\nd\ne":
+    // it takes LF CR for one line break, where this reader shows two.
+    let mut document = document("kosync-line-endings.epub");
+    let chapter = document.chapter(0).unwrap();
+    let Block::Text(paragraph) = &chapter.blocks[0] else {
+        panic!("text expected");
+    };
+    assert_eq!(paragraph.text, "a\nb\n\nc\nd\ne");
+    // Reading position, the engine's character, and the position it gives back.
+    let positions = [
+        (0, 0, 0),
+        (1, 1, 1),
+        (2, 2, 2),
+        (3, 3, 3),
+        (4, 3, 3),
+        (5, 4, 5),
+        (6, 5, 6),
+        (7, 6, 7),
+        (8, 7, 8),
+        (9, 8, 9),
+        (10, 9, 10),
+    ];
+    for (byte, offset, back) in positions {
+        let location = Locator {
+            chapter: 0,
+            block: 0,
+            byte,
+        };
+        let path = format!("/body[1]/DocFragment[1]/body[1]/pre[1]/text()[1].{offset}");
+        assert_eq!(document.koreader_position(location).unwrap(), path);
+        assert_eq!(
+            document.resolve_koreader_position(&path).unwrap(),
+            Locator {
+                byte: back,
+                ..location
+            }
+        );
+    }
+}

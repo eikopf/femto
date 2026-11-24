@@ -22,4 +22,5 @@ zeroize = { version = "=1.9.1", features = ["serde"] }
 libc = "=0.2.191"
 
 [dev-dependencies]
+proptest = "1"
 tempfile.workspace = true

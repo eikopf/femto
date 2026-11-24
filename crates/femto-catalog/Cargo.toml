@@ -21,3 +21,6 @@ tailnet = ["dep:femto-microlink"]
 
 [target.'cfg(all(unix, not(target_os = "espidf")))'.dependencies]
 femto-microlink = { path = "../femto-microlink", optional = true }
+
+[dev-dependencies]
+proptest = "1"

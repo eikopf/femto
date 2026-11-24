@@ -7,3 +7,6 @@ license.workspace = true
 
 [dependencies]
 hidreport.workspace = true
+
+[dev-dependencies]
+proptest = "1"

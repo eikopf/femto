@@ -34,5 +34,6 @@ png.workspace = true
 zune-jpeg.workspace = true
 
 [dev-dependencies]
+proptest = "1"
 tempfile.workspace = true
 

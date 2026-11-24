@@ -42,3 +42,6 @@ signal-hook = { version = "=0.4.4", default-features = false }
 
 [target.'cfg(all(unix, not(target_os = "espidf")))'.dev-dependencies]
 rustls = { version = "=0.23.46", default-features = false, features = ["std", "ring", "tls12"] }
+
+[dev-dependencies]
+proptest = "1"

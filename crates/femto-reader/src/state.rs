@@ -875,11 +875,15 @@ impl Library {
     }
 }
 
+/// The form in which library text is searched and ordered. Lowercasing writes
+/// a capital sigma as ς at the end of a word and as σ elsewhere; both become
+/// σ, so that a piece of a text matches it wherever the piece ends.
 pub(crate) fn library_key(text: &str) -> String {
     text.nfc()
         .collect::<String>()
         .to_lowercase()
         .nfc()
+        .map(|letter| if letter == 'ς' { 'σ' } else { letter })
         .collect()
 }
 
@@ -967,6 +971,36 @@ mod tests {
         }
         for query in ["1", "ffi", "STRASSE", "ı"] {
             assert!(library.search(query).is_empty(), "{query}");
+        }
+    }
+
+    #[test]
+    fn library_search_matches_sigma_wherever_the_query_ends() {
+        let titled = |title: &str| Library {
+            entries: vec![LibraryEntry {
+                path: "books/entry.txt".into(),
+                metadata: LibraryMetadata {
+                    id: "id".into(),
+                    title: title.into(),
+                    author: String::new(),
+                    language: "el".into(),
+                },
+            }],
+            ..Library::default()
+        };
+        // Lowercasing writes a capital sigma as ς at the end of a word and
+        // as σ elsewhere, so a query that ends inside a word of the title
+        // lowercases differently from the title.
+        for (title, queries) in [
+            ("ΟΔΥΣΣΕΙΑ", ["ΟΔΥ", "ΟΔΥΣ", "ΟΔΥΣΣ", "οδυσ", "οδυς"]),
+            ("Οδυσσεύς", ["ΟΔΥΣΣΕΎΣ", "ΟΔΥΣ", "σεύς", "σεύσ", "ΎΣ"]),
+            ("aaaΣaa", ["aaaΣ", "AAAΣ", "aaaσ", "Σaa", "aaaς"]),
+        ] {
+            let library = titled(title);
+            for query in queries {
+                assert_eq!(library.search(query).len(), 1, "{query} in {title}");
+            }
+            assert!(library.search("ΟΔΥΖ").is_empty());
         }
     }
 

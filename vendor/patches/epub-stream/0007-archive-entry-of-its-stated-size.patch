@@ -1,0 +1,179 @@
+femto patch for epub-stream 0.1.0
+Subject: zip: read exactly the size an entry states, or fail
+
+Every limit on a read (ZipLimits::max_file_read_size, the max_bytes of
+read_entry_into_with_limit behind the *_with_limit and *_with_hard_cap
+readers, the buffer check of read_file) is checked against the sizes the
+central directory states. Nothing held the data to them: a deflated entry
+was inflated until its stream ended, so an entry stating 16 bytes could
+give megabytes to a writer whose cap was far lower. An archive under 64 KiB
+returned 8 MiB through a 2 MiB cap.
+
+1. Both DEFLATE loops (read_file_with_scratch and
+   read_file_to_writer_with_scratch; every other read goes through one of
+   them) give inflate no output room past the stated size. Inflate may
+   still consume the end of the stream there. If it has more to write it
+   makes no progress, and the read fails before anything past the stated
+   size reaches the buffer or the writer.
+2. A stream that ends before the stated size fails too, so that a
+   successful read is always exactly the stated size.
+3. A stored entry must state the same compressed and uncompressed size.
+   Its data was read by the compressed size while the limits and buffers
+   were sized by the other.
+
+These fail with the new ZipErrorKind::SizeMismatch (the enum is
+non_exhaustive). In read_file_with_scratch a stored entry whose two sizes
+differ was BufferTooSmall when the compressed one exceeded the buffer and
+is now SizeMismatch.
+
+Upstreamable.
+
+--- a/src/error.rs
++++ b/src/error.rs
+@@ -274,6 +274,8 @@
+     DecompressError,
+     /// CRC32 mismatch
+     CrcMismatch,
++    /// Entry does not unpack to the size the central directory states
++    SizeMismatch,
+     /// I/O error during ZIP operations
+     IoError,
+     /// Central directory full (exceeded max entries)
+@@ -299,6 +301,7 @@
+             ZipErrorKind::UnsupportedCompression => write!(f, "unsupported compression method"),
+             ZipErrorKind::DecompressError => write!(f, "decompression failed"),
+             ZipErrorKind::CrcMismatch => write!(f, "CRC32 checksum mismatch"),
++            ZipErrorKind::SizeMismatch => write!(f, "entry is not the size the archive states"),
+             ZipErrorKind::IoError => write!(f, "I/O error"),
+             ZipErrorKind::CentralDirFull => write!(f, "central directory full"),
+             ZipErrorKind::BufferTooSmall => write!(f, "buffer too small"),
+--- a/src/zip.rs
++++ b/src/zip.rs
+@@ -87,6 +87,26 @@
+ // Re-export the crate's public ZIP error alias for module consumers.
+ pub use crate::error::ZipError;
+ 
++/// The size an entry states it unpacks to. The limits are checked against
++/// it, so a read gives exactly this many bytes or fails. A stored entry is
++/// its own unpacked form and must state one size for both.
++fn stated_size(entry: &CdEntry) -> Result<usize, ZipError> {
++    if entry.method == METHOD_STORED && entry.compressed_size != entry.uncompressed_size {
++        return Err(ZipError::SizeMismatch);
++    }
++    usize::try_from(entry.uncompressed_size).map_err(|_| ZipError::FileTooLarge)
++}
++
++/// Why inflate made no progress: with the stated size written it has more
++/// to write and no room for it; before that the stream is damaged.
++fn stalled(written: usize, stated: usize) -> ZipError {
++    if written == stated {
++        ZipError::SizeMismatch
++    } else {
++        ZipError::DecompressError
++    }
++}
++
+ #[derive(Clone, Copy, Debug)]
+ struct EocdInfo {
+     cd_offset: u64,
+@@ -582,8 +602,7 @@
+                 return Err(ZipError::FileTooLarge);
+             }
+         }
+-        let uncompressed_size =
+-            usize::try_from(entry.uncompressed_size).map_err(|_| ZipError::FileTooLarge)?;
++        let uncompressed_size = stated_size(entry)?;
+         if uncompressed_size > buf.len() {
+             return Err(ZipError::BufferTooSmall);
+         }
+@@ -599,11 +618,7 @@
+         match entry.method {
+             METHOD_STORED => {
+                 // Read stored data directly
+-                let size =
+-                    usize::try_from(entry.compressed_size).map_err(|_| ZipError::FileTooLarge)?;
+-                if size > buf.len() {
+-                    return Err(ZipError::BufferTooSmall);
+-                }
++                let size = uncompressed_size;
+                 self.file
+                     .read_exact(&mut buf[..size])
+                     .map_err(|_| ZipError::IoError)?;
+@@ -640,7 +655,8 @@
+                     let result = miniz_oxide::inflate::stream::inflate(
+                         &mut self.inflate_state,
+                         pending,
+-                        &mut buf[written..],
++                        // No room past the stated size, whatever the buffer.
++                        &mut buf[written..uncompressed_size],
+                         MZFlush::None,
+                     );
+                     let consumed = result.bytes_consumed;
+@@ -657,13 +673,16 @@
+                         }
+                         Ok(MZStatus::Ok) => {
+                             if consumed == 0 && produced == 0 {
+-                                return Err(ZipError::DecompressError);
++                                return Err(stalled(written, uncompressed_size));
+                             }
+                         }
+                         Ok(MZStatus::NeedDict) => return Err(ZipError::DecompressError),
+                         Err(_) => return Err(ZipError::DecompressError),
+                     }
+                 }
++                if written != uncompressed_size {
++                    return Err(ZipError::SizeMismatch);
++                }
+ 
+                 // Verify CRC32 if available
+                 if entry.crc32 != 0 {
+@@ -716,6 +735,7 @@
+                 return Err(ZipError::FileTooLarge);
+             }
+         }
++        let uncompressed_size = stated_size(entry)?;
+ 
+         let data_offset = self.calc_data_offset(entry)?;
+         self.file
+@@ -724,8 +744,7 @@
+ 
+         match entry.method {
+             METHOD_STORED => {
+-                let mut remaining =
+-                    usize::try_from(entry.compressed_size).map_err(|_| ZipError::FileTooLarge)?;
++                let mut remaining = uncompressed_size;
+                 let mut hasher = crc32fast::Hasher::new();
+                 let mut written = 0usize;
+ 
+@@ -765,10 +784,12 @@
+                         compressed_remaining -= take;
+                     }
+ 
++                    // No room past the stated size, so no more is written.
++                    let room = core::cmp::min(output_buf.len(), uncompressed_size - written);
+                     let result = miniz_oxide::inflate::stream::inflate(
+                         &mut self.inflate_state,
+                         pending,
+-                        output_buf,
++                        &mut output_buf[..room],
+                         MZFlush::None,
+                     );
+                     let consumed = result.bytes_consumed;
+@@ -792,13 +813,16 @@
+                         }
+                         Ok(MZStatus::Ok) => {
+                             if consumed == 0 && produced == 0 {
+-                                return Err(ZipError::DecompressError);
++                                return Err(stalled(written, uncompressed_size));
+                             }
+                         }
+                         Ok(MZStatus::NeedDict) => return Err(ZipError::DecompressError),
+                         Err(_) => return Err(ZipError::DecompressError),
+                     }
+                 }
++                if written != uncompressed_size {
++                    return Err(ZipError::SizeMismatch);
++                }
+ 
+                 if entry.crc32 != 0 && hasher.finalize() != entry.crc32 {
+                     return Err(ZipError::CrcMismatch);

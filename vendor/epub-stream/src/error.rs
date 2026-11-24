@@ -274,6 +274,8 @@ pub enum ZipErrorKind {
     DecompressError,
     /// CRC32 mismatch
     CrcMismatch,
+    /// Entry does not unpack to the size the central directory states
+    SizeMismatch,
     /// I/O error during ZIP operations
     IoError,
     /// Central directory full (exceeded max entries)
@@ -299,6 +301,7 @@ impl fmt::Display for ZipErrorKind {
             ZipErrorKind::UnsupportedCompression => write!(f, "unsupported compression method"),
             ZipErrorKind::DecompressError => write!(f, "decompression failed"),
             ZipErrorKind::CrcMismatch => write!(f, "CRC32 checksum mismatch"),
+            ZipErrorKind::SizeMismatch => write!(f, "entry is not the size the archive states"),
             ZipErrorKind::IoError => write!(f, "I/O error"),
             ZipErrorKind::CentralDirFull => write!(f, "central directory full"),
             ZipErrorKind::BufferTooSmall => write!(f, "buffer too small"),

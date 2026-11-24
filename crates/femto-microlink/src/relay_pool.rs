@@ -1000,3 +1000,6 @@ mod tests {
         assert!(pool.is_empty());
     }
 }
+
+#[cfg(test)]
+mod prop_tests;

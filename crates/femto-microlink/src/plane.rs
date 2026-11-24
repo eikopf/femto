@@ -1179,3 +1179,6 @@ mod tests {
         assert!(plane.authenticated_packet(key, new_reply, 30_006).is_ok());
     }
 }
+
+#[cfg(test)]
+mod prop_tests;

@@ -45,8 +45,9 @@ impl Parser {
             let value = attribute
                 .unescape_value()
                 .map_err(|_| Error::Field("feed XML"))?;
+            // Too long to keep or to follow, as an inline `data:` thumbnail is.
             if value.len() > MAX_TEXT_BYTES {
-                return Err(Error::Limit("link attribute"));
+                return Ok(None);
             }
             match attribute.key.local_name().as_ref() {
                 b"href" => href = Some(value.into_owned()),
@@ -68,7 +69,7 @@ impl Parser {
         let resolved = if templated {
             None
         } else {
-            Some(web_url(Some(&self.base), &href)?.to_string())
+            web_url(Some(&self.base), &href).ok().map(String::from)
         };
         let relations: Vec<String> = rel
             .as_deref()

@@ -165,7 +165,6 @@ fn malformed_and_oversized_feeds_are_rejected() {
         "<html><body>Sign in</body></html>",
         "<feed><title>Open",
         "<feed><entry><title>x</title></feed>",
-        "<feed><link href=\"javascript:alert(1)\" rel=\"self\"/></feed>",
     ] {
         assert!(Catalog::parse(bad.as_bytes(), source).is_err(), "{bad}");
     }
@@ -184,6 +183,50 @@ fn malformed_and_oversized_feeds_are_rejected() {
     let empty = Catalog::parse(b"<feed><title/></feed>", source).unwrap();
     assert_eq!(empty.title, "Catalog");
     assert!(empty.navigation.is_empty() && empty.publications.is_empty());
+}
+
+#[test]
+fn a_link_that_cannot_be_followed_does_not_cost_the_feed() {
+    let source = "https://library.test/opds";
+    let thumbnail = format!("data:image/png;base64,{}", "A".repeat(8192));
+    for href in [
+        "mailto:librarian@example.org",
+        "data:image/png;base64,iVBORw0KGgo=",
+        "ftp://files.example/book.epub",
+        "javascript:alert(1)",
+        "https://user:secret@library.test/book.epub",
+        thumbnail.as_str(),
+    ] {
+        let feed = format!(
+            "<feed><title>Books</title><link rel=\"related\" href=\"{href}\"/>\
+             <entry><title>A book</title>\
+             <link rel=\"http://opds-spec.org/image/thumbnail\" href=\"{href}\"/>\
+             <link rel=\"http://opds-spec.org/acquisition\" type=\"application/epub+zip\" href=\"{href}\"/>\
+             <link rel=\"http://opds-spec.org/acquisition\" type=\"application/epub+zip\" href=\"/a.epub\"/>\
+             </entry></feed>"
+        );
+        let catalog = Catalog::parse(feed.as_bytes(), source).unwrap();
+        let book = &catalog.publications[0];
+        let unusable = [
+            &catalog.links,
+            &book.images,
+            &book.links[..book.links.len() - 1],
+        ];
+        // An unsupported link keeps its fields; one too long to keep is left out.
+        for links in unusable {
+            if href.len() > 4096 {
+                assert!(links.is_empty());
+            } else {
+                assert_eq!((links[0].href.as_str(), &links[0].resolved), (href, &None));
+                assert_eq!(links[0].direct_epub(), None);
+            }
+        }
+        assert_eq!(
+            book.links.last().unwrap().direct_epub(),
+            Some("https://library.test/a.epub")
+        );
+        assert!(Browser::new(catalog).destinations().is_empty());
+    }
 }
 
 #[test]

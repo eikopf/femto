@@ -69,12 +69,23 @@ impl Size {
         if max_width == 0 || max_height == 0 {
             return Err(Error::Layout("empty image box"));
         }
-        let scale = (max_width as f64 / self.width as f64)
-            .min(max_height as f64 / self.height as f64)
-            .min(1.0);
+        // The scale is the smaller of the two ratios, kept as a fraction: a
+        // rounded scale can lose the last pixel of the side that limits.
+        let (width, height) = (u64::from(self.width), u64::from(self.height));
+        let (max_width, max_height) = (u64::from(max_width), u64::from(max_height));
+        let (numerator, denominator) = if max_width * height <= max_height * width {
+            (max_width, width)
+        } else {
+            (max_height, height)
+        };
+        if numerator >= denominator {
+            return Ok(self);
+        }
+        // Smaller than the side it reduces, so it fits the type.
+        let scale = |side: u64| (side * numerator / denominator).max(1) as u32;
         Ok(Self {
-            width: (self.width as f64 * scale).floor().max(1.0) as u32,
-            height: (self.height as f64 * scale).floor().max(1.0) as u32,
+            width: scale(width),
+            height: scale(height),
         })
     }
 }

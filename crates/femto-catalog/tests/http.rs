@@ -385,3 +385,32 @@ fn file_downloads_accept_any_type_follow_redirects_and_enforce_the_callers_limit
     assert!(matches!(result, Err(http::Error::Status(200))));
     assert!(bytes.is_empty());
 }
+
+#[test]
+fn a_chunked_body_may_have_the_documented_number_of_chunks() {
+    for (chunks, accepted) in [(16_383, true), (16_384, true), (16_385, false)] {
+        let mut response =
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/epub+zip\r\nTransfer-Encoding: chunked\r\n\r\n"
+                .to_vec();
+        response.extend(b"1\r\nx\r\n".repeat(chunks));
+        // The empty chunk that ends the body is not one of them.
+        response.extend(b"0\r\n\r\n");
+        let mut mock = Mock {
+            responses: [response].into(),
+            ..Default::default()
+        };
+        let result = http::download_epub(
+            &mut mock,
+            SOURCE,
+            femto_catalog::deadline::Limit::Until(Instant::now() + Duration::from_secs(5)),
+            Arc::new(AtomicBool::new(false)),
+            None,
+            &mut Vec::new(),
+        );
+        assert_eq!(
+            result.ok().map(|download| download.bytes),
+            accepted.then_some(chunks),
+            "{chunks} chunks"
+        );
+    }
+}

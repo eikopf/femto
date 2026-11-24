@@ -191,3 +191,36 @@ fn a_resource_is_never_larger_than_the_cap() {
         vec![0; SMALL]
     );
 }
+
+/// Names that differ only in case are different files (EPUB OCF 3.3,
+/// section 4.2.2), and so are a name and the same name after a slash.
+#[test]
+fn a_name_finds_the_entry_of_exactly_that_name() {
+    let entries = [
+        stored("OEBPS/Chapter.xhtml", b"upper"),
+        stored("OEBPS/chapter.xhtml", b"lower"),
+        stored("/a", b"rooted"),
+        stored("a", b"relative"),
+        stored("mimetype", b"application/epub+zip"),
+    ];
+    let mut zip = open(&entries);
+    for entry in &entries {
+        let found = zip.get_entry(entry.name).unwrap().clone();
+        assert_eq!(found.filename, entry.name);
+        let mut read = Vec::new();
+        zip.read_file_to_writer(&found, &mut read).unwrap();
+        assert_eq!(read, entry.packed, "{}", entry.name);
+    }
+    // A name no entry has exactly still finds one that differs in case or
+    // by a leading slash: the first such in the archive.
+    for (name, found) in [
+        ("oebps/CHAPTER.xhtml", "OEBPS/Chapter.xhtml"),
+        ("/A", "/a"),
+        ("A", "/a"),
+        ("/mimetype", "mimetype"),
+        ("MIMETYPE", "mimetype"),
+    ] {
+        assert_eq!(zip.get_entry(name).unwrap().filename, found, "{name}");
+    }
+    assert!(zip.get_entry("b").is_none());
+}

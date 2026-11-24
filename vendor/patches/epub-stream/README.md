@@ -96,15 +96,25 @@ A read gives exactly the number of bytes the central directory states for the en
 - Evidence: observed failure. In `crates/femto-reader/tests/archive.rs`, `a_resource_is_never_larger_than_the_cap` builds a book under 64 KiB whose image states 16 bytes and inflates to 8 MiB; before the change `Document::resource`, whose cap is 2 MiB, returned all of it. `an_entry_that_is_not_the_size_it_states_is_refused` covers both read paths, entries that hold more and less than stated, and stored entries. Found by a property test over generated archives. The library sweep (`crates/femto-reader/tests/library_sweep.rs`) was not run with this change, so that no book in circulation misstates a size is assumed, not measured.
 - Upstream: upstreamable. Refusing an entry that unpacks to less than it states is stricter than the limits need; upstream may prefer to refuse only the excess.
 
+### 0008-archive-name-lookup-exact-first
+
+`StreamingZip::get_entry` returns the entry of exactly the name asked for when there is one. The fallbacks (ASCII case ignored, a leading slash on either side ignored) apply only when there is none, and then find the first entry they match, as before.
+
+- Why: one pass tested each entry against the exact name and the fallbacks together, so in an archive holding both `OEBPS/Chapter.xhtml` and `OEBPS/chapter.xhtml` a request for the second returned the first, and likewise for `/a` and `a`. Names that differ in case are different files (EPUB OCF 3.3, section 4.2.2); a book that has both would show one chapter or image in place of the other.
+- Evidence: observed failure. `a_name_finds_the_entry_of_exactly_that_name` in `crates/femto-reader/tests/archive.rs` fails before the change and passes after; found by a property test over generated archives. No book in circulation is known to have such names.
+- Upstream: upstreamable.
+
 ## Dependencies between patches
 
-0001 is independent of the rest. 0002 and 0003 are independent of each other in behaviour. 0004 applies on top of 0002 and 0003 because it touches neighbouring lines. 0006 is independent of the rest. 0007 is independent in behaviour and applies on top of 0006. 0005 depends on 0004 for one hunk (a test `match` that lists the new `StyledEventOrRun` variants was placed in 0004 so that each state compiles). The library type-checks after each patch.
+0001 is independent of the rest. 0002 and 0003 are independent of each other in behaviour. 0004 applies on top of 0002 and 0003 because it touches neighbouring lines. 0006 is independent of the rest. 0007 is independent in behaviour and applies on top of 0006. 0008 is independent in behaviour and applies on top of 0007. 0005 depends on 0004 for one hunk (a test `match` that lists the new `StyledEventOrRun` variants was placed in 0004 so that each state compiles). The library type-checks after each patch.
 
 ## Verification
 
 Applying 0001 to 0006 in order to the extracted archive reproduces every file under `vendor/epub-stream/src` and `LICENSE` byte for byte. The remaining `diff -r` output is exactly the removed files listed above plus `Cargo.toml`, which was compared structurally (parsed as TOML, dependency tables normalised) with the result described under "Differences that are not patches". `cargo check --lib` passes after each patch with default features. The crate's tests were not run at intermediate states; `scripts/check` runs `cargo test --locked -p epub-stream --lib` on the final state.
 
 0007 was checked against the vendored tree and not against the archive: applied with `patch -p1 -F0` to the files as they were after 0006, it reproduces the files it touches byte for byte.
+
+With 0008 the whole series was checked against the archive again: 0001 to 0008 applied in order, with `patch -p1 -F0` and with `git apply`, reproduce every file under `vendor/epub-stream/src` and `LICENSE` byte for byte.
 
 ## Re-vendoring
 

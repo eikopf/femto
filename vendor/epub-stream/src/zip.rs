@@ -545,14 +545,20 @@ impl<F: Read + Seek> StreamingZip<F> {
         Ok(Some(entry))
     }
 
-    /// Get entry by filename (case-insensitive)
+    /// Get entry by filename: the entry of exactly that name, or failing that
+    /// the first whose name differs only in ASCII case or by a leading slash
     pub fn get_entry(&self, name: &str) -> Option<&CdEntry> {
-        self.entries.iter().find(|e| {
-            e.filename == name
-                || e.filename.eq_ignore_ascii_case(name)
-                || (name.starts_with('/') && e.filename.eq_ignore_ascii_case(&name[1..]))
-                || (e.filename.starts_with('/') && e.filename[1..].eq_ignore_ascii_case(name))
-        })
+        self.entries
+            .iter()
+            .find(|e| e.filename == name)
+            .or_else(|| {
+                self.entries.iter().find(|e| {
+                    e.filename.eq_ignore_ascii_case(name)
+                        || (name.starts_with('/') && e.filename.eq_ignore_ascii_case(&name[1..]))
+                        || (e.filename.starts_with('/')
+                            && e.filename[1..].eq_ignore_ascii_case(name))
+                })
+            })
     }
 
     /// Debug: Log all entries in the ZIP (for troubleshooting)

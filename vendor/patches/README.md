@@ -4,7 +4,7 @@ Six crates are vendored under `vendor/` and wired in through `[patch.crates-io]`
 
 | Crate | Upstream release | Patches | Notes |
 | --- | --- | --- | --- |
-| [`epub-stream`](epub-stream/README.md) | 0.1.0 | 7 | One patch (0004) bundles thirteen entangled changes. Manifest and file set reduced by hand. |
+| [`epub-stream`](epub-stream/README.md) | 0.1.0 | 8 | One patch (0004) bundles thirteen entangled changes. Manifest and file set reduced by hand. |
 | [`esp-idf-svc`](esp-idf-svc/README.md) | 0.53.0 | 5 | Firmware only. |
 | [`hidreport`](hidreport/README.md) | 0.6.0 | 1 | |
 | [`miniz_oxide`](miniz_oxide/README.md) | 0.9.1 | 2 | |

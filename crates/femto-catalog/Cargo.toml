@@ -14,7 +14,7 @@ httparse = "=1.10.1"
 quick-xml = { version = "=0.39.4", default-features = false }
 base64 = "=0.22.1"
 zeroize = { version = "=1.9.1", features = ["serde"] }
-iri-string = { version = "=0.7.14", default-features = false }
+iri-string = { version = "=0.7.15", default-features = false }
 
 [features]
 tailnet = ["dep:femto-microlink"]

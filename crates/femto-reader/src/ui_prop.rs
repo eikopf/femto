@@ -93,6 +93,8 @@ pub(super) struct Config {
     /// Ask about a sync conflict only over the reading page, as the sync
     /// session does.
     pub guarded_conflict: bool,
+    /// What the three reading gestures do, when not the defaults.
+    pub gestures: Option<[usize; 3]>,
 }
 
 /// Which invariants to enforce; known findings are switched off to search
@@ -110,6 +112,7 @@ pub(super) struct Checks {
     pub keyboard_taps: bool,
 }
 impl Checks {
+    #[allow(dead_code)]
     pub const ALL: Self = Self {
         selection: true,
         honest_effect: true,
@@ -330,6 +333,12 @@ impl Harness {
         }
         if config.status_line {
             state.layout.footer = STATUS_ROWS;
+        }
+        if let Some([up, down, hold]) = config.gestures {
+            use crate::state::GestureAction;
+            state.gestures.swipe_up = GestureAction::ALL[up];
+            state.gestures.swipe_down = GestureAction::ALL[down];
+            state.gestures.hold = GestureAction::ALL[hold];
         }
         let book = fixture(BOOKS[0]);
         let mut reader = Reader::new(Document::open(&book).unwrap(), fonts(), state).unwrap();
@@ -701,6 +710,11 @@ impl Harness {
             Op::Gesture(which) => {
                 let gesture = [Gesture::SwipeUp, Gesture::SwipeDown, Gesture::Hold]
                     [usize::from(*which) % 3];
+                // Repeated, so that stepped levels reach their ends.
+                for _ in 0..usize::from(*which) / 3 {
+                    let _ = self.ui.gesture(&mut self.reader, gesture);
+                }
+                self.frame.clear();
                 effect = Some(self.ui.gesture(&mut self.reader, gesture));
                 if panel.is_none() && matches!(self.ui.panel, Some(Panel::Light)) {
                     self.shortcut = true;
@@ -1081,7 +1095,7 @@ fn op(weights: [u32; 6]) -> impl Strategy<Value = Op> {
         (page * 4, prop::bool::weighted(0.7).prop_map(Op::Turn).boxed()),
         (page, any::<bool>().prop_map(Op::Swipe).boxed()),
         (page * 2, prop::bool::weighted(0.8).prop_map(Op::TurnLazy).boxed()),
-        (page, (0..3u8).prop_map(Op::Gesture).boxed()),
+        (page * 3, (0..36u8).prop_map(Op::Gesture).boxed()),
         (page, Just(Op::Home).boxed()),
         (menu * 2, any::<bool>().prop_map(Op::Turn).boxed()),
         (menu * 2, any::<bool>().prop_map(Op::Swipe).boxed()),
@@ -1128,13 +1142,15 @@ fn config() -> impl Strategy<Value = Config> {
         prop::bool::weighted(0.8),
         prop::bool::weighted(0.25),
         any::<bool>(),
+        prop::option::weighted(0.5, [0..8usize, 0..8usize, 0..8usize]),
     )
-        .prop_map(|(sleep, services, landscape, status_line)| Config {
+        .prop_map(|(sleep, services, landscape, status_line, gestures)| Config {
             sleep,
             services,
             landscape,
             status_line,
             guarded_conflict: true,
+            gestures,
         })
 }
 

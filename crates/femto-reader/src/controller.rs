@@ -814,12 +814,13 @@ impl Reader {
         self.finish_navigation_using(job, None, |_| Ok(()))
     }
     /// Publishes saved state before replacing the visible page. Failed storage
-    /// leaves the position, annotations and back history unchanged.
+    /// leaves the position, annotations and back history unchanged. `save` may
+    /// add to what it publishes, and the reader keeps it as published.
     pub fn finish_navigation_saved(
         &mut self,
         job: Navigating,
         now: u64,
-        save: impl FnOnce(&ReaderState) -> Result<()>,
+        save: impl FnOnce(&mut ReaderState) -> Result<()>,
     ) -> Result<Effect> {
         self.finish_navigation_using(job, Some(now), save)
     }
@@ -827,7 +828,7 @@ impl Reader {
         &mut self,
         job: Navigating,
         now: Option<u64>,
-        save: impl FnOnce(&ReaderState) -> Result<()>,
+        save: impl FnOnce(&mut ReaderState) -> Result<()>,
     ) -> Result<Effect> {
         self.check_navigation(&job)?;
         let pagination = job.indexer.finish()?;
@@ -848,7 +849,7 @@ impl Reader {
                 .get_mut(&self.document.metadata.id)
                 .unwrap()
                 .typography = Some(BookTypography::current(&state));
-            save(&state)?;
+            save(&mut state)?;
             self.state = state;
         }
         if job.remember {

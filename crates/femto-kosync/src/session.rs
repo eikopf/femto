@@ -473,22 +473,21 @@ impl Session {
             {
                 Ok(false) => self.navigation = Some((job, budget, record)),
                 Ok(true) => {
+                    // The agreement goes into the same save as the position:
+                    // a reader that kept one without the other would take the
+                    // place it was sent to for one it has yet to send.
+                    let id = reader.document.metadata.id.clone();
                     let result = reader.finish_navigation_saved(job, now, |state| {
                         budget.check()?;
-                        save(state)
-                    });
-                    if result.is_ok() {
-                        let position = reader.position();
-                        if let Some(book) = reader.state.books.get_mut(&reader.document.metadata.id)
-                        {
+                        if let Some(book) = state.books.get_mut(&id) {
                             book.synced = Some(Synced {
-                                position,
+                                position: book.position,
                                 device_id: record.0,
                                 timestamp: record.1,
                             });
                         }
-                        let _ = save(&reader.state);
-                    }
+                        save(state)
+                    });
                     self.report(
                         ui,
                         if result.is_ok() {

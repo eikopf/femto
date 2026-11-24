@@ -125,6 +125,25 @@ fn opensearch_templates_expand_against_their_document() {
 }
 
 #[test]
+fn a_keyword_of_dots_does_not_name_another_resource() {
+    use femto_catalog::search::opensearch_url;
+    let source = "https://library.test/opds";
+    // In a path, `.` and `..` are instructions, percent-encoded or not.
+    let path = "/opds/search/{searchTerms}/results";
+    for term in [".", ".."] {
+        assert!(opensearch_url(path, source, term).is_err(), "{term}");
+        assert_eq!(
+            opensearch_url("/opds/search?q={searchTerms}", source, term).unwrap(),
+            format!("https://library.test/opds/search?q={term}")
+        );
+    }
+    assert_eq!(
+        opensearch_url(path, source, "...").unwrap(),
+        "https://library.test/opds/search/.../results"
+    );
+}
+
+#[test]
 fn acquisition_feeds_offer_direct_epubs_and_paging_only() {
     let source = "https://library.test/api/v1/opds/catalog?page=1&size=2";
     let catalog = Catalog::parse(ACQUISITION.as_bytes(), source).unwrap();

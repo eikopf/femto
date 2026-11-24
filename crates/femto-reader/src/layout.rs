@@ -1333,11 +1333,20 @@ fn soft_hyphen_enabled(p: &Paragraph, end: usize) -> bool {
         .is_none_or(|span| span.style.hyphens != Hyphens::None)
 }
 
+/// Where a line that starts with `text` may end within the line buffer.
 fn break_opportunities(text: &str) -> impl Iterator<Item = (usize, BreakOpportunity)> + '_ {
+    use crate::scripts::LINE_BYTES;
+    // Whether a line may end before a character is decided by the text up to
+    // and including that character, so one character past the buffer settles
+    // every end within it. Looking further would read the rest of a paragraph
+    // that has no opportunity, once for each of its lines.
+    let seen = (LINE_BYTES + 1..text.len())
+        .find(|&byte| text.is_char_boundary(byte))
+        .unwrap_or(text.len());
+    let text = &text[..seen];
     let mut ordinary = linebreaks(text).peekable();
     let mut soft = text
         .char_indices()
-        .take_while(|(byte, _)| *byte < crate::scripts::LINE_BYTES)
         .filter_map(|(byte, c)| (c == '\u{ad}').then_some(byte + c.len_utf8()))
         .peekable();
     std::iter::from_fn(
@@ -1358,6 +1367,8 @@ fn break_opportunities(text: &str) -> impl Iterator<Item = (usize, BreakOpportun
             _ => ordinary.next(),
         },
     )
+    // Where the text seen was cut short, its end lies past the buffer as well.
+    .take_while(|(end, _)| *end <= LINE_BYTES)
 }
 
 /// Byte offset at which unshaped advances of the regular face exceed `width`.
@@ -1417,9 +1428,6 @@ fn break_line(
     let mut candidates = Vec::new();
     for (relative, kind) in break_opportunities(&p.text[start..]) {
         let end = start + relative;
-        if end - start > crate::scripts::LINE_BYTES {
-            break;
-        }
         if kind == BreakOpportunity::Allowed && p.text[start..end].chars().all(|c| c == '\u{ad}') {
             continue;
         }

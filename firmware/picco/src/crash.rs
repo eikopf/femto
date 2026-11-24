@@ -61,7 +61,7 @@ impl PowerLog {
             at: std::time::Instant::now(),
             seen: (0, 0),
         };
-        log.line("start", battery);
+        log.line(started(), battery);
         log
     }
     pub fn poll(&mut self, battery: Option<femto_picco_board::battery::Sample>) {
@@ -99,6 +99,26 @@ impl PowerLog {
                 format_args!("{event}, battery unread, light sleep {asleep}%"),
             ),
         }
+    }
+}
+
+/// Why this start happened, so that a reader found awake, asleep or
+/// restarted with nobody watching can be explained afterwards.
+fn started() -> &'static str {
+    match unsafe { sys::esp_reset_reason() } {
+        sys::esp_reset_reason_t_ESP_RST_POWERON => "start at power on",
+        sys::esp_reset_reason_t_ESP_RST_SW => "start after a requested restart",
+        sys::esp_reset_reason_t_ESP_RST_USB => "start after a reset over USB",
+        sys::esp_reset_reason_t_ESP_RST_DEEPSLEEP => match unsafe { sys::esp_sleep_get_wakeup_cause() } {
+            sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT1 => "wake by the power button",
+            sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_TIMER => "wake by the timer",
+            _ => "wake by an unexpected source",
+        },
+        sys::esp_reset_reason_t_ESP_RST_PANIC
+        | sys::esp_reset_reason_t_ESP_RST_INT_WDT
+        | sys::esp_reset_reason_t_ESP_RST_TASK_WDT
+        | sys::esp_reset_reason_t_ESP_RST_BROWNOUT => "start after a fault",
+        _ => "start after another reset",
     }
 }
 

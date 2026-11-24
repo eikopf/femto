@@ -43,7 +43,7 @@ The Picco appends one line to `/sdcard/femto/crash.log` when it panics (thread, 
 
 ## Power record
 
-The Picco appends a line to `/sdcard/femto/power.log` at each start, every ten minutes while awake, and before each sleep: the battery voltage, the charge estimate and charger state, and the share of the time since the previous line that the processor spent in light sleep. With the firmware version, seconds since start and Unix time that every record line carries, a day of ordinary reading gives the discharge per hour awake and per hour asleep without instruments. Rotation is as for the crash record. Nothing has read this file from a device yet.
+The Picco appends a line to `/sdcard/femto/power.log` at each start, every ten minutes while awake, and before each sleep: the battery voltage, the charge estimate and charger state, and the share of the time since the previous line that the processor spent in light sleep. The line for a start says why it happened: power on, a wake by the power button or the timer, a requested restart, a reset over USB, or a fault. With the firmware version, seconds since start and Unix time that every record line carries, a day of ordinary reading gives the discharge per hour awake and per hour asleep without instruments. Rotation is as for the crash record. The reset that ends an installation over USB is reported as power on. On 2026-11-24 a Picco recorded a start, a sleep and a wake by the timer across a 20-second timed sleep; no discharge figures have been taken from the file yet.
 
 ## Network diagnostics
 

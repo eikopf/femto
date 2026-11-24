@@ -457,13 +457,12 @@ fn a_resource_is_never_larger_than_the_cap() {
     std::fs::write(&path, bytes).unwrap();
     let mut document = Document::open(&path).unwrap();
     assert_eq!(document.document_count(), 1);
-    match document.resource("big.png") {
-        Ok(resource) => assert!(
+    if let Ok(resource) = document.resource("big.png") {
+        assert!(
             resource.len() <= cap,
             "{} bytes returned with a cap of {cap}",
             resource.len()
-        ),
-        Err(_) => {}
+        );
     }
 }
 

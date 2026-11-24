@@ -49,18 +49,41 @@ fn clipping() -> impl Strategy<Value = Clipping> {
         prop::sample::select(vec![16_383usize, 16_384, 16_385]),
         prop_oneof![9 => Just(false), 1 => Just(true)],
     )
-        .prop_map(|(book, (chapter, block, span, step), text, recorded_at, version, id, long, use_long)| {
-            let start = Locator { chapter, block, byte: 0 };
-            let end = Locator { chapter: chapter + span, block: block + step, byte: 0 };
-            Clipping {
-                version,
-                book_id: id.unwrap_or(BOOKS[book]).into(),
-                range: start..end,
-                text: if use_long { "x".repeat(long) } else { text.into() },
+        .prop_map(
+            |(
+                book,
+                (chapter, block, span, step),
+                text,
                 recorded_at,
-                highlighted: false,
-            }
-        })
+                version,
+                id,
+                long,
+                use_long,
+            )| {
+                let start = Locator {
+                    chapter,
+                    block,
+                    byte: 0,
+                };
+                let end = Locator {
+                    chapter: chapter + span,
+                    block: block + step,
+                    byte: 0,
+                };
+                Clipping {
+                    version,
+                    book_id: id.unwrap_or(BOOKS[book]).into(),
+                    range: start..end,
+                    text: if use_long {
+                        "x".repeat(long)
+                    } else {
+                        text.into()
+                    },
+                    recorded_at,
+                    highlighted: false,
+                }
+            },
+        )
 }
 
 fn change() -> impl Strategy<Value = Option<Change>> {
@@ -100,7 +123,11 @@ fn add(model: &mut BTreeMap<String, Vec<Clipping>>, clipping: &Clipping) -> Resu
     }
     let book = model.entry(clipping.book_id.clone()).or_default();
     if let Some(existing) = book.iter().find(|other| other.range == clipping.range) {
-        return if existing.text == clipping.text { Ok(false) } else { Err(()) };
+        return if existing.text == clipping.text {
+            Ok(false)
+        } else {
+            Err(())
+        };
     }
     if book.len() >= MAX_CLIPPINGS_PER_BOOK {
         return Err(());
@@ -116,7 +143,12 @@ fn changed(mut record: Clipping, change: Option<Change>) -> Clipping {
         Some(Change::Time) => record.recorded_at += 1,
         Some(Change::Range) => record.range.end.byte += 1,
         Some(Change::Book) => {
-            record.book_id = if record.book_id == BOOKS[0] { BOOKS[1] } else { BOOKS[0] }.into()
+            record.book_id = if record.book_id == BOOKS[0] {
+                BOOKS[1]
+            } else {
+                BOOKS[0]
+            }
+            .into()
         }
         Some(Change::Flag) => record.highlighted = !record.highlighted,
     }

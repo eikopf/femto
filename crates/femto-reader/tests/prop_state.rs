@@ -118,15 +118,22 @@ fn line_height() -> BoxedStrategy<f32> {
 }
 
 fn typography() -> impl Strategy<Value = BookTypography> {
-    (margin(), font_size(), line_height(), hyphenation(), raster()).prop_map(
-        |(margin, font_size, line_height, hyphenation, text_raster)| BookTypography {
-            margin,
-            font_size,
-            line_height,
-            hyphenation,
-            text_raster,
-        },
+    (
+        margin(),
+        font_size(),
+        line_height(),
+        hyphenation(),
+        raster(),
     )
+        .prop_map(
+            |(margin, font_size, line_height, hyphenation, text_raster)| BookTypography {
+                margin,
+                font_size,
+                line_height,
+                hyphenation,
+                text_raster,
+            },
+        )
 }
 
 fn layout() -> impl Strategy<Value = LayoutConfig> {
@@ -178,7 +185,10 @@ fn clippings() -> impl Strategy<Value = Vec<Clipping>> {
             .into_iter()
             .enumerate()
             .map(
-                |(index, (block, byte, span, step, text, recorded_at, highlighted, version, flip))| {
+                |(
+                    index,
+                    (block, byte, span, step, text, recorded_at, highlighted, version, flip),
+                )| {
                     let start = Locator {
                         chapter: index * 8,
                         block,
@@ -232,7 +242,8 @@ fn book() -> BoxedStrategy<BookState> {
                     timestamp,
                 }),
             },
-        ).boxed()
+        )
+        .boxed()
 }
 
 fn bindings() -> impl Strategy<Value = Option<SavedBindings>> {
@@ -297,10 +308,22 @@ fn reader_state() -> BoxedStrategy<ReaderState> {
         any::<u8>(),
     );
     let books = prop::collection::btree_map(book_key(), book(), 0..4);
-    (settings, choices, books, prop_oneof![30 => Just(false), 1 => Just(true)]).prop_map(
-        |(settings, choices, mut books, foreign)| {
-            let (version, dictionary_name, remote_bindings, font_family, layout, text_raster, light) =
-                settings;
+    (
+        settings,
+        choices,
+        books,
+        prop_oneof![30 => Just(false), 1 => Just(true)],
+    )
+        .prop_map(|(settings, choices, mut books, foreign)| {
+            let (
+                version,
+                dictionary_name,
+                remote_bindings,
+                font_family,
+                layout,
+                text_raster,
+                light,
+            ) = settings;
             let (idle_sleep, rotation, gestures, flags, sync_conflict, full_refresh_interval) =
                 choices;
             for (id, book) in &mut books {
@@ -334,34 +357,36 @@ fn reader_state() -> BoxedStrategy<ReaderState> {
                 full_refresh_interval,
                 books,
             }
-        },
-    ).boxed()
+        })
+        .boxed()
 }
 
 /// A state both stores accept: generated states that are refused are replaced
 /// by their settings on a default layout, and by the default as a last resort.
 fn valid_state() -> BoxedStrategy<ReaderState> {
-    reader_state().prop_map(|state| {
-        if accepted(&state) {
-            return state;
-        }
-        let mut plain = ReaderState {
-            font_family: state.font_family.clone(),
-            idle_sleep: state.idle_sleep,
-            rotation: state.rotation,
-            gestures: state.gestures,
-            full_refresh_interval: state.full_refresh_interval,
-            ..ReaderState::default()
-        };
-        for (id, book) in &state.books {
-            let mut book = book.clone();
-            book.clippings.clear();
-            book.typography = None;
-            plain.books.insert(id.clone(), book);
-        }
-        assert!(accepted(&plain));
-        plain
-    }).boxed()
+    reader_state()
+        .prop_map(|state| {
+            if accepted(&state) {
+                return state;
+            }
+            let mut plain = ReaderState {
+                font_family: state.font_family.clone(),
+                idle_sleep: state.idle_sleep,
+                rotation: state.rotation,
+                gestures: state.gestures,
+                full_refresh_interval: state.full_refresh_interval,
+                ..ReaderState::default()
+            };
+            for (id, book) in &state.books {
+                let mut book = book.clone();
+                book.clippings.clear();
+                book.typography = None;
+                plain.books.insert(id.clone(), book);
+            }
+            assert!(accepted(&plain));
+            plain
+        })
+        .boxed()
 }
 
 // ------------------------------------------------------------------- helpers
@@ -435,7 +460,10 @@ fn documented_refusal(state: &ReaderState) -> Option<&'static str> {
             {
                 return Some("a malformed clipping");
             }
-            if book.clippings[..index].iter().any(|prior| prior.range == clipping.range) {
+            if book.clippings[..index]
+                .iter()
+                .any(|prior| prior.range == clipping.range)
+            {
                 return Some("a duplicate clipping range");
             }
         }
@@ -595,7 +623,8 @@ fn slot_content() -> BoxedStrategy<SlotContent> {
                 SlotContent::Invalid(bytes)
             }
         ),
-    ].boxed()
+    ]
+    .boxed()
 }
 
 proptest! {
@@ -690,7 +719,9 @@ fn scalar() -> impl Strategy<Value = serde_json::Value> {
         Just(json!([])),
         Just(json!({})),
         any::<i64>().prop_map(|n| json!(n)),
-        any::<f64>().prop_filter("finite", |n| n.is_finite()).prop_map(|n| json!(n)),
+        any::<f64>()
+            .prop_filter("finite", |n| n.is_finite())
+            .prop_map(|n| json!(n)),
         text().prop_map(|s| json!(s)),
     ]
 }
@@ -720,12 +751,15 @@ fn apply(value: &mut serde_json::Value, path: &[prop::sample::Index], edit: &Edi
                 (false, _) => apply(map.get_mut(&key).unwrap(), rest, edit),
                 (true, Edit::Replace(replacement)) => map[&key] = replacement.clone(),
                 (true, Edit::Remove) => drop(map.remove(&key)),
-                (true, Edit::Insert(name, inserted)) => drop(map.insert(name.clone(), inserted.clone())),
+                (true, Edit::Insert(name, inserted)) => {
+                    drop(map.insert(name.clone(), inserted.clone()))
+                }
             }
         }
         Value::Array(items) if !items.is_empty() => {
             let index = first.index(items.len());
-            let leaf = rest.is_empty() || !matches!(items[index], Value::Object(_) | Value::Array(_));
+            let leaf =
+                rest.is_empty() || !matches!(items[index], Value::Object(_) | Value::Array(_));
             match (leaf, edit) {
                 (false, _) => apply(&mut items[index], rest, edit),
                 (true, Edit::Replace(replacement)) => items[index] = replacement.clone(),
@@ -821,8 +855,16 @@ fn generator_statistics() {
         if accepted(&state) {
             ok += 1;
             books += state.books.len();
-            clips += state.books.values().map(|b| b.clippings.len()).sum::<usize>();
-            typo += state.books.values().filter(|b| b.typography.is_some()).count();
+            clips += state
+                .books
+                .values()
+                .map(|b| b.clippings.len())
+                .sum::<usize>();
+            typo += state
+                .books
+                .values()
+                .filter(|b| b.typography.is_some())
+                .count();
             bytes += serde_json::to_vec(&state).unwrap().len();
         }
     }

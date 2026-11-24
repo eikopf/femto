@@ -54,7 +54,12 @@ fn plane(seed: u8) -> Vec<u8> {
         0 => vec![0; PLANE_BYTES],
         1 => vec![255; PLANE_BYTES],
         _ => (0..PLANE_BYTES)
-            .map(|i| (i as u32).wrapping_mul(2654435761).rotate_left(u32::from(seed)) as u8 ^ seed)
+            .map(|i| {
+                (i as u32)
+                    .wrapping_mul(2654435761)
+                    .rotate_left(u32::from(seed)) as u8
+                    ^ seed
+            })
             .collect(),
     }
 }
@@ -347,4 +352,3 @@ proptest! {
         prop_assert!(upright.monochrome(&binary[1..], &mut untouched).is_err());
     }
 }
-

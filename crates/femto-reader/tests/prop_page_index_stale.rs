@@ -37,7 +37,12 @@ fn record_with_moved_boundary(directory: &std::path::Path, text: &str, page: usi
     );
     while reader.index_step().unwrap() {}
     assert!(reader.page_count() > page + 3);
-    let file = std::fs::read_dir(directory).unwrap().next().unwrap().unwrap().path();
+    let file = std::fs::read_dir(directory)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
     let mut bytes = std::fs::read(&file).unwrap();
     // Twelve header bytes, eight record header bytes, sixteen bytes a page:
     // start block, start byte, end block, end byte.

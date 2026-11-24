@@ -63,8 +63,8 @@ fn expected(samples: &[Sample]) -> Vec<(usize, Press)> {
             .unwrap_or(samples.len());
         if !samples[i].long {
             events.push((i, Press::Short(turn)));
-        } else if let Some(at) = (i..end)
-            .find(|&j| samples[j].t - samples[i].t >= 500 && samples[j].value == stable[i])
+        } else if let Some(at) =
+            (i..end).find(|&j| samples[j].t - samples[i].t >= 500 && samples[j].value == stable[i])
         {
             events.push((at, Press::Long(turn)));
         } else if end < samples.len() && stable[end] == 0 {

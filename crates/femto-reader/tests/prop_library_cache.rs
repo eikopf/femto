@@ -29,8 +29,12 @@ const LIMIT: usize = 64;
 /// Small contents with repeats of length, so that a change can keep the size.
 fn content(name: &str, index: usize) -> Vec<u8> {
     let fixture = |file: &str| {
-        std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures").join(file))
-            .unwrap()
+        std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures")
+                .join(file),
+        )
+        .unwrap()
     };
     if name.ends_with(".epub") {
         return match index {
@@ -51,18 +55,35 @@ fn content(name: &str, index: usize) -> Vec<u8> {
 
 #[derive(Clone, Debug)]
 enum Op {
-    Write { name: usize, content: usize, keep_time: bool },
-    Remove { name: usize },
-    Rename { from: usize, to: usize },
+    Write {
+        name: usize,
+        content: usize,
+        keep_time: bool,
+    },
+    Remove {
+        name: usize,
+    },
+    Rename {
+        from: usize,
+        to: usize,
+    },
     /// A complete cached scan.
     Scan,
     /// A cached scan that stops at the book limit.
-    Truncated { limit: usize },
+    Truncated {
+        limit: usize,
+    },
     /// A cached scan dropped after some steps.
-    Abandoned { steps: usize },
+    Abandoned {
+        steps: usize,
+    },
     /// Opens a book through the cached opening path.
-    Open { name: usize },
-    Corrupt { bytes: Vec<u8> },
+    Open {
+        name: usize,
+    },
+    Corrupt {
+        bytes: Vec<u8>,
+    },
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -93,7 +114,10 @@ fn fonts() -> Fonts {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 type Stamp = (u64, std::time::SystemTime);
@@ -147,7 +171,11 @@ fn run(ops: &[Op], stats: &mut Stats) -> Result<(), TestCaseError> {
     let mut cache: Option<BTreeMap<PathBuf, (String, Stamp)>> = Some(BTreeMap::new());
     for (step, op) in ops.iter().enumerate() {
         match op {
-            Op::Write { name, content: index, keep_time } => {
+            Op::Write {
+                name,
+                content: index,
+                keep_time,
+            } => {
                 let path = root.join(NAMES[*name]);
                 std::fs::create_dir_all(path.parent().unwrap()).unwrap();
                 let before = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
@@ -188,7 +216,12 @@ fn run(ops: &[Op], stats: &mut Stats) -> Result<(), TestCaseError> {
                         library
                             .entries
                             .iter()
-                            .map(|entry| (entry.path.clone(), (entry.metadata.id.clone(), stamp(&entry.path))))
+                            .map(|entry| {
+                                (
+                                    entry.path.clone(),
+                                    (entry.metadata.id.clone(), stamp(&entry.path)),
+                                )
+                            })
                             .collect(),
                     );
                     continue;
@@ -197,7 +230,10 @@ fn run(ops: &[Op], stats: &mut Stats) -> Result<(), TestCaseError> {
                 prop_assert!(partial.truncated);
                 prop_assert_eq!(std::fs::read(&cache_file).ok(), before, "step {}", step);
                 for entry in &partial.entries {
-                    prop_assert_eq!(&entry.metadata.id, &hex(&std::fs::read(&entry.path).unwrap()));
+                    prop_assert_eq!(
+                        &entry.metadata.id,
+                        &hex(&std::fs::read(&entry.path).unwrap())
+                    );
                 }
             }
             Op::Scan | Op::Truncated { .. } => {
@@ -214,7 +250,11 @@ fn run(ops: &[Op], stats: &mut Stats) -> Result<(), TestCaseError> {
                 for entry in &cached.entries {
                     let bytes = std::fs::read(&entry.path).unwrap();
                     prop_assert_eq!(&entry.metadata.id, &hex(&bytes), "step {}", step);
-                    if entry.path.extension().is_some_and(|e| e.eq_ignore_ascii_case("txt")) {
+                    if entry
+                        .path
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("txt"))
+                    {
                         prop_assert_eq!(
                             entry.metadata.title.as_str(),
                             entry.path.file_stem().unwrap().to_str().unwrap()
@@ -228,7 +268,9 @@ fn run(ops: &[Op], stats: &mut Stats) -> Result<(), TestCaseError> {
                     .iter()
                     .filter(|entry| {
                         usable.is_some_and(|cache| {
-                            cache.get(&entry.path).is_some_and(|(id, _)| *id == entry.metadata.id)
+                            cache
+                                .get(&entry.path)
+                                .is_some_and(|(id, _)| *id == entry.metadata.id)
                         })
                     })
                     .count();
@@ -245,17 +287,32 @@ fn run(ops: &[Op], stats: &mut Stats) -> Result<(), TestCaseError> {
                     .iter()
                     .filter(|name| !name.ends_with(".md") && root.join(name).is_file())
                     .count();
-                prop_assert_eq!(cached.entries.len() + plain.errors.len(), books, "{:?}", plain.errors);
                 prop_assert_eq!(
-                    cached.errors.iter().filter(|e| !e.contains("library cache ignored")).count(),
+                    cached.entries.len() + plain.errors.len(),
+                    books,
+                    "{:?}",
+                    plain.errors
+                );
+                prop_assert_eq!(
+                    cached
+                        .errors
+                        .iter()
+                        .filter(|e| !e.contains("library cache ignored"))
+                        .count(),
                     plain.errors.len(),
-                    "{:?}", cached.errors
+                    "{:?}",
+                    cached.errors
                 );
                 cache = Some(
                     cached
                         .entries
                         .iter()
-                        .map(|entry| (entry.path.clone(), (entry.metadata.id.clone(), stamp(&entry.path))))
+                        .map(|entry| {
+                            (
+                                entry.path.clone(),
+                                (entry.metadata.id.clone(), stamp(&entry.path)),
+                            )
+                        })
                         .collect(),
                 );
                 // The saved cache lists the same library without a scan, and
@@ -271,10 +328,16 @@ fn run(ops: &[Op], stats: &mut Stats) -> Result<(), TestCaseError> {
             }
             Op::Open { name } => {
                 let path = root.join(NAMES[*name]);
-                let Ok(bytes) = std::fs::read(&path) else { continue };
-                let Ok(mut startup) =
-                    ReaderStartup::from_cached_file(&path, &root, LIMIT, fonts(), ReaderState::default())
-                else {
+                let Ok(bytes) = std::fs::read(&path) else {
+                    continue;
+                };
+                let Ok(mut startup) = ReaderStartup::from_cached_file(
+                    &path,
+                    &root,
+                    LIMIT,
+                    fonts(),
+                    ReaderState::default(),
+                ) else {
                     continue;
                 };
                 let now = stamp(&path);

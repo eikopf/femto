@@ -382,8 +382,14 @@ impl Harness {
         for kind in 0..4 {
             let before = (self.ui.panel, self.reader.position());
             let (was, effect) = match kind {
-                0 => (self.ui.is_navigating(), self.ui.poll_navigation(&mut self.reader)),
-                1 => (self.ui.is_reflowing(), self.ui.poll_reflow(&mut self.reader)),
+                0 => (
+                    self.ui.is_navigating(),
+                    self.ui.poll_navigation(&mut self.reader),
+                ),
+                1 => (
+                    self.ui.is_reflowing(),
+                    self.ui.poll_reflow(&mut self.reader),
+                ),
                 2 => (self.ui.is_opening(), self.ui.poll_open(&mut self.reader)),
                 _ => (
                     self.ui.is_preview_opening(),
@@ -436,10 +442,10 @@ impl Harness {
 
     /// What the device loop does after an input event.
     fn frontend(&mut self) -> Check {
-        if let Some(rotation) = self.ui.take_rotation_request() {
-            if let Err(error) = self.ui.rotate(&self.reader, rotation) {
-                self.ui.show_error(error.to_string());
-            }
+        if let Some(rotation) = self.ui.take_rotation_request()
+            && let Err(error) = self.ui.rotate(&self.reader, rotation)
+        {
+            self.ui.show_error(error.to_string());
         }
         if let Some(event) = self.ui.take_kosync_event() {
             match event {
@@ -586,7 +592,11 @@ impl Harness {
                     } else {
                         at.saturating_sub(1)
                     };
-                    let expected = if target == at { selected } else { target * items };
+                    let expected = if target == at {
+                        selected
+                    } else {
+                        target * items
+                    };
                     ensure!(
                         self.selected() == expected && self.ui.panel == panel,
                         "swipe in {} moved {selected} to {} of {count}",
@@ -611,11 +621,15 @@ impl Harness {
                             break;
                         }
                         let next = self.selected() < target;
-                        self.ui.turn(&mut self.reader, next).map_err(|e| e.to_string())?;
+                        self.ui
+                            .turn(&mut self.reader, next)
+                            .map_err(|e| e.to_string())?;
                     }
                     let label = entries[target].0.clone();
                     let slider = match entries[target].1 {
-                        Command::Step(setting) => Some((setting, setting.position(&self.reader.state))),
+                        Command::Step(setting) => {
+                            Some((setting, setting.position(&self.reader.state)))
+                        }
                         _ => None,
                     };
                     effect = Some(self.ui.select(&mut self.reader));
@@ -623,7 +637,10 @@ impl Harness {
                         self.stats.slider_steps += 1;
                         if matches!(
                             setting,
-                            Setting::Brightness | Setting::Warmth | Setting::Stroke | Setting::Coverage
+                            Setting::Brightness
+                                | Setting::Warmth
+                                | Setting::Stroke
+                                | Setting::Coverage
                         ) {
                             let after = setting.position(&self.reader.state);
                             ensure!(
@@ -667,7 +684,9 @@ impl Harness {
                 let expected = if panel.is_none() {
                     self.config.sleep
                 } else {
-                    !busy && !self.ui.turns_pages() && label.as_deref() == Some("Save and sleep")
+                    !busy
+                        && !self.ui.turns_pages()
+                        && label.as_deref() == Some("Save and sleep")
                         && panel == Some(Panel::Root)
                 };
                 ensure!(
@@ -702,8 +721,8 @@ impl Harness {
                 effect = Some(self.ui.tap(&mut self.reader, x, y));
             }
             Op::Gesture(which) => {
-                let gesture = [Gesture::SwipeUp, Gesture::SwipeDown, Gesture::Hold]
-                    [usize::from(*which) % 3];
+                let gesture =
+                    [Gesture::SwipeUp, Gesture::SwipeDown, Gesture::Hold][usize::from(*which) % 3];
                 // Repeated, so that stepped levels reach their ends.
                 for _ in 0..usize::from(*which) / 3 {
                     let _ = self.ui.gesture(&mut self.reader, gesture);
@@ -848,7 +867,10 @@ impl Harness {
                 input = false;
                 if matches!(self.ui.panel, Some(Panel::Device)) {
                     self.ui
-                        .set_device_view("Network", device_rows(self.device_toggle, usize::from(*rows) % 8))
+                        .set_device_view(
+                            "Network",
+                            device_rows(self.device_toggle, usize::from(*rows) % 8),
+                        )
                         .unwrap();
                 }
             }
@@ -866,7 +888,12 @@ impl Harness {
         if input && !matches!(op, Op::Back | Op::Home) {
             self.frontend()?;
         }
-        if input && busy && !matches!(op, Op::Back | Op::Home | Op::Power | Op::Type(_) | Op::Submit)
+        if input
+            && busy
+            && !matches!(
+                op,
+                Op::Back | Op::Home | Op::Power | Op::Type(_) | Op::Submit
+            )
         {
             ensure!(
                 effect == Some(Effect::Unchanged)
@@ -881,8 +908,7 @@ impl Harness {
         }
         if self.asked && !matches!(self.ui.panel, Some(Panel::SyncConflict)) {
             // Back declines to answer; anything else lost the question.
-            let declined = matches!(op, Op::Back | Op::Home)
-                || matches!(op, Op::Tap(..)) && !busy;
+            let declined = matches!(op, Op::Back | Op::Home) || matches!(op, Op::Tap(..)) && !busy;
             ensure!(
                 !self.checks.conflict_answered || declined,
                 "the sync question vanished from {} without an answer",
@@ -959,7 +985,8 @@ impl Harness {
             .render_view(&mut self.reader, 2)
             .map_err(|e| format!("render in {}: {e}", name(self.ui.panel)))?;
         ensure!(
-            frame.len() == (self.reader.state.layout.width * self.reader.state.layout.height) as usize,
+            frame.len()
+                == (self.reader.state.layout.width * self.reader.state.layout.height) as usize,
             "frame size"
         );
         if self.checks.honest_effect
@@ -1036,7 +1063,10 @@ impl Harness {
         self.clock += 1;
         self.reader.record_position(self.clock);
         let path = self.dir.path().join("reader.json");
-        self.reader.state.save(&path).map_err(|e| format!("save: {e}"))?;
+        self.reader
+            .state
+            .save(&path)
+            .map_err(|e| format!("save: {e}"))?;
         let state = ReaderState::load(&path).map_err(|e| format!("load: {e}"))?;
         let reopened = Reader::new(
             Document::open(&self.book).map_err(|e| e.to_string())?,
@@ -1062,7 +1092,11 @@ impl Harness {
     }
 }
 
-pub(super) fn run(config: Config, checks: Checks, ops: &[Op]) -> std::result::Result<Stats, String> {
+pub(super) fn run(
+    config: Config,
+    checks: Checks,
+    ops: &[Op],
+) -> std::result::Result<Stats, String> {
     let mut harness = Harness::new(config, checks);
     for (index, op) in ops.iter().enumerate() {
         harness
@@ -1078,9 +1112,15 @@ fn op(weights: [u32; 6]) -> impl Strategy<Value = Op> {
     let [page, menu, deep, text, service, work] = weights;
     let choices: Vec<(u32, BoxedStrategy<Op>)> = vec![
         (page * 4, any::<bool>().prop_map(Op::Turn).boxed()),
-        (page * 4, prop::bool::weighted(0.7).prop_map(Op::Turn).boxed()),
+        (
+            page * 4,
+            prop::bool::weighted(0.7).prop_map(Op::Turn).boxed(),
+        ),
         (page, any::<bool>().prop_map(Op::Swipe).boxed()),
-        (page * 2, prop::bool::weighted(0.8).prop_map(Op::TurnLazy).boxed()),
+        (
+            page * 2,
+            prop::bool::weighted(0.8).prop_map(Op::TurnLazy).boxed(),
+        ),
         (page * 3, (0..36u8).prop_map(Op::Gesture).boxed()),
         (page, Just(Op::Home).boxed()),
         (menu * 2, any::<bool>().prop_map(Op::Turn).boxed()),
@@ -1088,7 +1128,12 @@ fn op(weights: [u32; 6]) -> impl Strategy<Value = Op> {
         (menu * 2, Just(Op::Select).boxed()),
         (menu * 2, Just(Op::Back).boxed()),
         (menu + page, Just(Op::Power).boxed()),
-        (menu * 2, (0..1000u16, 0..1000u16).prop_map(|(x, y)| Op::Tap(x, y)).boxed()),
+        (
+            menu * 2,
+            (0..1000u16, 0..1000u16)
+                .prop_map(|(x, y)| Op::Tap(x, y))
+                .boxed(),
+        ),
         (deep * 6, (0..24u8).prop_map(Op::Choose).boxed()),
         (deep, (0..100u8).prop_map(Op::Choose).boxed()),
         (
@@ -1118,7 +1163,10 @@ fn op(weights: [u32; 6]) -> impl Strategy<Value = Op> {
         (1, Just(Op::SaveReload).boxed()),
     ];
     proptest::strategy::Union::new_weighted(
-        choices.into_iter().filter(|(weight, _)| *weight > 0).collect(),
+        choices
+            .into_iter()
+            .filter(|(weight, _)| *weight > 0)
+            .collect(),
     )
 }
 
@@ -1130,13 +1178,15 @@ fn config() -> impl Strategy<Value = Config> {
         any::<bool>(),
         prop::option::weighted(0.5, [0..8usize, 0..8usize, 0..8usize]),
     )
-        .prop_map(|(sleep, services, landscape, status_line, gestures)| Config {
-            sleep,
-            services,
-            landscape,
-            status_line,
-            gestures,
-        })
+        .prop_map(
+            |(sleep, services, landscape, status_line, gestures)| Config {
+                sleep,
+                services,
+                landscape,
+                status_line,
+                gestures,
+            },
+        )
 }
 
 /// Swarm testing: each case draws its own mix of operation families.
@@ -1228,7 +1278,13 @@ fn coverage_of_generated_histories() {
                 if std::env::var("FEMTO_PROP_VERBOSE").is_ok() {
                     println!("FAIL {error}\n  {shown}");
                 }
-                let key = error.split(": ").nth(1).unwrap_or(&error).chars().take(60).collect();
+                let key = error
+                    .split(": ")
+                    .nth(1)
+                    .unwrap_or(&error)
+                    .chars()
+                    .take(60)
+                    .collect();
                 *failures.entry(key).or_default() += 1;
             }
         }

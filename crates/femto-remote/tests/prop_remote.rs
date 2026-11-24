@@ -50,7 +50,8 @@ impl ReportSpec {
             true
         };
         for (index, usage) in self.buttons.iter().enumerate() {
-            if payload[index / 8] >> (index % 8) & 1 == 1 && !add(self.button_page, u32::from(*usage))
+            if payload[index / 8] >> (index % 8) & 1 == 1
+                && !add(self.button_page, u32::from(*usage))
             {
                 return None;
             }
@@ -83,7 +84,18 @@ fn descriptor(reports: &[ReportSpec], numbered: bool) -> Vec<u8> {
             for usage in &report.buttons {
                 bytes.extend([0x09, *usage]);
             }
-            bytes.extend([0x15, 0, 0x25, 1, 0x75, 1, 0x95, report.buttons.len() as u8, 0x81, 2]);
+            bytes.extend([
+                0x15,
+                0,
+                0x25,
+                1,
+                0x75,
+                1,
+                0x95,
+                report.buttons.len() as u8,
+                0x81,
+                2,
+            ]);
             let padding = report.buttons.len().div_ceil(8) * 8 - report.buttons.len();
             if padding != 0 {
                 bytes.extend([0x75, 1, 0x95, padding as u8, 0x81, 3]);
@@ -113,8 +125,8 @@ fn report_spec() -> impl Strategy<Value = ReportSpec> {
         prop_oneof![3 => Just(0u8), 1 => 1u8..4],
         0u8..=4,
     )
-        .prop_map(|(button_page, buttons, usage_min, logical_min, span, unmapped, slots)| {
-            ReportSpec {
+        .prop_map(
+            |(button_page, buttons, usage_min, logical_min, span, unmapped, slots)| ReportSpec {
                 button_page,
                 buttons: buttons.into_iter().collect(),
                 usage_min,
@@ -122,8 +134,8 @@ fn report_spec() -> impl Strategy<Value = ReportSpec> {
                 span,
                 unmapped,
                 slots,
-            }
-        })
+            },
+        )
         .prop_filter("a report carries data", |r| r.payload_len() != 0)
 }
 
@@ -597,7 +609,8 @@ proptest! {
     ) {
         let mut inventory = scan::Inventory::default();
         // (address, type, rssi, advertising, response) in first-seen order.
-        let mut model: Vec<([u8; 6], u8, i8, Vec<u8>, Vec<u8>)> = Vec::new();
+        type Seen = ([u8; 6], u8, i8, Vec<u8>, Vec<u8>);
+        let mut model: Vec<Seen> = Vec::new();
         let mut dropped = 0u32;
         for (address, address_type, rssi, advertising, response) in records {
             let address = [address, 1, 2, 3, 4, 5];
@@ -685,7 +698,10 @@ proptest! {
 // ------------------------------------------------------ discovery sequencing
 
 fn connection() -> impl Strategy<Value = Connection> {
-    (prop_oneof![5 => Just(4u8), 1 => Just(5u8), 1 => Just(255u8)], prop_oneof![5 => Just(12u16), 1 => Just(13u16)])
+    (
+        prop_oneof![5 => Just(4u8), 1 => Just(5u8), 1 => Just(255u8)],
+        prop_oneof![5 => Just(12u16), 1 => Just(13u16)],
+    )
         .prop_map(|(interface, id)| Connection { interface, id })
 }
 
@@ -733,24 +749,26 @@ fn script() -> impl Strategy<Value = Vec<Step>> {
         interface: 4,
         id: 12,
     };
-    let canonical = move |map_len: usize, reference_len: usize| vec![
-        Step::Registered(4, true),
-        Step::TakeCommand,
-        Step::Opened(c, true, true),
-        Step::TakeCommand,
-        Step::Service(c, 1, 4, true),
-        Step::Searched(c, true),
-        Step::TakeCommand,
-        Step::Inspected(c),
-        Step::BeginRead(c, 1, true),
-        Step::ReadCompleted(c, 1, true, true, map_len),
-        Step::TakeRead,
-        Step::BeginRead(c, 2, false),
-        Step::ReadCompleted(c, 2, false, true, reference_len),
-        Step::TakeRead,
-        Step::Finish(c),
-        Step::TakeCommand,
-    ];
+    let canonical = move |map_len: usize, reference_len: usize| {
+        vec![
+            Step::Registered(4, true),
+            Step::TakeCommand,
+            Step::Opened(c, true, true),
+            Step::TakeCommand,
+            Step::Service(c, 1, 4, true),
+            Step::Searched(c, true),
+            Step::TakeCommand,
+            Step::Inspected(c),
+            Step::BeginRead(c, 1, true),
+            Step::ReadCompleted(c, 1, true, true, map_len),
+            Step::TakeRead,
+            Step::BeginRead(c, 2, false),
+            Step::ReadCompleted(c, 2, false, true, reference_len),
+            Step::TakeRead,
+            Step::Finish(c),
+            Step::TakeCommand,
+        ]
+    };
     (
         prop::sample::select(vec![1usize, 1, 17, 512, 0, 513]),
         prop::sample::select(vec![2usize, 2, 2, 2, 0, 1, 3]),
@@ -762,14 +780,16 @@ fn script() -> impl Strategy<Value = Vec<Step>> {
             canonical(1, 2).len(),
         ),
     )
-    .prop_map(move |(map_len, reference_len, edits)| {
-        let mut steps = Vec::new();
-        for (original, (replacement, extra)) in canonical(map_len, reference_len).iter().zip(edits) {
-            steps.push(replacement.unwrap_or_else(|| original.clone()));
-            steps.extend(extra);
-        }
-        steps
-    })
+        .prop_map(move |(map_len, reference_len, edits)| {
+            let mut steps = Vec::new();
+            for (original, (replacement, extra)) in
+                canonical(map_len, reference_len).iter().zip(edits)
+            {
+                steps.push(replacement.unwrap_or_else(|| original.clone()));
+                steps.extend(extra);
+            }
+            steps
+        })
 }
 
 proptest! {
@@ -1195,11 +1215,30 @@ fn group() -> impl Strategy<Value = (Option<u8>, Vec<u8>)> {
         1 => any::<u8>().prop_map(|v| vec![0x55, v, 0x65, v]),
         1 => Just(vec![0xa4, 0xb4]),
     ];
-    (prop::option::of(1u8..=4), page, usages, logical, size, count, main, extra).prop_map(
-        |(id, page, usages, logical, size, count, main, extra)| {
-            (id, [page, logical, vec![0x75, size, 0x95, count], extra, usages, main].concat())
-        },
+    (
+        prop::option::of(1u8..=4),
+        page,
+        usages,
+        logical,
+        size,
+        count,
+        main,
+        extra,
     )
+        .prop_map(|(id, page, usages, logical, size, count, main, extra)| {
+            (
+                id,
+                [
+                    page,
+                    logical,
+                    vec![0x75, size, 0x95, count],
+                    extra,
+                    usages,
+                    main,
+                ]
+                .concat(),
+            )
+        })
 }
 
 proptest! {

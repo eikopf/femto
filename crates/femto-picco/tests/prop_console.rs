@@ -89,8 +89,11 @@ fn command() -> impl Strategy<Value = Command> {
         (any::<u16>(), any::<u16>()).prop_map(|(x, y)| Command::Tap { x, y }),
         text().prop_map(Command::Type),
         text().prop_map(Command::Choose),
-        (0..=MAX_FILE_BYTES, any::<u32>(), safe_path())
-            .prop_map(|(len, crc, path)| Command::Put { len, crc, path }),
+        (0..=MAX_FILE_BYTES, any::<u32>(), safe_path()).prop_map(|(len, crc, path)| Command::Put {
+            len,
+            crc,
+            path
+        }),
         safe_path().prop_map(Command::List),
         safe_path().prop_map(Command::Show),
         safe_path().prop_map(Command::Remove),

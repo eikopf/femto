@@ -24,7 +24,8 @@ fn report(contacts: &[Contact]) -> Vec<u8> {
     bytes[..2].copy_from_slice(&len.to_le_bytes());
     bytes[2] = 1;
     bytes[5] = contacts.len() as u8;
-    for (record, &(id, event, x, y)) in bytes[7..].chunks_exact_mut(10).zip(contacts) {
+    for (record, &(id, event, x, y)) in bytes[7..].as_chunks_mut::<10>().0.iter_mut().zip(contacts)
+    {
         record[1] = id | (event << 5);
         record[2..4].copy_from_slice(&x.to_le_bytes());
         record[4..6].copy_from_slice(&y.to_le_bytes());

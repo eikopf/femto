@@ -149,7 +149,7 @@ fn check_decoded(bytes: &[u8]) -> Result<(), TestCaseError> {
                 image::dimensions(bytes)
                     .ok()
                     .filter(|_| count <= Limits::PAGE.pixels),
-                Some(decoded.size).filter(|_| count <= Limits::PAGE.pixels)
+                (count <= Limits::PAGE.pixels).then_some(decoded.size)
             );
         }
     }

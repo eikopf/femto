@@ -54,17 +54,40 @@ fn configs() -> Vec<LayoutConfig> {
     vec![
         base,
         LayoutConfig { width: 481, ..base },
-        LayoutConfig { height: 801, ..base },
+        LayoutConfig {
+            height: 801,
+            ..base
+        },
         LayoutConfig { margin: 25, ..base },
         LayoutConfig { footer: 1, ..base },
         LayoutConfig { footer: 24, ..base },
         LayoutConfig { footer: 25, ..base },
-        LayoutConfig { font_size: 24.5, ..base },
-        LayoutConfig { line_height: 1.4, ..base },
-        LayoutConfig { hyphenation: Hyphenation::Off, ..base },
-        LayoutConfig { hyphenation: Hyphenation::German, ..base },
-        LayoutConfig { width: 800, height: 480, ..base },
-        LayoutConfig { margin: 0, footer: 24, ..base },
+        LayoutConfig {
+            font_size: 24.5,
+            ..base
+        },
+        LayoutConfig {
+            line_height: 1.4,
+            ..base
+        },
+        LayoutConfig {
+            hyphenation: Hyphenation::Off,
+            ..base
+        },
+        LayoutConfig {
+            hyphenation: Hyphenation::German,
+            ..base
+        },
+        LayoutConfig {
+            width: 800,
+            height: 480,
+            ..base
+        },
+        LayoutConfig {
+            margin: 0,
+            footer: 24,
+            ..base
+        },
     ]
 }
 
@@ -98,8 +121,14 @@ enum Op {
         pages: Vec<[usize; 4]>,
     },
     /// Cuts the book's file short, as an interrupted copy would.
-    Truncate { book: usize, at: prop::sample::Index },
-    Overwrite { book: usize, bytes: Vec<u8> },
+    Truncate {
+        book: usize,
+        at: prop::sample::Index,
+    },
+    Overwrite {
+        book: usize,
+        bytes: Vec<u8>,
+    },
 }
 
 fn position() -> impl Strategy<Value = usize> {
@@ -137,6 +166,9 @@ fn op() -> impl Strategy<Value = Op> {
 }
 
 type Records = Vec<(u32, Vec<[u32; 4]>)>;
+/// The key a book's file was written under (salt, fonts, layout), and its
+/// records.
+type Stored = ((usize, usize, usize), Records);
 
 proptest! {
     #![proptest_config(ProptestConfig { cases: 200, max_shrink_iters: 300, ..ProptestConfig::default() })]
@@ -150,7 +182,7 @@ proptest! {
         let fonts = [font_sets().swap_remove(0), font_sets().swap_remove(1)];
         let configs = configs();
         // Per book: the key of its file and the records in file order.
-        let mut model: [Option<((usize, usize, usize), Records)>; 2] = [None, None];
+        let mut model: [Option<Stored>; 2] = [None, None];
         let (mut stored, mut replaced, mut rekeyed, mut skipped) = (0, 0, 0, 0);
         for op in &ops {
             match op {
@@ -212,11 +244,11 @@ proptest! {
             }
             // Observe every key and chapter of both books after every step.
             for (book, expected) in model.iter().enumerate() {
-                for salt in 0..2 {
-                    for font in 0..2 {
+                for (salt, store) in stores.iter().enumerate() {
+                    for (font, set) in fonts.iter().enumerate() {
                         for (config, &layout) in configs.iter().enumerate() {
                             for chapter in CHAPTERS {
-                                let loaded = stores[salt].load(BOOKS[book], &fonts[font], layout, chapter);
+                                let loaded = store.load(BOOKS[book], set, layout, chapter);
                                 let expected = expected
                                     .as_ref()
                                     .filter(|(key, _)| *key == (salt, font, config))
@@ -289,21 +321,41 @@ fn oversized_indexes_are_not_recorded_and_keep_earlier_records() {
     let fonts = font_sets().swap_remove(0);
     let layout = LayoutConfig::default();
     let page = |block| PageBounds {
-        start: Locator { chapter: 0, block, byte: 0 },
-        end: Locator { chapter: 0, block: block + 1, byte: 0 },
+        start: Locator {
+            chapter: 0,
+            block,
+            byte: 0,
+        },
+        end: Locator {
+            chapter: 0,
+            block: block + 1,
+            byte: 0,
+        },
     };
     let pages = |count: usize| (0..count).map(page).collect::<Vec<_>>();
     store.store(BOOKS[0], &fonts, layout, 0, &pages(3)).unwrap();
-    store.store(BOOKS[0], &fonts, layout, 1, &pages(MAX_PAGES + 1)).unwrap();
+    store
+        .store(BOOKS[0], &fonts, layout, 1, &pages(MAX_PAGES + 1))
+        .unwrap();
     assert_eq!(store.load(BOOKS[0], &fonts, layout, 1), None);
-    store.store(BOOKS[0], &fonts, layout, 1, &pages(MAX_PAGES)).unwrap();
-    assert_eq!(store.load(BOOKS[0], &fonts, layout, 1).map(|p| p.len()), Some(MAX_PAGES));
+    store
+        .store(BOOKS[0], &fonts, layout, 1, &pages(MAX_PAGES))
+        .unwrap();
+    assert_eq!(
+        store.load(BOOKS[0], &fonts, layout, 1).map(|p| p.len()),
+        Some(MAX_PAGES)
+    );
     // Eight chapters of the largest index fill the two-megabyte file.
     for chapter in 2..12 {
-        store.store(BOOKS[0], &fonts, layout, chapter, &pages(MAX_PAGES)).unwrap();
+        store
+            .store(BOOKS[0], &fonts, layout, chapter, &pages(MAX_PAGES))
+            .unwrap();
     }
     assert!(std::fs::metadata(store.path(BOOKS[0])).unwrap().len() <= MAX_FILE_BYTES);
     assert_eq!(store.load(BOOKS[0], &fonts, layout, 0), Some(pages(3)));
-    assert_eq!(store.load(BOOKS[0], &fonts, layout, 1).map(|p| p.len()), Some(MAX_PAGES));
+    assert_eq!(
+        store.load(BOOKS[0], &fonts, layout, 1).map(|p| p.len()),
+        Some(MAX_PAGES)
+    );
     assert_eq!(store.load(BOOKS[0], &fonts, layout, 11), None);
 }

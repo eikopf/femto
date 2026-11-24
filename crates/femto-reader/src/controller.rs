@@ -7,7 +7,7 @@ use crate::{
         Fonts, LayoutConfig, Locator, Page, paginate, rasterize_display, rasterize_display_report,
     },
     page_index::IndexStore,
-    pagination::{PageCache, PageIndexer},
+    pagination::{PageCache, PageIndexer, Record},
     state::{BookTypography, ReaderState},
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -45,7 +45,6 @@ pub struct Reader {
     pub state: ReaderState,
     fonts: Fonts,
     pagination: PageCache,
-    page_index: usize,
     position: Locator,
     history: Vec<Locator>,
     links: Vec<DocumentLink>,
@@ -422,14 +421,12 @@ impl ReaderStartup {
         } = *job;
         let pagination = indexer.finish()?;
         let position = normalize_position(&pagination, position);
-        let page_index = pagination.page_for(position);
         typography.apply(&mut self.state);
         Ok(Reader {
             document,
             fonts: self.fonts,
             state: self.state,
             pagination,
-            page_index,
             position,
             history: Vec::new(),
             links,
@@ -510,13 +507,11 @@ impl Reader {
         let links = chapter.links.clone();
         let pagination = PageCache::new(chapter, &fonts, state.layout, position)?;
         position = normalize_position(&pagination, position);
-        let page_index = pagination.page_for(position);
         Ok(Self {
             document,
             fonts,
             state,
             pagination,
-            page_index,
             position,
             history: Vec::new(),
             links,
@@ -554,9 +549,9 @@ impl Reader {
         };
         let book = self.document.metadata.id.clone();
         let chapter = self.pagination.chapter();
-        if !self.pagination.stored {
+        if self.pagination.record == Record::Unwritten {
             // A failed write is not retried on every idle poll.
-            self.pagination.stored = true;
+            self.pagination.record = Record::Written;
             store.store(
                 &book,
                 &self.fonts,
@@ -700,7 +695,7 @@ impl Reader {
                     .map(Some);
             }
             Action::Next
-                if self.page_index + 1 == self.page_count()
+                if self.page_index() + 1 == self.page_count()
                     && self.pagination.is_complete()
                     && chapter + 1 < self.document.metadata.chapters.len() =>
             {
@@ -714,7 +709,7 @@ impl Reader {
                 )
             }
             Action::Previous
-                if self.page_index == 0
+                if self.page_index() == 0
                     && chapter > 0
                     && chapter < self.document.metadata.chapters.len() =>
             {
@@ -860,7 +855,6 @@ impl Reader {
         if job.back {
             self.history.pop();
         }
-        self.page_index = pagination.page_for(position);
         self.pagination = pagination;
         self.position = position;
         self.links = job.links;
@@ -903,7 +897,6 @@ impl Reader {
             256,
             |source| self.document.resource(source),
         )?;
-        self.page_index = pagination.page_for(position);
         self.position = position;
         self.pagination = pagination;
         self.state.layout = job.next;
@@ -1015,7 +1008,6 @@ impl Reader {
         } = *job;
         let pagination = indexer.finish()?;
         let position = normalize_position(&pagination, position);
-        let page_index = pagination.page_for(position);
         rasterize_display(
             pagination.page(),
             &self.fonts,
@@ -1033,7 +1025,6 @@ impl Reader {
         typography.apply(&mut self.state);
         self.document = document;
         self.pagination = pagination;
-        self.page_index = page_index;
         self.position = position;
         self.links = links;
         self.history.clear();
@@ -1093,7 +1084,7 @@ impl Reader {
     }
 
     pub fn page_index(&self) -> usize {
-        self.page_index
+        self.pagination.selected()
     }
     pub fn section_label(&self) -> String {
         let chapter = self.position.chapter;
@@ -1114,7 +1105,7 @@ impl Reader {
     pub fn book_progress_percent(&self) -> Option<u8> {
         self.document.estimated_progress(
             self.position.chapter,
-            self.page_index + 1,
+            self.page_index() + 1,
             self.page_count(),
         )
     }
@@ -1482,7 +1473,7 @@ impl Reader {
             });
             if self.frames.len() == FRAMES {
                 let farthest = (0..FRAMES)
-                    .max_by_key(|&i| self.frames[i].0.index.abs_diff(self.page_index))
+                    .max_by_key(|&i| self.frames[i].0.index.abs_diff(self.page_index()))
                     .expect("nonempty frames");
                 self.frames.swap_remove(farthest);
             }
@@ -1896,13 +1887,10 @@ impl Reader {
             None
         };
         if replacement.is_none() {
-            self.pagination.index_until(target, &self.fonts)?;
-            let index = self.pagination.page_for(target);
-            self.pagination.select(index, &self.fonts)?;
+            self.pagination.select_at(target, &self.fonts)?;
         }
         let pages = replacement.as_ref().unwrap_or(&self.pagination);
         let target = normalize_position(pages, target);
-        let index = pages.page_for(target);
         if target == previous {
             return Ok(Effect::Unchanged);
         }
@@ -1918,7 +1906,6 @@ impl Reader {
         if let Some(links) = links {
             self.links = links;
         }
-        self.page_index = index;
         self.position = target;
         Ok(Effect::Redraw)
     }
@@ -1943,11 +1930,10 @@ impl Reader {
             }
             // The page after the last indexed one is laid out on demand.
             Action::Next
-                if self.page_index + 1 < self.page_count()
+                if self.page_index() + 1 < self.page_count()
                     || self.pagination.extend(&self.fonts)? =>
             {
-                self.pagination.select(self.page_index + 1, &self.fonts)?;
-                self.page_index += 1;
+                self.pagination.select(self.page_index() + 1, &self.fonts)?;
                 self.position = self.page().start;
                 Ok(Effect::Redraw)
             }
@@ -1958,9 +1944,8 @@ impl Reader {
                 },
                 false,
             ),
-            Action::Previous if self.page_index > 0 => {
-                self.pagination.select(self.page_index - 1, &self.fonts)?;
-                self.page_index -= 1;
+            Action::Previous if self.page_index() > 0 => {
+                self.pagination.select(self.page_index() - 1, &self.fonts)?;
                 self.position = self.page().start;
                 Ok(Effect::Redraw)
             }
@@ -2045,7 +2030,6 @@ impl Reader {
                 let updated =
                     PageCache::new(self.document.chapter(chapter)?, &self.fonts, config, anchor)?;
                 let anchor = normalize_position(&updated, anchor);
-                self.page_index = updated.page_for(anchor);
                 self.position = anchor;
                 self.pagination = updated;
                 self.state.layout = config;

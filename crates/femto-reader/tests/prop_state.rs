@@ -159,20 +159,22 @@ fn clippings() -> impl Strategy<Value = Vec<Clipping>> {
     let one = (
         0usize..20,
         0usize..20,
-        0usize..7,
+        prop_oneof![20 => 0usize..7, 1 => 7usize..10],
         1usize..20,
         prop_oneof![
             30 => "[a-z ]{1,20}".boxed(),
             10 => text().prop_map(|text| if text.is_empty() { "\u{e9}".into() } else { text }).boxed(),
             1 => Just(String::new()).boxed(),
+            1 => prop::sample::select(vec![16_384usize, 16_385]).prop_map(|n| "x".repeat(n)).boxed(),
         ],
         any::<u64>(),
         any::<bool>(),
         prop_oneof![40 => Just(1u32), 1 => any::<u32>()],
         prop_oneof![40 => Just(false), 1 => Just(true)],
     );
-    prop::collection::vec(one, 0..4).prop_map(|parts| {
-        parts
+    let duplicate = prop_oneof![20 => Just(false), 1 => Just(true)];
+    (prop::collection::vec(one, 0..4), duplicate).prop_map(|(parts, duplicate)| {
+        let mut list: Vec<Clipping> = parts
             .into_iter()
             .enumerate()
             .map(
@@ -197,7 +199,11 @@ fn clippings() -> impl Strategy<Value = Vec<Clipping>> {
                     }
                 },
             )
-            .collect()
+            .collect();
+        if duplicate && list.len() >= 2 {
+            list[1].range = list[0].range.clone();
+        }
+        list
     })
 }
 
@@ -388,10 +394,59 @@ fn reopened(dir: &Path) -> serde_json::Value {
     json(&StateJournal::open(dir).unwrap().1)
 }
 
+/// A documented reason for which both stores must refuse the state, written
+/// from docs/navigation.md and docs/picco-firmware.md rather than from the
+/// validation code. Not every reason is modelled.
+fn documented_refusal(state: &ReaderState) -> Option<&'static str> {
+    if state.version != 1 {
+        return Some("an unsupported version");
+    }
+    if state.frontlight.brightness > 10 || state.frontlight.warmth > 9 {
+        return Some("a frontlight level out of range");
+    }
+    if let Some(name) = &state.dictionary_name
+        && (name.len() > 255
+            || name.len() <= 4
+            || !name.ends_with(".ifo")
+            || name.contains(['/', '\\'])
+            || name.chars().any(char::is_control))
+    {
+        return Some("an invalid dictionary filename");
+    }
+    let finite = |values: &[f32]| values.iter().all(|value| value.is_finite());
+    if !finite(&[
+        state.layout.font_size,
+        state.layout.line_height,
+        state.text_raster.stroke,
+        state.text_raster.coverage_gamma,
+    ]) {
+        return Some("a setting that is not a number");
+    }
+    for (id, book) in &state.books {
+        if book.clippings.len() > 128 {
+            return Some("more than 128 clippings");
+        }
+        for (index, clipping) in book.clippings.iter().enumerate() {
+            if clipping.book_id != *id
+                || clipping.text.is_empty()
+                || clipping.text.len() > 16 * 1024
+                || clipping.range.start >= clipping.range.end
+                || clipping.range.end.chapter - clipping.range.start.chapter >= 8
+            {
+                return Some("a malformed clipping");
+            }
+            if book.clippings[..index].iter().any(|prior| prior.range == clipping.range) {
+                return Some("a duplicate clipping range");
+            }
+        }
+    }
+    None
+}
+
 // ---------------------------------------------------------------- properties
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 400, ..ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig { cases: 400, max_shrink_iters: 300, ..ProptestConfig::default() })]
 
     /// Whatever either store accepts comes back unchanged, both stores accept
     /// the same states, and a refused state leaves nothing behind.
@@ -403,6 +458,9 @@ proptest! {
         let saved = journal.save(&state);
         let host_saved = state.save(&host);
         prop_assert_eq!(saved.is_ok(), host_saved.is_ok(), "{:?} {:?}", saved, host_saved);
+        if let Some(rule) = documented_refusal(&state) {
+            prop_assert!(saved.is_err(), "stored despite {}", rule);
+        }
         if saved.is_ok() {
             prop_assert_eq!(reopened(dir.path()), json(&state));
             prop_assert_eq!(json(&ReaderState::load(&host).unwrap()), json(&state));
@@ -499,11 +557,11 @@ proptest! {
 #[derive(Clone, Debug)]
 enum SlotContent {
     Missing,
-    /// A complete frame of a storable state.
-    Valid(u64, Box<ReaderState>),
-    /// A complete frame whose payload the journal may or may not accept.
-    Framed(u64, Vec<u8>),
-    Garbage(Vec<u8>),
+    /// A complete checksummed frame; valid if the generation is not zero
+    /// and the state is storable.
+    Frame(u64, Box<ReaderState>),
+    /// Bytes that are certainly no valid frame.
+    Invalid(Vec<u8>),
 }
 
 fn generation() -> impl Strategy<Value = u64> {
@@ -519,14 +577,13 @@ fn generation() -> impl Strategy<Value = u64> {
 fn slot_content() -> BoxedStrategy<SlotContent> {
     prop_oneof![
         2 => Just(SlotContent::Missing),
-        6 => (generation(), valid_state()).prop_map(|(g, s)| SlotContent::Valid(g, Box::new(s))),
-        2 => (generation(), reader_state())
-            .prop_map(|(g, s)| SlotContent::Framed(g, serde_json::to_vec(&s).unwrap_or_default())),
+        6 => (generation(), valid_state()).prop_map(|(g, s)| SlotContent::Frame(g, Box::new(s))),
+        2 => (generation(), reader_state()).prop_map(|(g, s)| SlotContent::Frame(g, Box::new(s))),
         1 => (generation(), prop::collection::vec(any::<u8>(), 0..64))
-            .prop_map(|(g, bytes)| SlotContent::Framed(g, bytes)),
-        2 => prop::collection::vec(any::<u8>(), 0..128).prop_map(SlotContent::Garbage),
+            .prop_map(|(g, bytes)| SlotContent::Invalid(frame(g, &bytes))),
+        1 => prop::collection::vec(any::<u8>(), 0..128).prop_map(SlotContent::Invalid),
         // A valid frame with one flipped bit or a cut.
-        2 => (valid_state(), any::<prop::sample::Index>(), 0u8..8, any::<bool>()).prop_map(
+        3 => (valid_state(), any::<prop::sample::Index>(), 0u8..8, any::<bool>()).prop_map(
             |(state, at, bit, cut)| {
                 let mut bytes = frame(1, &serde_json::to_vec(&state).unwrap());
                 let at = at.index(bytes.len());
@@ -535,44 +592,41 @@ fn slot_content() -> BoxedStrategy<SlotContent> {
                 } else {
                     bytes[at] ^= 1 << bit;
                 }
-                SlotContent::Garbage(bytes)
+                SlotContent::Invalid(bytes)
             }
         ),
     ].boxed()
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 600, ..ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig { cases: 600, max_shrink_iters: 300, ..ProptestConfig::default() })]
 
-    /// Opening arbitrary slot files never panics, selects the newest storable
-    /// frame, and yields a state that can be saved and read again.
+    /// Opening arbitrary slot files never panics and yields the newest valid
+    /// frame: the default when there are no files, and an error when no file
+    /// is valid or two valid frames claim the same generation.
     #[test]
     fn arbitrary_slot_contents_open_to_the_newest_valid_frame_or_fail(
         contents in [slot_content(), slot_content()],
         next in valid_state(),
     ) {
         let dir = tempfile::tempdir().unwrap();
-        // (generation, state) of slots certain to be valid, and whether any
-        // slot is certain to be invalid or of unknown validity.
         let mut valid = Vec::new();
-        let mut unknown = false;
+        let mut invalid = false;
         for (index, content) in contents.iter().enumerate() {
             let bytes = match content {
                 SlotContent::Missing => continue,
-                SlotContent::Valid(generation, state) => {
-                    if *generation == 0 {
-                        unknown = true;
-                    } else {
+                SlotContent::Frame(generation, state) => {
+                    // NaN settings do not serialize to the same state.
+                    let payload = serde_json::to_vec(state).unwrap();
+                    if *generation != 0 && accepted(state) {
                         valid.push((*generation, json(state)));
+                    } else {
+                        invalid = true;
                     }
-                    frame(*generation, &serde_json::to_vec(state).unwrap())
+                    frame(*generation, &payload)
                 }
-                SlotContent::Framed(generation, payload) => {
-                    unknown = true;
-                    frame(*generation, payload)
-                }
-                SlotContent::Garbage(bytes) => {
-                    unknown = true;
+                SlotContent::Invalid(bytes) => {
+                    invalid = true;
                     bytes.clone()
                 }
             };
@@ -583,34 +637,24 @@ proptest! {
         // Opening is read-only.
         prop_assert_eq!(&before, &[0, 1].map(|index| std::fs::read(slot(dir.path(), index)).ok()));
         valid.sort_by_key(|(generation, _)| *generation);
-        if !unknown {
-            match valid.as_slice() {
-                [] => prop_assert_eq!(json(&opened.as_ref().unwrap().1), json(&ReaderState::default())),
-                [(_, only)] => prop_assert_eq!(&json(&opened.as_ref().unwrap().1), only),
-                [(low, _), (high, newest)] if low != high => {
-                    prop_assert_eq!(&json(&opened.as_ref().unwrap().1), newest)
-                }
-                _ => prop_assert!(opened.is_err()),
-            }
-        }
-        let Ok((mut journal, state)) = opened else { return Ok(()) };
-        // Never older than a slot known to be valid, unless something newer
-        // of unknown validity was accepted instead.
-        if let [.., (_, newest)] = valid.as_slice()
-            && !unknown
-        {
-            prop_assert_eq!(&json(&state), newest);
-        }
-        prop_assert!(accepted(&state), "opened a state that cannot be saved");
-        let highest = contents.iter().filter_map(|content| match content {
-            SlotContent::Valid(generation, _) | SlotContent::Framed(generation, _) => Some(*generation),
-            _ => None,
-        }).max();
+        let expected = match valid.as_slice() {
+            [] if invalid => None,
+            [] => Some((0, json(&ReaderState::default()))),
+            [(low, _), (high, _)] if low == high => None,
+            [.., newest] => Some(newest.clone()),
+        };
+        prop_assert_eq!(
+            opened.as_ref().ok().map(|(_, state)| json(state)),
+            expected.as_ref().map(|(_, state)| state.clone()),
+            "{:?}", opened.as_ref().err()
+        );
+        let (Ok((mut journal, _)), Some((winner, _))) = (opened, expected) else { return Ok(()) };
         match journal.save(&next) {
             Ok(()) => prop_assert_eq!(reopened(dir.path()), json(&next)),
             // The generation counter is exhausted only by a crafted file.
-            Err(error) => prop_assert!(highest == Some(u64::MAX), "{}", error),
+            Err(error) => prop_assert!(winner == u64::MAX, "{}", error),
         }
+        prop_assert!(winner != u64::MAX || StateJournal::open(dir.path()).is_ok());
     }
 }
 
@@ -698,7 +742,7 @@ fn apply(value: &mut serde_json::Value, path: &[prop::sample::Index], edit: &Edi
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 1500, ..ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig { cases: 1500, max_shrink_iters: 300, ..ProptestConfig::default() })]
 
     /// A state file that differs from a valid one in a few places is either
     /// refused by both stores or read as a state that saves and reads back.

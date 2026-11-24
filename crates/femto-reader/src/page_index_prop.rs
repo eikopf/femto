@@ -139,7 +139,7 @@ fn op() -> impl Strategy<Value = Op> {
 type Records = Vec<(u32, Vec<[u32; 4]>)>;
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 200, ..ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig { cases: 200, max_shrink_iters: 300, ..ProptestConfig::default() })]
 
     #[test]
     fn the_store_agrees_with_a_map_of_the_last_key_per_book(

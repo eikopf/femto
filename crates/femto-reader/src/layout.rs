@@ -1437,7 +1437,8 @@ fn break_line(
             - 1;
         // A discretionary hyphen can be wider than the following complete
         // word with its invisible soft hyphen, so widths are not monotonic:
-        // an overflowing hyphenated candidate is skipped, any other ends the line.
+        // an overflowing hyphenated candidate ends the line only if it
+        // overflows without its hyphen as well, any other always does.
         let mut overflow = None;
         let mut index = first;
         loop {
@@ -1471,7 +1472,14 @@ fn break_line(
                 let line = shape(p, shaping, start..end, fonts, size)?;
                 if line.width <= width {
                     best = Some((end, line));
-                } else if !line.hyphenated {
+                    continue;
+                }
+                // Only the hyphen may be what overflows. Without it the text
+                // is a prefix of every longer line, and ends the scan too.
+                let text = p.text[start..end].trim_end_matches('\u{ad}');
+                if !line.hyphenated
+                    || shape(p, shaping, start..start + text.len(), fonts, size)?.width > width
+                {
                     overflow = Some(end);
                     break;
                 }

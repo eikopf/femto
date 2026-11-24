@@ -837,7 +837,6 @@ impl ReaderUi {
         if !matches!(self.panel, Some(Panel::Device)) || self.device_title != title {
             self.selected = 0;
         }
-        self.selected = self.selected.min(rows.len().saturating_sub(1));
         self.device_title = title;
         self.device_rows = rows
             .into_iter()
@@ -952,11 +951,12 @@ impl ReaderUi {
     }
     /// The selected row of the catalog list, while that list is showing.
     pub fn catalog_position(&self) -> Option<usize> {
-        matches!(self.panel, Some(Panel::Catalog)).then_some(self.selected)
+        matches!(self.panel, Some(Panel::Catalog))
+            .then(|| self.selected.min(self.catalog_rows.len().saturating_sub(1)))
     }
     pub fn set_catalog_position(&mut self, position: usize) {
         if matches!(self.panel, Some(Panel::Catalog)) {
-            self.selected = position.min(self.catalog_rows.len().saturating_sub(1));
+            self.selected = position;
         }
     }
     /// Marks a catalog request the reader is waiting on: the view stays in
@@ -1014,8 +1014,9 @@ impl ReaderUi {
         let items =
             crate::menu::Geometry::new(reader.state.layout.width, reader.state.layout.height)?
                 .items;
-        let page = self.selected / items;
-        let last = self.entries(reader).len().saturating_sub(1) / items;
+        let (entries, selected) = self.menu(reader);
+        let page = selected / items;
+        let last = entries.len().saturating_sub(1) / items;
         let target = if next {
             (page + 1).min(last)
         } else {
@@ -1600,12 +1601,11 @@ impl ReaderUi {
         if self.panel.is_none() {
             return self.navigate(reader, if next { Action::Next } else { Action::Previous });
         }
-        let count = self.entries(reader).len();
-        let previous = self.selected;
+        let (entries, previous) = self.menu(reader);
         self.selected = if next {
-            (self.selected + 1).min(count.saturating_sub(1))
+            (previous + 1).min(entries.len().saturating_sub(1))
         } else {
-            self.selected.saturating_sub(1)
+            previous.saturating_sub(1)
         };
         Ok(if self.selected == previous {
             Effect::Unchanged
@@ -1781,7 +1781,7 @@ impl ReaderUi {
         if row == 0 {
             return self.back(reader);
         }
-        let entries = self.entries(reader);
+        let (entries, selected) = self.menu(reader);
         if self.is_editing() {
             geometry.keyboard()?;
             let Some(index) = geometry.key_at(x, row) else {
@@ -1791,7 +1791,7 @@ impl ReaderUi {
             return self.activate(reader, entries[index].1);
         }
         if row == geometry.rows - 1 {
-            let page = self.selected / geometry.items;
+            let page = selected / geometry.items;
             let next = if x < layout.width / 2 {
                 page.saturating_sub(1)
             } else {
@@ -1800,11 +1800,11 @@ impl ReaderUi {
             self.selected = next * geometry.items;
             return Ok(Effect::Redraw);
         }
-        let index = (self.selected / geometry.items) * geometry.items + row - 1;
+        let index = (selected / geometry.items) * geometry.items + row - 1;
         let Some((_, command)) = entries.get(index) else {
             return Ok(Effect::Unchanged);
         };
-        let moved = self.selected != index;
+        let moved = selected != index;
         self.selected = index;
         if let Command::Step(setting) = *command {
             // One tap target per value across the row.
@@ -1841,9 +1841,12 @@ impl ReaderUi {
             self.open();
             return Ok(Effect::Redraw);
         }
-        let entries = self.entries(reader);
-        match entries.get(self.selected) {
-            Some((_, command)) => self.activate(reader, *command),
+        let (entries, selected) = self.menu(reader);
+        match entries.get(selected) {
+            Some((_, command)) => {
+                self.selected = selected;
+                self.activate(reader, *command)
+            }
             None => Ok(Effect::Unchanged),
         }
     }
@@ -2057,9 +2060,6 @@ impl ReaderUi {
                 let mut bindings = reader.state.remote_bindings.clone().unwrap_or_default();
                 bindings.cycle(usage).map(|()| {
                     reader.state.remote_bindings = Some(bindings);
-                    self.selected = self
-                        .selected
-                        .min(self.entries(reader).len().saturating_sub(1));
                     Effect::Redraw
                 })
             }
@@ -2164,7 +2164,7 @@ impl ReaderUi {
             }
             Command::ConfirmDeleteBook(index) => {
                 self.panel = Some(Panel::Delete);
-                self.selected = index.min(self.library.entries.len().saturating_sub(2));
+                self.selected = index;
                 self.delete_book(reader, index).map(|()| Effect::Redraw)
             }
             Command::Leave => self.back(reader),
@@ -2219,6 +2219,15 @@ impl ReaderUi {
                 Ok(Effect::Redraw)
             }
         }
+    }
+    /// The entries of the current menu and the index of the selected one.
+    /// The frontend and the reader can leave fewer entries than there were
+    /// when the selection was made, so it is read only here, where it is
+    /// kept within them.
+    fn menu(&self, reader: &Reader) -> (Vec<(String, Command)>, usize) {
+        let entries = self.entries(reader);
+        let selected = self.selected.min(entries.len().saturating_sub(1));
+        (entries, selected)
     }
     fn entries(&self, reader: &Reader) -> Vec<(String, Command)> {
         match self.panel.unwrap_or(Panel::Root) {
@@ -2946,7 +2955,8 @@ impl ReaderUi {
             false,
         );
         canvas.rule(top + height - 1);
-        for (index, (text, _)) in self.entries(reader).iter().enumerate() {
+        let (entries, selected) = self.menu(reader);
+        for (index, (text, _)) in entries.iter().enumerate() {
             let (row, x, key_width) = geometry.key(index);
             let (top, height) = geometry.row(row);
             let (x, key_width, top, height) = (
@@ -2955,7 +2965,7 @@ impl ReaderUi {
                 top as usize,
                 height as usize,
             );
-            let selected = self.selected == index;
+            let selected = selected == index;
             if selected {
                 canvas.fill(x, top, key_width, height, 0);
             }
@@ -3149,11 +3159,11 @@ impl ReaderUi {
             Panel::Recent => "Recent books",
             Panel::Folders | Panel::Folder(_) => "Folders",
         };
-        let entries = self.entries(reader);
+        let (entries, selection) = self.menu(reader);
         let layout = reader.state.layout;
         let geometry = crate::menu::Geometry::new(layout.width, layout.height)?;
         let count = geometry.items;
-        let start = self.selected / count * count;
+        let start = selection / count * count;
         let width = layout.width as usize;
         let mut canvas = Canvas {
             pixels: vec![255; width * layout.height as usize],
@@ -3198,7 +3208,7 @@ impl ReaderUi {
                 }
                 continue;
             };
-            let selected = self.selected == start + row - 1;
+            let selected = selection == start + row - 1;
             let ink = if selected { 255 } else { 0 };
             if selected {
                 canvas.fill(0, top, width, height - 1, 0);

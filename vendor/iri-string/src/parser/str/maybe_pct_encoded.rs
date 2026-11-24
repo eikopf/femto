@@ -131,6 +131,26 @@ where
         }
         Ok(())
     }
+
+    /// Calls the output functions with the result of feeding data to the decoder.
+    fn output_push_result(&mut self, result: PushResult) -> fmt::Result {
+        match result {
+            PushResult::Decoded(len_written, c) => {
+                let len_written = usize::from(len_written.get());
+                let frag = core::str::from_utf8(&self.buf[..len_written])
+                    .expect("`DecoderBuffer` writes a valid ASCII string");
+                self.result = (self.f)(PctEncodedFragments::Char(frag, c));
+                self.result_continue_or_err()
+            }
+            PushResult::Undecodable(len_written) if len_written > 0 => {
+                self.output_as_undecodable(len_written)
+            }
+            PushResult::Undecodable(_) | PushResult::NeedMoreBytes => {
+                // Nothing to write at this time.
+                Ok(())
+            }
+        }
+    }
 }
 
 impl<F, B> fmt::Write for DecomposeWriter<'_, F, B>
@@ -142,41 +162,33 @@ where
         let mut rest = s;
         while !rest.is_empty() {
             let (len_consumed, result) = self.decoder.push_encoded(self.buf, rest);
-            if len_consumed == 0 {
-                // `rest` does not start with the percent-encoded triplets.
-                // Flush the decoder before attempting to decode more data.
-                if let Some(len_written) = self.decoder.flush(self.buf).map(NonZeroU8::get) {
-                    self.output_as_undecodable(len_written)?;
-                    rest = &rest[usize::from(len_written)..];
-                }
 
-                // Write plain string prefix (if found).
-                let (plain_prefix, suffix) = find_split(rest, b'%').unwrap_or((rest, ""));
-                debug_assert!(
-                    !plain_prefix.is_empty(),
-                    "`len_consumed == 0` indicates non-empty `rest` not starting with `%`"
-                );
-                self.result = (self.f)(PctEncodedFragments::NoPctStr(plain_prefix));
-                self.result_continue_or_err()?;
-                rest = suffix;
-                continue;
+            // Process decoding result. This is necessary even when no input
+            // is consumed: the decoder then gives up what it held, which
+            // came from the input consumed before.
+            self.output_push_result(result)?;
+            if matches!(result, PushResult::Undecodable(_)) {
+                // The triplet that made the sequence undecodable is not a
+                // part of it and is still in the decoder. That triplet can
+                // be a character or undecodable by itself, so process it
+                // now rather than when the next triplet comes.
+                while let Some(result) = self.decoder.take_decoded(self.buf) {
+                    self.output_push_result(result)?;
+                }
             }
 
-            // Process decoding result.
-            match result {
-                PushResult::Decoded(len_written, c) => {
-                    let len_written = usize::from(len_written.get());
-                    let frag = core::str::from_utf8(&self.buf[..len_written])
-                        .expect("`DecoderBuffer` writes a valid ASCII string");
-                    self.result = (self.f)(PctEncodedFragments::Char(frag, c));
+            if len_consumed == 0 {
+                // `rest` does not continue what the decoder held, and the
+                // decoder is empty now. Write plain string prefix (if found).
+                // The prefix is empty when `rest` starts with `%`, which
+                // the decoder will consume next time.
+                let (plain_prefix, suffix) = find_split(rest, b'%').unwrap_or((rest, ""));
+                if !plain_prefix.is_empty() {
+                    self.result = (self.f)(PctEncodedFragments::NoPctStr(plain_prefix));
                     self.result_continue_or_err()?;
                 }
-                PushResult::Undecodable(len_written) => {
-                    self.output_as_undecodable(len_written)?;
-                }
-                PushResult::NeedMoreBytes => {
-                    // Nothing to write at this time.
-                }
+                rest = suffix;
+                continue;
             }
             rest = &rest[len_consumed..];
         }
@@ -307,45 +319,45 @@ impl DecoderBuffer {
 
             // Now a new percent-encoded triplet is read.
             // Check if the buffer contains a valid decodable content.
-            let len_decoded = usize::from(self.len_encoded) / 3;
-            match core::str::from_utf8(&self.decoded[..len_decoded]) {
-                Ok(decoded_str) => {
-                    // Successfully decoded.
-                    let len_consumed = s.len() - chars.as_str().len();
-                    let c = decoded_str
-                        .chars()
-                        .next()
-                        .expect("`decoded` buffer is nonempty");
-                    let len_result = NonZeroU8::new(self.len_encoded).expect(
-                        "`encoded` buffer is nonempty since \
-                         `push_single_encoded_byte()` was called",
-                    );
-                    self.write_and_pop(buf, len_result.get());
-                    return (len_consumed, PushResult::Decoded(len_result, c));
-                }
-                Err(e) => {
-                    // Undecodable.
-                    assert_eq!(
-                        e.valid_up_to(),
-                        0,
-                        "`decoded` buffer contains at most one character"
-                    );
-                    let skip_len_decoded = match e.error_len() {
-                        // Unexpected EOF. Wait for remaining input.
-                        None => continue,
-                        // Skip invalid bytes.
-                        Some(v) => v,
-                    };
-                    let len_consumed = s.len() - chars.as_str().len();
-                    let len_result = skip_len_decoded as u8 * 3;
-                    assert_ne!(skip_len_decoded, 0, "empty bytes cannot be invalid");
-                    self.write_and_pop(buf, len_result);
-                    return (len_consumed, PushResult::Undecodable(len_result));
-                }
-            };
+            if let Some(result) = self.take_decoded(buf) {
+                let len_consumed = s.len() - chars.as_str().len();
+                return (len_consumed, result);
+            }
+            // Unexpected EOF. Wait for remaining input.
         }
         let len_consumed = s.len() - chars.as_str().len();
         (len_consumed, PushResult::NeedMoreBytes)
+    }
+
+    /// Takes the character at the beginning of the buffer, or the triplets
+    /// there that cannot be the beginning of a character.
+    ///
+    /// Returns `None` if the buffer has no complete triplets, or if the
+    /// triplets can be the beginning of a character when more triplets follow.
+    #[must_use]
+    fn take_decoded(&mut self, buf: &mut [u8]) -> Option<PushResult> {
+        let decoded = &self.decoded[..usize::from(self.len_encoded) / 3];
+        let (valid, error_len) = match core::str::from_utf8(decoded) {
+            Ok(valid) => (valid, None),
+            Err(e) => (
+                core::str::from_utf8(&decoded[..e.valid_up_to()])
+                    .expect("the bytes before `valid_up_to()` are valid UTF-8"),
+                e.error_len(),
+            ),
+        };
+        if let Some(c) = valid.chars().next() {
+            // Successfully decoded.
+            let len_result = NonZeroU8::new(c.len_utf8() as u8 * 3)
+                .expect("a character is encoded to one or more bytes");
+            self.write_and_pop(buf, len_result.get());
+            return Some(PushResult::Decoded(len_result, c));
+        }
+        // Undecodable, unless the input ended in the middle of a character.
+        let skip_len_decoded = error_len?;
+        // Skip invalid bytes.
+        let len_result = skip_len_decoded as u8 * 3;
+        self.write_and_pop(buf, len_result);
+        Some(PushResult::Undecodable(len_result))
     }
 
     /// Writes the incomplete data completely to the destination, and clears the internal buffer.

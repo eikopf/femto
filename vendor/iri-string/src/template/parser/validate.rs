@@ -116,26 +116,29 @@ pub(in crate::template) fn validate_template_str(s: &str) -> Result<(), Error> {
             Some((literal, b'%', xdigits2_and_rest)) => {
                 validate_literal(literal, offset)?;
 
-                if xdigits2_and_rest.len() < 2 {
+                // Check the bytes before splitting: the two bytes after `%`
+                // are not necessarily ASCII, so the string cannot be split
+                // after them until they are known to be hexdigits.
+                let xdigits2 = xdigits2_and_rest.as_bytes();
+                if xdigits2.len() < 2 {
                     return Err(Error::new(
                         ErrorKind::InvalidPercentEncoding,
                         offset + literal.len(),
                     ));
                 }
-                let (xdigits2, new_rest) = xdigits2_and_rest.split_at(2);
-                if !xdigits2.as_bytes()[0].is_ascii_hexdigit() {
+                if !xdigits2[0].is_ascii_hexdigit() {
                     return Err(Error::new(
                         ErrorKind::InvalidPercentEncoding,
                         offset + literal.len() + 1,
                     ));
                 }
-                if !xdigits2.as_bytes()[1].is_ascii_hexdigit() {
+                if !xdigits2[1].is_ascii_hexdigit() {
                     return Err(Error::new(
                         ErrorKind::InvalidPercentEncoding,
                         offset + literal.len() + 2,
                     ));
                 }
-                new_rest
+                &xdigits2_and_rest[2..]
             }
             Some((literal, b'{', expr_and_rest)) => {
                 validate_literal(literal, offset)?;

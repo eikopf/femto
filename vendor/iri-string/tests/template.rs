@@ -482,3 +482,123 @@ fn prefix_modifier_for_fragmented_non_ascii_write() {
         assert_eq!(expanded.to_string(), "%CE%B1%CE%B2");
     }
 }
+
+#[test]
+fn stray_percent_before_non_ascii_is_invalid() {
+    // `%` followed by one ASCII character and then a non-ASCII character:
+    // the two bytes after `%` end inside the non-ASCII character.
+    for template in [
+        "%/\u{00E9}",
+        "%a\u{00E9}",
+        "%\u{00E9}",
+        "%\u{3042}",
+        "a%4\u{3042}{x}",
+        "{x}%/\u{00E9}",
+    ] {
+        assert!(
+            UriTemplateStr::new(template).is_err(),
+            "template={template:?}"
+        );
+    }
+}
+
+#[test]
+fn reserved_expansion_of_triplet_after_undecodable_triplets() {
+    let mut context = SimpleContext::new();
+    // `%C2` cannot be followed by `%00`, and `%00` is a character by itself.
+    context.insert("nul", "%C2%00%8A");
+    context.insert("ascii", "%E3%81%41%42");
+    context.insert("invalid", "%C2%FF%41");
+    context.insert("end", "%C2%00");
+
+    // `&[(template, expected)]`.
+    const CASES: &[(&str, &str)] = &[
+        ("{+nul}", "%C2%00%8A"),
+        ("{+nul:1}", "%C2"),
+        ("{+nul:2}", "%C2%00"),
+        ("{+nul:3}", "%C2%00%8A"),
+        ("{#nul}", "#%C2%00%8A"),
+        ("{+ascii}", "%E3%81%41%42"),
+        // `%E3`, `%81`, `%41`, `%42`.
+        ("{+ascii:3}", "%E3%81%41"),
+        ("{+invalid}", "%C2%FF%41"),
+        ("{+invalid:2}", "%C2%FF"),
+        ("{+end}", "%C2%00"),
+        ("{+end:1}", "%C2"),
+    ];
+
+    for (template, expected) in CASES {
+        let template = UriTemplateStr::new(template).expect("must be valid template");
+        let expanded = template
+            .expand::<UriSpec, _>(&context)
+            .expect("must not have variable type error");
+        assert_eq!(expanded.to_string(), *expected, "template={template:?}");
+
+        let expanded_dynamic = template
+            .expand_dynamic_to_string::<UriSpec, _>(&mut context.clone())
+            .expect("must not have variable type error");
+        assert_eq!(
+            expanded_dynamic, *expected,
+            "dynamic, template={template:?}"
+        );
+    }
+}
+
+#[test]
+fn reserved_expansion_keeps_triplets_before_non_triplet() {
+    use core::fmt;
+
+    let mut context = SimpleContext::new();
+    // The second `%C3` starts a character that `x` does not continue.
+    context.insert("lead", "%C3%C3x");
+    context.insert("non_ascii", "%CA%E3\u{00E9}");
+    context.insert("incomplete", "%C3%E3%8x");
+
+    // `&[(template, expected)]`.
+    const CASES: &[(&str, &str)] = &[
+        ("{+lead}", "%C3%C3x"),
+        ("{+lead:2}", "%C3%C3"),
+        ("{+lead:3}", "%C3%C3x"),
+        ("{#lead}", "#%C3%C3x"),
+        ("{+non_ascii}", "%CA%E3%C3%A9"),
+        ("{+incomplete}", "%C3%E3%258x"),
+    ];
+
+    for (template, expected) in CASES {
+        let template = UriTemplateStr::new(template).expect("must be valid template");
+        let expanded = template
+            .expand::<UriSpec, _>(&context)
+            .expect("must not have variable type error");
+        assert_eq!(expanded.to_string(), *expected, "template={template:?}");
+
+        let expanded_dynamic = template
+            .expand_dynamic_to_string::<UriSpec, _>(&mut context.clone())
+            .expect("must not have variable type error");
+        assert_eq!(
+            expanded_dynamic, *expected,
+            "dynamic, template={template:?}"
+        );
+    }
+
+    // A stray `%` at the end of one write, and a triplet in the next.
+    #[derive(Clone)]
+    struct Fragmented;
+    impl fmt::Display for Fragmented {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("a%")?;
+            f.write_str("%41")?;
+            f.write_str("%C3")?;
+            f.write_str("x")
+        }
+    }
+    impl Context for Fragmented {
+        fn visit<V: Visitor>(&self, visitor: V) -> V::Result {
+            visitor.visit_string(Fragmented)
+        }
+    }
+    let template = UriTemplateStr::new("{+x}").expect("must be valid template");
+    let expanded = template
+        .expand::<UriSpec, _>(&Fragmented)
+        .expect("must not have variable type error");
+    assert_eq!(expanded.to_string(), "a%25%41%C3x");
+}

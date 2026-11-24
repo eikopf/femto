@@ -440,6 +440,8 @@ impl Session {
                             ui.ask_sync_conflict(percent, reader.book_progress_percent());
                             self.outcome = Some("Asked which position to keep".into());
                             changed = true;
+                        } else {
+                            self.outcome = Some("Question left for the next opening".into());
                         }
                     } else if let Some(job) =
                         take.then(|| reader.begin_location(target).ok()).flatten()

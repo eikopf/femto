@@ -124,3 +124,34 @@ fn mixed_sizes_share_a_baseline_and_spacing_remains_a_minimum() {
         );
     }
 }
+
+#[test]
+fn a_line_takes_the_next_word_when_only_shaping_makes_it_fit() {
+    let fonts = Fonts::new(Font::from_bytes(FONT.to_vec()).unwrap());
+    let lines = |text: &str, width: u32| {
+        let chapter = Document::from_text("Fit", text)
+            .unwrap()
+            .chapter(0)
+            .unwrap();
+        let config = LayoutConfig {
+            width,
+            margin: 0,
+            hyphenation: femto_reader::layout::Hyphenation::Off,
+            ..Default::default()
+        };
+        let pages = paginate(&chapter, &fonts, config).unwrap().pages;
+        let lines = pages.into_iter().flat_map(|page| page.lines);
+        lines.collect::<Vec<_>>()
+    };
+    // Shaped, both are far narrower than their letters one by one: the
+    // Arabic letters join, and every pair of the Latin word is kerned.
+    for (fitting, next) in [("ببببب ببببب", "ببببب"), ("Yo YoYoYoYoYoYoYoYo", "Yo")]
+    {
+        let alone = lines(fitting, 2048);
+        assert_eq!(alone.len(), 1);
+        let column = alone[0].width.ceil() as u32;
+        let broken = lines(&format!("{fitting} {next}"), column);
+        let texts: Vec<_> = broken.iter().map(|line| line.text.as_str()).collect();
+        assert_eq!(texts, [fitting, next]);
+    }
+}

@@ -252,7 +252,19 @@ pub struct InputTask {
     long_presses: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
     generation: u64,
+    /// An event taken off the queue by [`Self::wait`] for [`Self::next`].
+    waited: std::cell::RefCell<Option<(u64, Instant, Event)>>,
 }
+
+/// How often the controls are sampled while one is in use, and otherwise.
+/// Every sample wakes the processor from light sleep for about three
+/// milliseconds. The slower rate adds at most its period to the 30 ms a
+/// press takes to be accepted, and is shorter than a press.
+const ACTIVE_SAMPLE: Duration = Duration::from_millis(10);
+const IDLE_SAMPLE: Duration = Duration::from_millis(30);
+/// How long after the last use the faster rate is kept, which covers the
+/// gaps inside a gesture and the long-press threshold.
+const ACTIVE_FOR: Duration = Duration::from_millis(600);
 
 impl InputTask {
     pub fn start(
@@ -280,6 +292,8 @@ impl InputTask {
                 let mut touch_errors = 0;
                 let mut battery_at: Option<Instant> = None;
                 let mut view = ViewGate::default();
+                let mut used = Instant::now();
+                let mut request = None;
                 while !stopped.load(Ordering::Relaxed) {
                     if battery_at.is_none_or(|at| at.elapsed() >= Duration::from_secs(30)) {
                         let adc_mv = read_battery();
@@ -299,7 +313,7 @@ impl InputTask {
                         }
                         battery_at = Some(now);
                     }
-                    if let Ok(command) = requests.try_recv() {
+                    if let Some(command) = request.take().or_else(|| requests.try_recv().ok()) {
                         match command {
                             Command::View {
                                 generation: next,
@@ -378,7 +392,20 @@ impl InputTask {
                             }
                         }
                     }
-                    thread::sleep(Duration::from_millis(10));
+                    let touched = touch
+                        .as_ref()
+                        .is_some_and(|device| device.enabled && device.irq.is_low());
+                    if touched || previous.is_low() || next.is_low() || select.is_low() {
+                        used = Instant::now();
+                    }
+                    // A request cuts the wait short and is served next.
+                    request = requests
+                        .recv_timeout(if used.elapsed() < ACTIVE_FOR {
+                            ACTIVE_SAMPLE
+                        } else {
+                            IDLE_SAMPLE
+                        })
+                        .ok();
                 }
             })
             .map_err(|e| e.to_string())?;
@@ -390,6 +417,7 @@ impl InputTask {
             long_presses,
             worker: Some(worker),
             generation: 0,
+            waited: Default::default(),
         })
     }
     /// Long page-button presses mean back, which delays short presses until
@@ -432,8 +460,18 @@ impl InputTask {
         self.generation = generation;
         Ok(())
     }
+    /// Waits up to `limit` for an event, which [`Self::next`] then returns.
+    pub fn wait(&self, limit: Duration) {
+        let mut waited = self.waited.borrow_mut();
+        if waited.is_none() {
+            *waited = self.events.recv_timeout(limit).ok();
+        }
+    }
     pub fn next(&self) -> Option<Event> {
-        while let Ok((generation, at, event)) = self.events.try_recv() {
+        let mut waited = self.waited.borrow_mut().take();
+        while let Some((generation, at, event)) =
+            waited.take().or_else(|| self.events.try_recv().ok())
+        {
             if generation == self.generation && at.elapsed() <= Duration::from_secs(3) {
                 return Some(event);
             }

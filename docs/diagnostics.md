@@ -19,6 +19,7 @@ The USB Serial/JTAG console accepts newline-terminated commands from a physicall
 | `femto awake` | Suppresses automatic sleep until restart; deep sleep disconnects USB and needs the power button to wake. Automatic sleep is also suppressed while a USB host is connected |
 | `femto sleep SECONDS` | Sleeps as the power button would and wakes unaided after the given time, at least 5 seconds. If the wake fails, only the power button brings the reader back |
 | `femto cat PATH` | Prints the first 16 KiB of a text file below `/sdcard/femto`, one log line per line, each cut to 200 bytes |
+| `femto tasks` | Logs each task's lowest stack headroom in bytes and its share of processor time since the previous report, out of 200% for the two cores, then the power-management locks and the time spent in each power mode since start |
 | `femto fault` | Panics, to test the crash record; the reader restarts |
 | `femto relay` | Makes tailnet sessions opened afterwards discard direct datagrams other than STUN until restart, so that peers are reached through relays only |
 | `femto reboot` | Restarts the application |
@@ -39,6 +40,10 @@ Startup and ten-second runtime reports include free bytes, largest free block, a
 ## Crash record
 
 The Picco appends one line to `/sdcard/femto/crash.log` when it panics (thread, source location and message), when its main routine stops with an error, and at a start that follows a panic or processor exception, a watchdog or a brownout. A fault that restarts the processor without running Rust code, such as a watchdog, leaves only the line written at the next start. Each line carries the firmware version, seconds since start and the Unix time when the clock was set. Past 64 KiB the file becomes `crash.old` and a new one starts. Writing fails silently, since the card may be what failed. `femto cat crash.log` prints it over USB and `femto fault` produces a panic to test it; on the tested Picco that panic and the restart after it were both recorded, and the book reopened on its page.
+
+## Power record
+
+The Picco appends a line to `/sdcard/femto/power.log` at each start, every ten minutes while awake, and before each sleep: the battery voltage, the charge estimate and charger state, and the share of the time since the previous line that the processor spent in light sleep. With the firmware version, seconds since start and Unix time that every record line carries, a day of ordinary reading gives the discharge per hour awake and per hour asleep without instruments. Rotation is as for the crash record. Nothing has read this file from a device yet.
 
 ## Network diagnostics
 

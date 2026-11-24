@@ -23,6 +23,8 @@ pub enum Command {
     Awake,
     /// Reach tailnet peers through relays only in sessions opened from now on.
     Relay,
+    /// Report every task's stack headroom and share of processor time.
+    Tasks,
     /// Fail as a programming error would, to test what a fault leaves behind.
     Fault,
     /// Sleep as the power button would, and wake unaided after this many
@@ -82,6 +84,7 @@ fn parse(line: &str) -> Option<Command> {
         ("awake", "") => Command::Awake,
         ("relay", "") => Command::Relay,
         ("fault", "") => Command::Fault,
+        ("tasks", "") => Command::Tasks,
         ("sleep", seconds) => Command::Sleep(seconds.parse().ok().filter(|n| *n >= MIN_SLEEP)?),
         ("swipe", "next") => Command::Swipe(crate::input::Turn::Next),
         ("swipe", "prev") => Command::Swipe(crate::input::Turn::Previous),

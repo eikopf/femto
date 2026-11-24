@@ -297,6 +297,10 @@ impl Screen {
     pub fn event(&self) -> Option<crate::input::Event> {
         self.input.next()
     }
+    /// Waits up to `limit` for input, which [`Self::event`] then returns.
+    pub fn wait_event(&self, limit: std::time::Duration) {
+        self.input.wait(limit);
+    }
     pub fn set_full_refresh_interval(&mut self, updates: u8) {
         self.full_interval = updates.max(1);
     }

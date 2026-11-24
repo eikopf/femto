@@ -72,10 +72,40 @@ fn report_heap(stage: &str) {
     }
 }
 
+/// Logs each task's lowest stack headroom in bytes and its share of
+/// processor time since the previous report, out of 200% for two cores.
+fn report_tasks(previous: &mut std::collections::BTreeMap<u32, u32>) {
+    use esp_idf_svc::sys;
+    let mut tasks = vec![sys::TaskStatus_t::default(); 48];
+    let mut total = 0;
+    let count =
+        unsafe { sys::uxTaskGetSystemState(tasks.as_mut_ptr(), tasks.len() as u32, &mut total) };
+    tasks.truncate(count as usize);
+    let elapsed = total
+        .wrapping_sub(previous.insert(0, total).unwrap_or(0))
+        .max(1);
+    tasks.sort_by_key(|task| task.xTaskNumber);
+    for task in &tasks {
+        let name = unsafe { std::ffi::CStr::from_ptr(task.pcTaskName) }.to_string_lossy();
+        let ran = task.ulRunTimeCounter.wrapping_sub(
+            previous
+                .insert(task.xTaskNumber, task.ulRunTimeCounter)
+                .unwrap_or(0),
+        );
+        log::info!(
+            "Task {name}: stack_free={} cpu={:.1}%",
+            task.usStackHighWaterMark,
+            100.0 * f64::from(ran) / f64::from(elapsed)
+        );
+    }
+    log::info!("Tasks: {count} over {} ms", elapsed / 1000);
+}
+
 /// Names the book being opened at startup until its first page is shown.
 const OPENING_MARKER: &str = "/sdcard/femto/.opening";
 
 fn run() -> Result<(), String> {
+    let mut awake = power::Awake::open()?;
     let mut screen = panel::open()?;
     crash::note_restart();
     // The input task above keeps its internal stack; workers started from
@@ -295,14 +325,20 @@ fn run() -> Result<(), String> {
             })
         }};
     }
+    // Processor time per task at the last report, to report shares since.
+    let mut task_times = std::collections::BTreeMap::new();
     // The book automatic sync has compared with the server since it opened.
     let mut reconciled = None::<String>;
     // A sleep that waits, behind the sleep page already shown, for the
     // reading position to reach the sync server: when the timer should wake
     // the reader, and a checksum of that page.
     let mut retiring = None::<(Option<Duration>, u32)>;
+    let mut power_log = crash::PowerLog::start(screen.battery());
+    // Nothing is in progress, so the loop can wait longer for input; each
+    // pass wakes the processor from light sleep.
+    let mut quiet = false;
     loop {
-        std::thread::sleep(Duration::from_millis(10));
+        screen.wait_event(Duration::from_millis(if quiet { 100 } else { 10 }));
         screen.poll_wifi();
         // A carried event is handled before any new console command is read.
         let command = if carry.is_some() {
@@ -345,6 +381,11 @@ fn run() -> Result<(), String> {
                     None
                 }
                 Command::Fault => panic!("requested over USB"),
+                Command::Tasks => {
+                    report_tasks(&mut task_times);
+                    power::report_modes();
+                    None
+                }
                 Command::Relay => {
                     tailnet::RELAY_ONLY.store(true, std::sync::atomic::Ordering::Relaxed);
                     log::info!("USB relay: new tailnet sessions use relays only until restart");
@@ -839,22 +880,33 @@ fn run() -> Result<(), String> {
         let manual_sleep = ui.take_sleep_request();
         let idle_now = idle_epoch.elapsed().as_millis().min(u64::MAX as u128) as u64;
         idle.configure(idle_now, reader.state.idle_sleep.minutes() * 60 * 1000);
-        let automatic_sleep = idle.poll(
-            idle_now,
-            journal.is_some(),
-            ui.is_scanning()
-                || ui.is_opening()
-                || ui.is_reflowing()
-                || ui.is_navigating()
-                || ui.is_preview_opening()
-                || ui.is_dictionary_opening()
-                || screen.catalog.is_busy()
-                || updater.is_busy()
-                || kosync.as_ref().is_some_and(|sync| sync.is_busy()),
-        );
+        let working = ui.is_scanning()
+            || ui.is_opening()
+            || ui.is_reflowing()
+            || ui.is_navigating()
+            || ui.is_preview_opening()
+            || ui.is_dictionary_opening()
+            || screen.catalog.is_busy()
+            || updater.is_busy()
+            || kosync.as_ref().is_some_and(|sync| sync.is_busy());
+        let automatic_sleep = idle.poll(idle_now, journal.is_some(), working);
         // Deep sleep drops the USB connection, so an attached host keeps the
         // device awake; it is then powered and usually being driven over USB.
         let hosted = unsafe { esp_idf_svc::sys::usb_serial_jtag_is_connected() };
+        // A host loses the device when the processor sleeps, so one that is
+        // attached keeps it awake.
+        awake.hold(hosted);
+        // A host is served promptly; the processor cannot sleep for it anyway.
+        quiet = !hosted
+            && !working
+            && !preparing
+            && !dirty
+            && carry.is_none()
+            && retiring.is_none()
+            && !ui.is_open()
+            && !ui.is_busy()
+            && screen.tailnet.driver().is_none()
+            && !cfg!(feature = "bluetooth");
         let wake_after = timed_sleep.take();
         let asked =
             manual_sleep || wake_after.is_some() || (automatic_sleep && !stay_awake && !hosted);
@@ -904,6 +956,8 @@ fn run() -> Result<(), String> {
             }
         }
         if let Some((wake_after, shown)) = sleeping {
+            // Written while the card is still mounted.
+            power_log.line("sleep", screen.battery());
             let prepared = (|| -> Result<(), String> {
                 power::wait_for_release()?;
                 if kosync
@@ -960,6 +1014,7 @@ fn run() -> Result<(), String> {
                 }
             }
         }
+        power_log.poll(screen.battery());
         if heap_report.elapsed() >= Duration::from_secs(10) {
             report_heap("running");
             log::info!("battery: {:?}", screen.battery());

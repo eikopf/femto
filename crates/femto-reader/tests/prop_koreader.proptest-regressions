@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 98ac4ab5e182c8ad8e150b0090648e9a98f175399ec84c490d83c179638269f8 # shrinks to chapters = ["<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>t</title></head><body><div><div><pre>\r\n&amp;</pre></div></div></body></html>"]

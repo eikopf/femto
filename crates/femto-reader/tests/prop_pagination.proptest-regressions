@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc de96afb8ac7b8ef5f0ae138f581c85130bb3360a50271d3d50b179a895d6b075 # shrinks to chapter = Chapter { language: "en", index: 3, href: "c.xhtml", blocks: [Text(Paragraph { list: None, text: "", spans: [] }), Text(Paragraph { list: None, text: "a", spans: [Span { language: Some("en"), range: 0..1, style: TextStyle { indent: Pixels(0.0), tab_size: Spaces(8.0), direction: Auto, align: Start, hyphens: Auto, scale: 1.0, bold: false, italic: false } }] })], warnings: [], anchors: {}, notes: [], links: [] }, config = LayoutConfig { width: 80, height: 217, margin: 0, font_size: 8.0, line_height: 1.0, hyphenation: Book, footer: 0 }, serif = false, picks = [0]
+cc 3ebf962e7645327741601b56717f5f051d05eda8930788503fa33f1d6937c196 # shrinks to chapter = Chapter { language: "en", index: 3, href: "c.xhtml", blocks: [Text(Paragraph { list: None, text: "", spans: [] }), Text(Paragraph { list: None, text: "a", spans: [Span { language: Some("en"), range: 0..1, style: TextStyle { indent: Pixels(0.0), tab_size: Spaces(8.0), direction: Auto, align: Start, hyphens: Auto, scale: 1.0, bold: false, italic: false } }] })], warnings: [], anchors: {}, notes: [], links: [] }, width = 80, height = 80, margin = 0, font_size = 8.0, hyphenation = Book, serif = false, picks = [0]

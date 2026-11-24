@@ -549,6 +549,9 @@ pub struct Connection<T: Transport> {
     tls: T,
     decoder: Decoder,
     output: VecDeque<Output>,
+    /// The answer to the relay's latest ping, held while both output slots
+    /// are taken. One value, so pings cannot grow what is retained.
+    pong: Option<[u8; 8]>,
     last_ms: u64,
     last_input_ms: u64,
     closed: bool,
@@ -562,6 +565,7 @@ impl<T: Transport> Connection<T> {
             tls: T::from_verified(session.into_transport()?)?,
             decoder: Decoder::default(),
             output: VecDeque::new(),
+            pong: None,
             last_ms: now_ms,
             last_input_ms: now_ms,
             closed: false,
@@ -602,6 +606,16 @@ impl<T: Transport> Connection<T> {
         });
         Ok(())
     }
+    /// Queues the held pong once an output slot is free. Waiting datagrams
+    /// are backpressure, not a reason to close: they drain or expire.
+    fn queue_pong(&mut self, now_ms: u64) -> Result<(), Error> {
+        if self.output.len() < 2
+            && let Some(value) = self.pong.take()
+        {
+            self.enqueue(derp_frames::pong(value), now_ms)?;
+        }
+        Ok(())
+    }
     /// Acceptance queues one datagram, not proof of delivery. The runtime must
     /// close this connection when its queued authorization becomes invalid.
     pub fn send(&mut self, peer: PublicKey<Node>, packet: &[u8], now_ms: u64) -> Result<(), Error> {
@@ -610,7 +624,9 @@ impl<T: Transport> Connection<T> {
         self.enqueue(bytes, now_ms)
     }
     /// One plaintext enqueue, one socket write, and the receipt of at most
-    /// one frame, which is returned as an event once it is complete. Pings queue their pong automatically.
+    /// one frame, which is returned as an event once it is complete. Pings
+    /// queue their pong automatically; while two frames wait for the socket
+    /// only the latest ping's pong is kept, and follows them.
     pub fn poll(&mut self, now_ms: u64) -> Result<Option<Event>, Error> {
         self.check(now_ms)?;
         let result = self.step(now_ms);
@@ -633,6 +649,7 @@ impl<T: Transport> Connection<T> {
         {
             self.output.pop_front();
         }
+        self.queue_pong(now_ms)?;
         // A full packet frame takes three reads: its header and a body of up
         // to 32 + MAX_DATAGRAM bytes in two parts.
         let mut buffer = [0; 1024];
@@ -651,7 +668,8 @@ impl<T: Transport> Connection<T> {
                 return Err(derp_frames::Error::Frame.into());
             }
             if let Some(Event::Ping(value)) = &event {
-                self.enqueue(derp_frames::pong(*value), now_ms)?;
+                self.pong = Some(*value);
+                self.queue_pong(now_ms)?;
             }
             if event.is_some() {
                 return Ok(event);
@@ -662,6 +680,7 @@ impl<T: Transport> Connection<T> {
     pub fn close(&mut self) {
         self.closed = true;
         self.output.clear();
+        self.pong = None;
         self.decoder.close();
         self.tls.close();
     }
@@ -732,11 +751,91 @@ mod tests {
                 tls: Idle,
                 decoder: Decoder::default(),
                 output: VecDeque::new(),
+                pong: None,
                 last_ms: 0,
                 last_input_ms: 0,
                 closed: false,
             },
         }
+    }
+    /// A socket that holds what the relay sent, and takes output only while
+    /// writable.
+    #[derive(Default)]
+    struct Wire {
+        input: VecDeque<u8>,
+        writable: bool,
+        sent: Vec<u8>,
+        closed: bool,
+    }
+    impl Transport for Wire {
+        type Blocking = Io;
+        fn from_verified(_: Io) -> io::Result<Self> {
+            unreachable!()
+        }
+        fn check(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+        fn queue(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if !self.writable {
+                return Ok(0);
+            }
+            self.sent.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush_pending(&mut self) -> io::Result<bool> {
+            Ok(self.writable)
+        }
+        fn receive(&mut self, buffer: &mut [u8]) -> io::Result<Option<usize>> {
+            let count = buffer.len().min(self.input.len());
+            for (slot, byte) in buffer.iter_mut().zip(self.input.drain(..count)) {
+                *slot = byte;
+            }
+            Ok((count > 0).then_some(count))
+        }
+        fn close(&mut self) {
+            self.closed = true;
+        }
+    }
+    #[test]
+    fn a_ping_while_two_datagrams_wait_is_answered_when_the_socket_drains() {
+        let mut connection = Connection {
+            tls: Wire::default(),
+            decoder: Decoder::default(),
+            output: VecDeque::new(),
+            pong: None,
+            last_ms: 0,
+            last_input_ms: 0,
+            closed: false,
+        };
+        let peer = PublicKey::from_bytes([1; 32]);
+        connection.send(peer, &[1], 1).unwrap();
+        connection.send(peer, &[2], 1).unwrap();
+        // The relay pings twice while the socket takes no output.
+        for value in [7, 8] {
+            connection.tls.input.extend([0x12, 0, 0, 0, 8]);
+            connection.tls.input.extend([value; 8]);
+        }
+        assert_eq!(connection.poll(2).unwrap(), Some(Event::Ping([7; 8])));
+        assert_eq!(connection.poll(3).unwrap(), Some(Event::Ping([8; 8])));
+        assert!(!connection.tls.closed);
+        // The pongs took no room, and made none: datagrams are still refused.
+        assert_eq!(connection.output.len(), 2);
+        assert!(matches!(connection.send(peer, &[3], 3), Err(Error::Busy)));
+        connection.tls.writable = true;
+        for now in 4..8 {
+            assert_eq!(connection.poll(now).unwrap(), None);
+        }
+        // Both datagrams, then the answer to the latest ping.
+        assert_eq!(
+            connection.tls.sent,
+            [
+                derp_frames::send_packet(peer, &[1]).unwrap(),
+                derp_frames::send_packet(peer, &[2]).unwrap(),
+                derp_frames::pong([8; 8]),
+            ]
+            .concat()
+        );
+        assert!(!connection.pending_output());
     }
     fn network() -> (Network<Store>, Vec<DeviceIdentity>) {
         let local = DeviceIdentity::generate().unwrap();

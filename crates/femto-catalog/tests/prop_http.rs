@@ -464,7 +464,6 @@ proptest! {
 /// The documented chunk limit is 16,384. A body sent in exactly that many
 /// chunks is within it.
 #[test]
-#[ignore = "bug: a chunked body of exactly 16,384 chunks is refused; the terminating chunk counts toward the limit"]
 fn a_body_of_exactly_the_documented_chunk_count_is_accepted() {
     for (chunks, accepted) in [(16_383, true), (16_384, true), (16_385, false)] {
         let mut response =

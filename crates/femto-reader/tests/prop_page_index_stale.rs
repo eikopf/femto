@@ -52,7 +52,6 @@ fn record_with_moved_boundary(directory: &std::path::Path, text: &str, page: usi
 }
 
 #[test]
-#[ignore = "bug: a stale page index record whose opening page still matches blocks later pages for good"]
 fn a_stale_record_beyond_the_opening_page_does_not_block_reading() {
     let text = "A build that breaks one line differently must not strand the reader. ".repeat(600);
     let document = || Document::from_text("book.txt", &text).unwrap();

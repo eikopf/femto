@@ -79,7 +79,7 @@ proptest! {
 
     /// OpenSearch with the term in the path: it is one segment, as typed.
     #[test]
-    fn opensearch_terms_in_a_path_are_one_segment(term in term().prop_filter("see the_terms_dot_and_dot_dot", |t| t != "." && t != "..")) {
+    fn opensearch_terms_in_a_path_are_one_segment(term in term().prop_filter("refused: the_terms_dot_and_dot_dot_are_refused_in_a_path_segment", |t| t != "." && t != "..")) {
         let url = opensearch_url("/search/{searchTerms}/results?n=1", SOURCE, &term).map_err(|e| TestCaseError::fail(e.to_string()))?;
         let raw = url.strip_prefix("https://catalog.example/search/").and_then(|rest| rest.strip_suffix("/results?n=1"))
             .ok_or_else(|| TestCaseError::fail(url.clone()))?;
@@ -141,7 +141,6 @@ proptest! {
 /// neither may stop the device. RFC 6570 reserved (`+`) and fragment (`#`)
 /// expansion of a term outside ASCII panics inside `iri-string` 0.7.14.
 #[test]
-#[ignore = "bug: a search template using reserved expansion panics on a non-ASCII search term"]
 fn reserved_expansion_of_a_non_ascii_term_does_not_panic() {
     let mut panicked = Vec::new();
     for template in [
@@ -172,7 +171,6 @@ fn reserved_expansion_of_a_non_ascii_term_does_not_panic() {
 /// panic where overflow checks are on, as in this test build; the release
 /// profiles leave them off, and there the count wraps.
 #[test]
-#[ignore = "bug: a search template with a prefix modifier panics on a multi-byte search term in builds with overflow checks"]
 fn a_prefix_modifier_on_a_multi_byte_term_does_not_panic() {
     let link = Link {
         href: "/search{?query:3}".into(),
@@ -196,7 +194,6 @@ fn a_prefix_modifier_on_a_multi_byte_term_does_not_panic() {
 /// multi-byte one is not a template; it must be refused, not sliced.
 /// Nothing here depends on what the reader types.
 #[test]
-#[ignore = "bug: a search template with a stray percent sign before a multi-byte character panics"]
 fn a_template_with_a_stray_percent_sign_is_refused() {
     let mut panicked = Vec::new();
     for template in [
@@ -223,14 +220,21 @@ fn a_template_with_a_stray_percent_sign_is_refused() {
 }
 
 /// A term of dots in a path segment is a term, not a path instruction.
+/// The two terms that would name another resource, encoded or not, are
+/// refused.
 #[test]
-#[ignore = "bug: searching for \".\" or \"..\" with a path-style OpenSearch template requests a different resource"]
-fn the_terms_dot_and_dot_dot_stay_in_their_path_segment() {
-    for (term, kept) in [("...", "..."), (".", "%2E"), ("..", "%2E%2E")] {
-        let url = opensearch_url("/opds/search/{searchTerms}/results", SOURCE, term).unwrap();
-        assert_eq!(
-            url.to_ascii_uppercase(),
-            format!("https://catalog.example/opds/search/{kept}/results").to_ascii_uppercase(),
+fn the_terms_dot_and_dot_dot_are_refused_in_a_path_segment() {
+    const TEMPLATE: &str = "/opds/search/{searchTerms}/results";
+    assert_eq!(
+        opensearch_url(TEMPLATE, SOURCE, "...").unwrap(),
+        "https://catalog.example/opds/search/.../results"
+    );
+    for term in [".", ".."] {
+        assert!(
+            matches!(
+                opensearch_url(TEMPLATE, SOURCE, term),
+                Err(femto_catalog::Error::Field("search query"))
+            ),
             "{term}"
         );
     }

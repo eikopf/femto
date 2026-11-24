@@ -78,7 +78,6 @@ proptest! {
     /// The reduced size is the exact one: an image that fills the width of
     /// its box is not drawn a pixel narrower.
     #[test]
-    #[ignore = "bug: a reduced image can be a pixel smaller than its box allows; the scale is rounded in floating point"]
     fn reduction_is_exact(width in dimension(), height in dimension(), max_width in side(), max_height in side()) {
         if let Ok(reduced) = (Size { width, height }).reduced(max_width, max_height) {
             prop_assert_eq!((reduced.width, reduced.height), exact(width, height, max_width, max_height),
@@ -242,7 +241,6 @@ fn every_truncation_of_every_fixture_is_handled() {
 /// "The size reduced to fit a box": the height limits a 1 x 2931 image in a
 /// 1 x 107 box, and 2931 * (107 / 2931) is just under 107 in floating point.
 #[test]
-#[ignore = "bug: a reduced image can be a pixel smaller than its box allows; the scale is rounded in floating point"]
 fn an_image_limited_by_height_fills_the_height() {
     for (width, height, max_width, max_height, expected) in [
         (1, 2931, 1, 107, (1, 107)),
@@ -265,7 +263,6 @@ fn an_image_limited_by_height_fills_the_height() {
 /// once. The frame type is found by walking the segments; bytes a decoder
 /// skips between segments must not hide it.
 #[test]
-#[ignore = "bug: a progressive JPEG with a byte of padding before a segment is decoded at sizes allowed only for baseline"]
 fn a_progressive_jpeg_is_recognized_however_its_segments_are_padded() {
     let whole = fixture("large-progressive.jpg");
     assert!(image::decode_within(&whole, Limits::ALONE).is_err());

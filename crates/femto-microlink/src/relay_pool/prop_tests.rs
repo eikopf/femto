@@ -2,9 +2,10 @@
 //! reads short, blocks, and accepts output a few bytes at a time.
 //!
 //! Reference: the relay's frames come out as their events, once and in
-//! order; every accepted datagram and every answer to a ping reaches the
-//! wire whole, once, in the order it was queued; a refusal for a full queue
-//! leaves the connection usable.
+//! order; every accepted datagram and every queued answer to a ping reaches
+//! the wire whole, once, in the order it was queued; a ping that arrives
+//! while two frames wait is answered after them unless a later ping
+//! replaces it; a refusal for a full queue leaves the connection usable.
 use super::*;
 use proptest::prelude::*;
 use std::io;
@@ -173,17 +174,12 @@ fn step() -> impl Strategy<Value = Step> {
 }
 
 /// Runs the steps, then lets the connection finish everything it holds.
-/// `tolerate_ping_overflow` ends the case at the known refusal of a ping
-/// that arrives while two output frames wait (see the regression test).
-fn run(
-    steps: &[Step],
-    end_of_stream: bool,
-    tolerate_ping_overflow: bool,
-) -> Result<(), TestCaseError> {
+fn run(steps: &[Step], end_of_stream: bool) -> Result<(), TestCaseError> {
     let mut connection = Connection {
         tls: Script::default(),
         decoder: Decoder::default(),
         output: VecDeque::new(),
+        pong: None,
         last_ms: 0,
         last_input_ms: 0,
         closed: false,
@@ -192,6 +188,8 @@ fn run(
     // Events owed, and output frames queued, in order.
     let mut owed: VecDeque<Event> = VecDeque::new();
     let mut queued: Vec<Vec<u8>> = Vec::new();
+    // The answer to the latest ping, held while two frames wait.
+    let mut held: Option<[u8; 8]> = None;
     let mut delivered = 0;
     let waiting = |connection: &Connection<Script>, queued: &[Vec<u8>]| {
         let mut end = 0;
@@ -206,15 +204,28 @@ fn run(
     let poll = |connection: &mut Connection<Script>,
                 owed: &mut VecDeque<Event>,
                 queued: &mut Vec<Vec<u8>>,
+                held: &mut Option<[u8; 8]>,
                 now: u64|
      -> Result<bool, TestCaseError> {
         let before = waiting(connection, queued);
-        match connection.poll(now) {
+        let result = connection.poll(now);
+        // A poll writes first, so what waits now is what waited when the
+        // held answer, and then this poll's ping, looked for a free slot.
+        let mut queue_held = |held: &mut Option<[u8; 8]>| {
+            if waiting(connection, queued) < 2
+                && let Some(value) = held.take()
+            {
+                queued.push(derp_frames::pong(value));
+            }
+        };
+        queue_held(held);
+        match result {
             Ok(Some(event)) => {
                 prop_assert_eq!(Some(&event), owed.front(), "event out of order or invented");
                 owed.pop_front();
                 if let Event::Ping(value) = event {
-                    queued.push(derp_frames::pong(value));
+                    *held = Some(value);
+                    queue_held(held);
                 }
                 Ok(true)
             }
@@ -228,10 +239,6 @@ fn run(
                 {
                     prop_assert!(owed.is_empty(), "events lost before end of stream");
                     prop_assert!(connection.closed && connection.tls.closed);
-                    return Ok(false);
-                }
-                let ping_next = matches!(owed.front(), Some(Event::Ping(_)));
-                if tolerate_ping_overflow && ping_next && before >= 2 {
                     return Ok(false);
                 }
                 Err(TestCaseError::fail(format!(
@@ -270,7 +277,7 @@ fn run(
                 connection.tls.reads = reads.iter().copied().collect();
                 connection.tls.accept = *accept;
                 connection.tls.flushed = *flushed;
-                if !poll(&mut connection, &mut owed, &mut queued, now)? {
+                if !poll(&mut connection, &mut owed, &mut queued, &mut held, now)? {
                     return Ok(());
                 }
             }
@@ -292,7 +299,7 @@ fn run(
         connection.tls.reads.clear();
         connection.tls.accept = usize::MAX;
         connection.tls.flushed = true;
-        if !poll(&mut connection, &mut owed, &mut queued, now)? {
+        if !poll(&mut connection, &mut owed, &mut queued, &mut held, now)? {
             ended = connection.tls.eof && connection.tls.input.is_empty() && owed.is_empty();
             if !ended {
                 return Ok(());
@@ -303,6 +310,7 @@ fn run(
     prop_assert!(owed.is_empty(), "events never delivered: {:?}", owed);
     prop_assert_eq!(ended, end_of_stream);
     if !end_of_stream {
+        prop_assert_eq!(held, None, "an answer to a ping never queued");
         prop_assert_eq!(&connection.tls.wire, &queued.concat());
         prop_assert!(!connection.pending_output());
     }
@@ -316,17 +324,16 @@ proptest! {
         steps in prop::collection::vec(step(), 1..40),
         end_of_stream in any::<bool>(),
     ) {
-        run(&steps, end_of_stream, true)?;
+        run(&steps, end_of_stream)?;
     }
 }
 
 /// The relay's ping arrives while two datagrams wait for a socket that is
 /// momentarily not writable. The contract (`Connection::poll`: "Pings queue
 /// their pong automatically"; `Transport::queue`: "zero means backpressure")
-/// gives output five seconds to drain; instead the connection is closed at
-/// once, and the pool then keeps that relay in a thirty-second cooldown.
+/// gives output five seconds to drain. The connection was closed at once,
+/// and the pool then kept that relay in a thirty-second cooldown.
 #[test]
-#[ignore = "bug: a relay ping during brief output backpressure closes the connection"]
 fn ping_while_two_datagrams_wait_does_not_close_the_connection() {
     let steps = [
         Step::Send(1, vec![1]),
@@ -339,5 +346,5 @@ fn ping_while_two_datagrams_wait_does_not_close_the_connection() {
             flushed: false,
         },
     ];
-    run(&steps, false, false).unwrap();
+    run(&steps, false).unwrap();
 }

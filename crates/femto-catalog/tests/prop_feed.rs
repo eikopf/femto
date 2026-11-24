@@ -774,7 +774,6 @@ proptest! {
 /// original fields with a null resolved URL", and OPDS 1 feeds "are read into
 /// the same model". OPDS 1.2 section 5.4.1 lets a thumbnail be a `data:` URL.
 #[test]
-#[ignore = "bug: one mailto:, data: or other unsupported link makes a whole OPDS 1 feed unreadable"]
 fn an_atom_feed_with_an_unsupported_link_is_still_read() {
     let source = "https://catalog.example/opds";
     for href in [

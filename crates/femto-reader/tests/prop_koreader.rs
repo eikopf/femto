@@ -265,9 +265,8 @@ fn round_trip(document: &mut Document, block: usize, byte: usize) -> Locator {
 
 /// `docs/koreader-sync.md`: the other reader "opens a little earlier and
 /// never later". The newline of a CR LF pair in preformatted text has a place
-/// in the source, yet comes back as the character after it.
+/// in the source, and came back as the character after it.
 #[test]
-#[ignore = "bug: the newline of CR LF in preformatted text resolves one character later"]
 fn preformatted_crlf_newline_round_trips() {
     let (_file, mut document) = body("<pre>ab\r\ncd</pre>");
     let chapter = document.chapter(0).unwrap();
@@ -333,11 +332,12 @@ proptest! {
                 prop_assert!(back.is_ok(), "{at:?} -> {pointer} does not resolve: {:?}", back.err());
                 let back = back.unwrap();
                 prop_assert!(valid(&chapter, back), "{at:?} -> {pointer} -> invalid {back:?}");
-                // Known (see the regression tests below): a preformatted
-                // newline that the other reader drops or reads as CR LF maps
-                // one character later.
-                let known = back == Locator { byte: at.byte + 1, ..at }
-                    && matches!(&chapter.blocks[at.block], Block::Text(p) if p.text[at.byte..].starts_with('\n'));
+                // Known (see `preformatted_block_start_is_never_later`): the
+                // newline that opens a preformatted block, which the other
+                // reader drops, maps one character later.
+                let known = back == Locator { byte: 1, ..at }
+                    && at.byte == 0
+                    && matches!(&chapter.blocks[at.block], Block::Text(p) if p.text.starts_with('\n'));
                 prop_assert!(back <= at || known, "{at:?} -> {pointer} -> later {back:?}");
                 if known {
                     continue;

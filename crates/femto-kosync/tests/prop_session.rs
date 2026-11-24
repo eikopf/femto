@@ -669,10 +669,6 @@ fn reader_moved_at_origin(model: &Model, d: usize, origin: usize) -> bool {
 /// table would upload the page the reader is on now. Neither position is
 /// lost either way, so this follows the session: an ambiguity, not a finding.
 const LOCAL_RACE_DEFERS: bool = true;
-/// A question left unanswered stops every later comparison in that session
-/// (see `a_question_left_unanswered_returns_when_the_book_is_next_opened`).
-/// Until that is fixed the histories restart the session after leaving.
-const LEAVING_NEEDS_RESTART: bool = true;
 
 // ---------------------------------------------------------------- replay
 
@@ -809,9 +805,6 @@ fn run(world: &mut World, op: &Op, asks: bool, stats: &mut Stats) {
                     device.ui.back(&mut device.reader).unwrap();
                     assert!(!device.ui.is_open());
                     assert!(device.ui.take_kosync_event().is_none());
-                    if LEAVING_NEEDS_RESTART {
-                        world.restart(d, false);
-                    }
                 } else {
                     device.ui.choose(&mut device.reader, label).unwrap();
                     let event = device.ui.take_kosync_event().expect("an answer");
@@ -1047,7 +1040,6 @@ fn foreign(world: &World, place: usize) {
 /// docs/koreader-sync.md: "leaving it changes nothing, and the question
 /// returns when the book is next opened."
 #[test]
-#[ignore = "bug: a sync question left unanswered stops every later automatic sync in the session"]
 fn a_question_left_unanswered_returns_when_the_book_is_next_opened() {
     let mut world = World::new(false);
     foreign(&world, 1);
@@ -1072,7 +1064,6 @@ fn a_question_left_unanswered_returns_when_the_book_is_next_opened() {
 /// The same cause seen from another book: nothing about book one's question
 /// should keep book two from uploading before sleep.
 #[test]
-#[ignore = "bug: a sync question left unanswered stops every later automatic sync in the session"]
 fn a_question_left_unanswered_does_not_stop_another_book_uploading_before_sleep() {
     let mut world = World::new(false);
     foreign(&world, 1);
@@ -1097,7 +1088,6 @@ fn a_question_left_unanswered_does_not_stop_another_book_uploading_before_sleep(
 /// docs/koreader-sync.md: "Each logs `Sync: OUTCOME`", and the question
 /// "is not put over a menu the user is in".
 #[test]
-#[ignore = "bug: a comparison that would ask while a menu is open ends without an outcome to log"]
 fn a_question_withheld_for_an_open_menu_still_logs_an_outcome() {
     let mut world = World::new(false);
     foreign(&world, 1);
@@ -1108,15 +1098,15 @@ fn a_question_withheld_for_an_open_menu_still_logs_an_outcome() {
     assert!(outcome.is_some(), "nothing is logged for this request");
 }
 
-/// A position taken from the server is saved, and the agreement in a second
-/// save. If only the first reaches storage (the second fails, or the reader
-/// loses power between them), the reader restarts at the server's position
-/// with the old agreement: it looks moved, the server's record looks new,
-/// and the user is asked to choose between two identical positions.
+/// A position taken from the server and the agreement go to storage in one
+/// save. In two, with only the first reaching storage (the second failed, or
+/// the reader lost power between them), the reader restarted at the server's
+/// position with the old agreement: it looked moved, the server's record
+/// looked new, and the user was asked to choose between two identical
+/// positions.
 /// docs/koreader-sync.md: "The agreed position is saved as soon as it is set"
 /// and "Failed saves retain the previous visible and in-memory state."
 #[test]
-#[ignore = "bug: position and agreement are saved separately; losing the second save invents a conflict"]
 fn a_taken_position_and_its_agreement_reach_storage_together() {
     let mut world = World::new(false);
     // Level with the server, then another device moves.
@@ -1138,15 +1128,12 @@ fn a_taken_position_and_its_agreement_reach_storage_together() {
     until(|| {
         session.poll(reader, ui, 20, |state| {
             saves += 1;
-            if saves == 2 {
-                return Err(io::Error::other("card full").into());
-            }
             *saved = state.clone();
             Ok(())
         });
         !session.is_busy()
     });
-    assert_eq!(saves, 2);
+    assert_eq!(saves, 1);
     assert_eq!(device.reader.position(), world.places[2].0);
     // The reader restarts from what storage holds, and is compared again.
     // Nothing has moved since it took the server's position.

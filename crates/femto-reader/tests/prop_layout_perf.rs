@@ -36,7 +36,6 @@ fn time(text: &str) -> (usize, f64) {
 /// Soft hyphens are break opportunities like any other, so a run of them
 /// should cost about what the same run costs with zero-width spaces.
 #[test]
-#[ignore = "bug: each line of a long run of soft hyphens shapes every later soft hyphen candidate in the 4096-byte line buffer"]
 fn soft_hyphen_runs_lay_out_in_time_comparable_to_other_break_opportunities() {
     let (_, control) = time(&"ab\u{200b}".repeat(600));
     let (pages, soft) = time(&"ab\u{ad}".repeat(600));
@@ -50,7 +49,6 @@ fn soft_hyphen_runs_lay_out_in_time_comparable_to_other_break_opportunities() {
 /// Layout of one unbreakable word should grow linearly with its length:
 /// four times the text in about four times the time.
 #[test]
-#[ignore = "bug: each line of an unbreakable word scans the rest of the paragraph for a break opportunity"]
 fn unbreakable_words_lay_out_in_linear_time() {
     let (_, small) = time(&"a".repeat(128 * 1024));
     let (_, large) = time(&"a".repeat(512 * 1024));

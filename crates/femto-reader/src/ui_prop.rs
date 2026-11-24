@@ -90,9 +90,6 @@ pub(super) struct Config {
     pub services: bool,
     pub landscape: bool,
     pub status_line: bool,
-    /// Ask about a sync conflict only over the reading page, as the sync
-    /// session does.
-    pub guarded_conflict: bool,
     /// What the three reading gestures do, when not the defaults.
     pub gestures: Option<[usize; 3]>,
 }
@@ -101,7 +98,6 @@ pub(super) struct Config {
 /// past them.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Checks {
-    pub selection: bool,
     pub honest_effect: bool,
     pub depth: bool,
     pub conflict_answered: bool,
@@ -114,13 +110,12 @@ pub(super) struct Checks {
 impl Checks {
     #[allow(dead_code)]
     pub const ALL: Self = Self {
-        selection: true,
         honest_effect: true,
         depth: true,
         conflict_answered: true,
         pages: true,
-        shrinking_rows: false,
-        keyboard_taps: false,
+        shrinking_rows: true,
+        keyboard_taps: true,
     };
 }
 
@@ -513,15 +508,20 @@ impl Harness {
         self.ui.is_busy()
     }
 
+    /// The selection the interface acts on and draws: the stored one, kept
+    /// within the entries there are now.
+    fn selected(&self) -> usize {
+        self.ui.menu(&self.reader).1
+    }
+
     fn step(&mut self, op: &Op) -> Check {
         let panel = self.ui.panel;
-        let selected = self.ui.selected;
         let busy = self.busy();
         let editing = self.ui.is_editing();
         let position = self.reader.position();
         let page = self.reader.page_index();
         let book_id = self.reader.document.metadata.id.clone();
-        let entries = self.ui.entries(&self.reader);
+        let (entries, selected) = self.ui.menu(&self.reader);
         let count = entries.len();
         let bookmarks = |reader: &Reader| -> Vec<Locator> {
             reader
@@ -554,16 +554,12 @@ impl Harness {
                     } else {
                         selected.saturating_sub(1)
                     };
-                    // A selection already out of range is reported by the
-                    // range invariant.
-                    if selected < count.max(1) {
-                        ensure!(
-                            self.ui.selected == expected && self.ui.panel == panel,
-                            "turn in {} moved {selected} to {} of {count}",
-                            name(panel),
-                            self.ui.selected
-                        );
-                    }
+                    ensure!(
+                        self.selected() == expected && self.ui.panel == panel,
+                        "turn in {} moved {selected} to {} of {count}",
+                        name(panel),
+                        self.selected()
+                    );
                     ensure!(
                         self.reader.position() == position,
                         "a menu turn moved the book"
@@ -591,14 +587,12 @@ impl Harness {
                         at.saturating_sub(1)
                     };
                     let expected = if target == at { selected } else { target * items };
-                    if selected < count.max(1) {
-                        ensure!(
-                            self.ui.selected == expected && self.ui.panel == panel,
-                            "swipe in {} moved {selected} to {} of {count}",
-                            name(panel),
-                            self.ui.selected
-                        );
-                    }
+                    ensure!(
+                        self.selected() == expected && self.ui.panel == panel,
+                        "swipe in {} moved {selected} to {} of {count}",
+                        name(panel),
+                        self.selected()
+                    );
                     ensure!(
                         self.reader.position() == position,
                         "a menu swipe moved the book"
@@ -613,10 +607,10 @@ impl Harness {
                 } else {
                     let target = usize::from(*index) % count;
                     for _ in 0..count {
-                        if self.ui.selected == target {
+                        if self.selected() == target {
                             break;
                         }
-                        let next = self.ui.selected < target;
+                        let next = self.selected() < target;
                         self.ui.turn(&mut self.reader, next).map_err(|e| e.to_string())?;
                     }
                     let label = entries[target].0.clone();
@@ -625,7 +619,7 @@ impl Harness {
                         _ => None,
                     };
                     effect = Some(self.ui.select(&mut self.reader));
-                    if let (Some((setting, before)), true) = (slider, self.ui.selected == target) {
+                    if let (Some((setting, before)), true) = (slider, self.selected() == target) {
                         self.stats.slider_steps += 1;
                         if matches!(
                             setting,
@@ -722,7 +716,7 @@ impl Harness {
                 if panel.is_some() {
                     ensure!(
                         self.ui.panel == panel
-                            && self.ui.selected == selected
+                            && self.selected() == selected
                             && self.reader.position() == position
                             && self.reader.state.frontlight == light,
                         "a gesture acted inside a menu"
@@ -773,8 +767,14 @@ impl Harness {
             }
             Op::AskConflict(remote, local) => {
                 input = false;
-                if !self.config.guarded_conflict || !self.ui.is_open() {
-                    self.ui.ask_sync_conflict(*remote, *local);
+                let asks = !self.ui.is_open() && !busy;
+                ensure!(
+                    self.ui.ask_sync_conflict(*remote, *local) == asks,
+                    "the sync question was {} in {}",
+                    if asks { "refused" } else { "asked" },
+                    name(panel)
+                );
+                if asks {
                     self.asked = true;
                     self.stats.conflicts += 1;
                 }
@@ -871,7 +871,7 @@ impl Harness {
             ensure!(
                 effect == Some(Effect::Unchanged)
                     && self.ui.panel == panel
-                    && self.ui.selected == selected
+                    && self.selected() == selected
                     && self.reader.position() == position,
                 "input acted while work was pending"
             );
@@ -953,20 +953,6 @@ impl Harness {
         }
         if matches!(self.ui.panel, Some(Panel::LinkPreview)) {
             ensure!(self.ui.preview.is_some(), "preview panel without a preview");
-        }
-        let shown = self.ui.entries(&self.reader).len();
-        if self.checks.selection
-            && !matches!(
-                self.ui.panel,
-                None | Some(Panel::SelectWord | Panel::LinkPreview)
-            )
-        {
-            ensure!(
-                self.ui.selected < shown.max(1),
-                "selection {} of {shown} in {} after {op:?}",
-                self.ui.selected,
-                name(self.ui.panel)
-            );
         }
         let frame = self
             .ui
@@ -1149,7 +1135,6 @@ fn config() -> impl Strategy<Value = Config> {
             services,
             landscape,
             status_line,
-            guarded_conflict: true,
             gestures,
         })
 }
@@ -1182,13 +1167,12 @@ fn checks() -> Checks {
     let strict = std::env::var("FEMTO_PROP_STRICT").unwrap_or_default();
     let on = |name: &str| strict.split(',').any(|s| s == name || s == "all");
     Checks {
-        selection: on("selection"),
         honest_effect: on("effect"),
         depth: on("depth"),
         conflict_answered: on("conflict"),
         pages: true,
-        shrinking_rows: on("shrink"),
-        keyboard_taps: on("keys"),
+        shrinking_rows: true,
+        keyboard_taps: true,
     }
 }
 
@@ -1211,7 +1195,6 @@ fn coverage_of_generated_histories() {
     let mut total = Stats::default();
     let mut failures = std::collections::BTreeMap::<String, usize>::new();
     let relaxed = Checks {
-        selection: false,
         honest_effect: false,
         depth: false,
         conflict_answered: false,

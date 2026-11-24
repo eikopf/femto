@@ -251,7 +251,7 @@ proptest! {
         for (listed, entry) in listed.iter().zip(&entries) {
             prop_assert_eq!(&listed.filename, &entry.name);
             prop_assert_eq!(listed.uncompressed_size, entry.data.len() as u64);
-            // A byte to spare: see `a_buffer_of_the_exact_size_is_enough`.
+            // A byte to spare; `a_buffer_of_the_exact_size_is_enough` has none.
             let mut buffer = vec![0xaa; entry.data.len() + 1];
             let count = zip.read_file(listed, &mut buffer).unwrap();
             prop_assert_eq!(&buffer[..count], &entry.data[..]);
@@ -269,7 +269,6 @@ proptest! {
     /// A name finds the entry of that name when there is one. Names that
     /// differ only in case are different files (EPUB OCF 3.3 section 4.2.2).
     #[test]
-    #[ignore = "bug: get_entry returns an earlier entry whose name differs only in case or by a leading slash"]
     fn a_name_finds_its_own_entry(entries in entries()) {
         let zip = open(archive(&entries, 0, 0).bytes).unwrap();
         for entry in &entries {
@@ -311,11 +310,8 @@ proptest! {
             let mut written = Vec::new();
             if let Ok(count) = zip.read_file_to_writer(&listed, &mut written) {
                 prop_assert_eq!(count, written.len());
-                // Known: a deflated entry may inflate past its stated size;
-                // see `an_entry_that_inflates_past_its_stated_size_is_refused`.
-                if listed.method != 8 {
-                    prop_assert!(written.len() <= LIMIT, "{} bytes read with a limit of {}", written.len(), LIMIT);
-                }
+                prop_assert!(written.len() <= LIMIT, "{} bytes read with a limit of {}", written.len(), LIMIT);
+                prop_assert_eq!(written.len() as u64, listed.uncompressed_size);
             }
         }
     }
@@ -381,7 +377,6 @@ fn stored(name: &str, data: &[u8]) -> Entry {
 }
 
 #[test]
-#[ignore = "bug: get_entry returns an earlier entry whose name differs only in case"]
 fn names_that_differ_in_case_are_different_files() {
     let entries = [
         stored("OEBPS/Chapter.xhtml", b"upper"),
@@ -428,7 +423,6 @@ fn inflating(stated: u32, actual: usize, checksum: bool) -> (Vec<Entry>, Vec<u8>
 /// file size allowed for reads". The size checked is the one the directory
 /// states; what the entry inflates to is not counted.
 #[test]
-#[ignore = "bug: a deflated entry is inflated past its stated size and past the read limit"]
 fn an_entry_that_inflates_past_its_stated_size_is_refused() {
     for checksum in [true, false] {
         let (_, bytes) = inflating(16, 8 * LIMIT, checksum);
@@ -450,7 +444,6 @@ fn an_entry_that_inflates_past_its_stated_size_is_refused() {
 /// `Document::resource` "reads an archive resource with an explicit size cap"
 /// of `image::MAX_ENCODED_BYTES`.
 #[test]
-#[ignore = "bug: a resource larger than the cap is returned whole when the archive understates its size"]
 fn a_resource_is_never_larger_than_the_cap() {
     let cap = femto_reader::image::MAX_ENCODED_BYTES;
     let (_, bytes) = inflating(16, 4 * cap, false);
@@ -493,7 +486,6 @@ proptest! {
 
     /// A buffer of exactly the entry's size is large enough.
     #[test]
-    #[ignore = "bug: read_file refuses a buffer of exactly the entry's size when compressed bytes remain once it is full"]
     fn a_buffer_of_the_exact_size_is_enough(entries in entries()) {
         let mut zip = open(archive(&entries, 0, 0).bytes).unwrap();
         for (listed, entry) in zip.entries().cloned().collect::<Vec<_>>().iter().zip(&entries) {
@@ -508,7 +500,6 @@ proptest! {
 /// write it, and a file whose end-of-stream code falls in the read after
 /// the one that produced its last byte.
 #[test]
-#[ignore = "bug: read_file refuses a buffer of exactly the entry's size when compressed bytes remain once it is full"]
 fn deflated_entries_read_into_a_buffer_of_their_size() {
     // With the fixed code, 8191 literals end inside the 8192nd compressed
     // byte, the last of the first read; the end code spills into the next.

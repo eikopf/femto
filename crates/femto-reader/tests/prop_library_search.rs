@@ -97,7 +97,6 @@ proptest! {
 
     /// The same with capital sigma in the alphabet.
     #[test]
-    #[ignore = "bug: a query ending in capital sigma does not match the same letters inside a title"]
     fn a_piece_of_a_greek_title_finds_the_title(
         titles in prop::collection::vec(title(true), 1..4),
         which in any::<prop::sample::Index>(),
@@ -143,7 +142,6 @@ proptest! {
 /// folding (STRASSE does not match Straße); this case differs in that the
 /// query is a literal piece of the title.
 #[test]
-#[ignore = "bug: a query ending in capital sigma does not match the same letters inside a title"]
 fn capital_sigma_at_the_end_of_a_query_matches_inside_a_title() {
     let library = library(&["\u{39f}\u{394}\u{3a5}\u{3a3}\u{3a3}\u{395}\u{399}\u{391}".into()]);
     assert_eq!(found(&library, "\u{39f}\u{394}\u{3a5}").len(), 1);

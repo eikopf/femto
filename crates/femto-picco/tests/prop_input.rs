@@ -46,9 +46,9 @@ fn debounced(samples: &[Sample]) -> Vec<u8> {
     out
 }
 
-/// `strict`: a long press is only reported by a sample that still shows the
-/// button pressed.
-fn expected(samples: &[Sample], strict: bool) -> Vec<(usize, Press)> {
+/// A long press is only reported by a sample that still shows the button
+/// pressed.
+fn expected(samples: &[Sample]) -> Vec<(usize, Press)> {
     let stable = debounced(samples);
     let mut events = Vec::new();
     let mut i = 0;
@@ -63,9 +63,9 @@ fn expected(samples: &[Sample], strict: bool) -> Vec<(usize, Press)> {
             .unwrap_or(samples.len());
         if !samples[i].long {
             events.push((i, Press::Short(turn)));
-        } else if let Some(at) = (i..end).find(|&j| {
-            samples[j].t - samples[i].t >= 500 && (!strict || samples[j].value == stable[i])
-        }) {
+        } else if let Some(at) = (i..end)
+            .find(|&j| samples[j].t - samples[i].t >= 500 && samples[j].value == stable[i])
+        {
             events.push((at, Press::Long(turn)));
         } else if end < samples.len() && stable[end] == 0 {
             events.push((end, Press::Short(turn)));
@@ -128,18 +128,9 @@ fn trace() -> impl Strategy<Value = Vec<Sample>> {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(4000))]
 
-    /// Pins the present behaviour, in which a long press may be reported by a
-    /// sample that no longer shows the button. Once that is fixed, the strict
-    /// property below replaces this one.
     #[test]
-    fn events_match_the_episode_oracle(samples in trace()) {
-        prop_assert_eq!(actual(&samples), expected(&samples, false));
-    }
-
-    #[test]
-    #[ignore = "bug: a long press is reported by the sample that first shows the button released"]
     fn long_presses_are_reported_only_while_the_button_is_down(samples in trace()) {
-        prop_assert_eq!(actual(&samples), expected(&samples, true));
+        prop_assert_eq!(actual(&samples), expected(&samples));
     }
 
     /// Clean single-button presses separated by clean releases: one event each.
@@ -212,10 +203,9 @@ fn run(samples: &[(u64, u8)], long: bool) -> Vec<(u64, Press)> {
 
 /// The button is held from 0 to 450 ms, a short press. The poll after 450 ms
 /// is late (the input task also reads the battery, the touch controller and
-/// the frontlight on this thread) and already shows the button released, yet
-/// that very sample reports a long press, which menus treat as Back.
+/// the frontlight on this thread) and already shows the button released;
+/// that very sample reported a long press, which menus treat as Back.
 #[test]
-#[ignore = "bug: a long press is reported by the sample that first shows the button released"]
 fn late_sample_after_release_is_not_a_long_press() {
     let mut samples: Vec<(u64, u8)> = (0..=45).map(|i| (i * 10, 1)).collect();
     samples.extend([(540, 0), (550, 0), (560, 0), (570, 0), (580, 0)]);

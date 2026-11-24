@@ -39,8 +39,10 @@ impl Buttons {
     ///
     /// Without `long_presses` a press reports [`Press::Short`] as soon as it is
     /// stable, so reading has no release latency. With them, a short press is
-    /// reported on release and a long press at the threshold; the mode is
-    /// fixed when the press begins. Pressing both buttons reports nothing.
+    /// reported on release and a long press by the first sample at or past the
+    /// threshold that shows the button down, so a release first seen after
+    /// the threshold is a short press; the mode is fixed when the press
+    /// begins. Pressing both buttons reports nothing.
     pub fn sample(
         &mut self,
         previous: bool,
@@ -72,7 +74,11 @@ impl Buttons {
             self.held = Some((turn, now));
         }
         match self.held {
-            Some((turn, since)) if now.saturating_sub(since) >= LONG_PRESS_MS => {
+            // A sample that shows anything but the held button says nothing
+            // about how long it was down since the sample before.
+            Some((turn, since))
+                if value == self.stable && now.saturating_sub(since) >= LONG_PRESS_MS =>
+            {
                 self.held = None;
                 Some(Press::Long(turn))
             }

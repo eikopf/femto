@@ -89,6 +89,46 @@ fn long_presses_report_once_and_short_presses_wait_for_release() {
 }
 
 #[test]
+fn a_long_press_is_reported_only_by_a_sample_that_shows_the_button_down() {
+    let mut buttons = Buttons::default();
+    // Held for 450 ms. The next poll comes late, past the threshold, and
+    // shows the button released: the hold that was seen is a short press.
+    for now in (0..=450).step_by(10) {
+        assert_eq!(buttons.sample(true, false, now, true), None);
+    }
+    assert_eq!(buttons.sample(false, false, 540, true), None);
+    assert_eq!(buttons.sample(false, false, 560, true), None);
+    assert_eq!(
+        buttons.sample(false, false, 570, true),
+        Some(Press::Short(Turn::Previous))
+    );
+    assert_eq!(buttons.sample(false, false, 600, true), None);
+    // A late poll that shows only the other button reports nothing, as when
+    // both are seen pressed.
+    for now in (1000..=1450).step_by(10) {
+        assert_eq!(buttons.sample(false, true, now, true), None);
+    }
+    for now in [1540, 1570, 1600] {
+        assert_eq!(buttons.sample(true, false, now, true), None);
+    }
+    for now in [1610, 1640, 1700] {
+        assert_eq!(buttons.sample(false, false, now, true), None);
+    }
+    // A dropout shorter than the debounce interval does not end the press;
+    // the next sample that shows the button down reports it.
+    for now in (2000..=2520).step_by(10) {
+        assert_eq!(buttons.sample(false, true, now, true), None);
+    }
+    assert_eq!(buttons.sample(false, false, 2530, true), None);
+    assert_eq!(
+        buttons.sample(false, true, 2540, true),
+        Some(Press::Long(Turn::Next))
+    );
+    assert_eq!(buttons.sample(false, false, 2550, true), None);
+    assert_eq!(buttons.sample(false, false, 2580, true), None);
+}
+
+#[test]
 fn view_barrier_suppresses_transition_events_and_requires_button_release() {
     use femto_picco_board::input::ViewGate;
     let mut view = ViewGate::default();

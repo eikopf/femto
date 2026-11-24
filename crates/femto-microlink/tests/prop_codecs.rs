@@ -30,8 +30,8 @@ enum End {
 
 fn header_ok(kind: u8, length: usize) -> bool {
     match kind {
-        1 | 2 | 3 | 4 => false,
-        5 => length >= 32 && length <= 32 + MAX_DATAGRAM,
+        1..=4 => false,
+        5 => (32..=32 + MAX_DATAGRAM).contains(&length),
         6 => length == 0,
         8 => length == 32 || length == 33,
         0x12 | 0x13 | 0x15 => length == 8,
@@ -105,7 +105,7 @@ fn body(range: impl Into<prop::collection::SizeRange>) -> impl Strategy<Value = 
 fn valid_frame() -> BoxedStrategy<Vec<u8>> {
     prop_oneof![
         3 => prop_oneof![Just(32usize), Just(33), Just(32 + MAX_DATAGRAM), 32..200usize, 32..=32 + MAX_DATAGRAM]
-            .prop_flat_map(|n| body(n)).prop_map(|b| frame(5, &b)),
+            .prop_flat_map(body).prop_map(|b| frame(5, &b)),
         2 => Just(frame(6, &[])),
         2 => body(32..=33).prop_map(|b| frame(8, &b)),
         2 => body(8).prop_map(|b| frame(0x12, &b)),
@@ -123,10 +123,14 @@ fn valid_frame() -> BoxedStrategy<Vec<u8>> {
 fn invalid_frame() -> impl Strategy<Value = Vec<u8>> {
     prop_oneof![
         (1..=4u8, 0..300usize).prop_map(|(k, n)| frame(k, &vec![0; n])),
-        prop_oneof![Just(31usize), Just(33 + MAX_DATAGRAM), Just(0)].prop_map(|n| frame(5, &vec![1; n])),
+        prop_oneof![Just(31usize), Just(33 + MAX_DATAGRAM), Just(0)]
+            .prop_map(|n| frame(5, &vec![1; n])),
         Just(frame(6, &[0])),
         prop_oneof![Just(31usize), Just(34)].prop_map(|n| frame(8, &vec![1; n])),
-        (prop_oneof![Just(0x12u8), Just(0x13), Just(0x15)], prop_oneof![Just(7usize), Just(9)])
+        (
+            prop_oneof![Just(0x12u8), Just(0x13), Just(0x15)],
+            prop_oneof![Just(7usize), Just(9)]
+        )
             .prop_map(|(k, n)| frame(k, &vec![1; n])),
         Just(frame(0x14, &[b'h'; 1025])),
         Just(frame(0x14, &[0xff, 0xfe])),
@@ -140,7 +144,9 @@ fn invalid_frame() -> impl Strategy<Value = Vec<u8>> {
 }
 
 fn wire() -> impl Strategy<Value = Vec<u8>> {
-    let frames = prop::collection::vec(valid_frame(), 0..8).prop_map(|f| f.concat()).boxed();
+    let frames = prop::collection::vec(valid_frame(), 0..8)
+        .prop_map(|f| f.concat())
+        .boxed();
     prop_oneof![
         4 => frames.clone(),
         // valid frames, one invalid frame, more bytes
@@ -200,7 +206,11 @@ fn decode(pieces: &[&[u8]]) -> (Vec<Option<Event>>, usize, End) {
                     // Errors are terminal.
                     assert!(decoder.feed(&[6, 0, 0, 0, 0], 0).is_err());
                     assert!(decoder.maintain(0).is_err());
-                    let events = events.into_iter().filter_map(|(_, e)| e).map(Some).collect();
+                    let events = events
+                        .into_iter()
+                        .filter_map(|(_, e)| e)
+                        .map(Some)
+                        .collect();
                     return (events, consumed, End::Invalid);
                 }
             }
@@ -211,7 +221,11 @@ fn decode(pieces: &[&[u8]]) -> (Vec<Option<Event>>, usize, End) {
     } else {
         End::Partial
     };
-    let events = events.into_iter().filter_map(|(_, e)| e).map(Some).collect();
+    let events = events
+        .into_iter()
+        .filter_map(|(_, e)| e)
+        .map(Some)
+        .collect();
     (events, consumed, end)
 }
 
@@ -325,8 +339,11 @@ fn map_wire() -> impl Strategy<Value = Vec<u8>> {
         6 => body(1..40).prop_map(|b| map_frame(&b)),
         1 => Just(map_frame(&vec![7; MAX_MAP_BYTES])),
         1 => Just(map_frame(&[1])),
-    ].boxed();
-    let frames = prop::collection::vec(one.clone(), 0..6).prop_map(|f| f.concat()).boxed();
+    ]
+    .boxed();
+    let frames = prop::collection::vec(one.clone(), 0..6)
+        .prop_map(|f| f.concat())
+        .boxed();
     let bad = prop_oneof![
         Just(0u32.to_le_bytes().to_vec()),
         Just((MAX_MAP_BYTES as u32 + 1).to_le_bytes().to_vec()),

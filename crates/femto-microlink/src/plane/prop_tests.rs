@@ -93,7 +93,15 @@ impl Rule {
     }
 }
 fn address() -> impl Strategy<Value = Address> {
-    let host = prop_oneof![Just(0u8), Just(1), Just(2), Just(3), Just(4), Just(5), Just(9)];
+    let host = prop_oneof![
+        Just(0u8),
+        Just(1),
+        Just(2),
+        Just(3),
+        Just(4),
+        Just(5),
+        Just(9)
+    ];
     prop_oneof![
         3 => Just(Address::Star),
         3 => host.clone().prop_map(|h| Address::Single(ip(h))),
@@ -107,12 +115,29 @@ fn address() -> impl Strategy<Value = Address> {
     ]
 }
 fn port() -> impl Strategy<Value = u16> {
-    prop_oneof![Just(0u16), Just(1), Just(79), Just(80), Just(81), Just(1234), Just(40000), Just(40001), Just(65535)]
+    prop_oneof![
+        Just(0u16),
+        Just(1),
+        Just(79),
+        Just(80),
+        Just(81),
+        Just(1234),
+        Just(40000),
+        Just(40001),
+        Just(65535)
+    ]
 }
 fn rule() -> impl Strategy<Value = Rule> {
     (
         prop::collection::vec(address(), 1..3),
-        prop::collection::vec((address(), prop_oneof![port(), Just(0u16)], prop_oneof![port(), Just(65535u16)]), 1..3),
+        prop::collection::vec(
+            (
+                address(),
+                prop_oneof![port(), Just(0u16)],
+                prop_oneof![port(), Just(65535u16)],
+            ),
+            1..3,
+        ),
         prop::option::of(prop::collection::vec(
             prop_oneof![Just(1u8), Just(6), Just(17), Just(47)],
             0..3,
@@ -143,7 +168,10 @@ impl Update {
     fn json(&self) -> Vec<u8> {
         let mut map = serde_json::Map::new();
         if let Some(base) = &self.base {
-            map.insert("PacketFilter".into(), json!(base.iter().map(Rule::json).collect::<Vec<_>>()));
+            map.insert(
+                "PacketFilter".into(),
+                json!(base.iter().map(Rule::json).collect::<Vec<_>>()),
+            );
         }
         let mut named = serde_json::Map::new();
         if self.clear {
@@ -218,10 +246,21 @@ enum Header {
 #[derive(Clone, Debug)]
 enum Transport {
     /// `length` is the whole segment; `offset` the header length in words.
-    Tcp { flags: u8, offset: u8, length: usize, checksum: bool },
+    Tcp {
+        flags: u8,
+        offset: u8,
+        length: usize,
+        checksum: bool,
+    },
     /// `declared` is added to the true length in the UDP length field.
-    Udp { length: usize, declared: i32, checksum: bool },
-    Icmp { length: usize },
+    Udp {
+        length: usize,
+        declared: i32,
+        checksum: bool,
+    },
+    Icmp {
+        length: usize,
+    },
     Other(u8),
 }
 #[derive(Clone, Debug)]
@@ -267,7 +306,12 @@ impl Packet {
             total + u32::from(self.protocol()) + length as u32
         };
         let mut body = match &self.transport {
-            Transport::Tcp { flags, offset, length, checksum } => {
+            Transport::Tcp {
+                flags,
+                offset,
+                length,
+                checksum,
+            } => {
                 let mut tcp = vec![0u8; *length];
                 let mut header = [0u8; 20];
                 header[..2].copy_from_slice(&self.source.port().to_be_bytes());
@@ -285,7 +329,11 @@ impl Packet {
                 }
                 tcp
             }
-            Transport::Udp { length, declared, checksum } => {
+            Transport::Udp {
+                length,
+                declared,
+                checksum,
+            } => {
                 let mut udp = vec![0u8; *length];
                 let mut header = [0u8; 8];
                 header[..2].copy_from_slice(&self.source.port().to_be_bytes());
@@ -327,7 +375,11 @@ impl Packet {
         bytes[12..16].copy_from_slice(&source);
         bytes[16..20].copy_from_slice(&destination);
         let good = sum(&bytes, 0);
-        let value = if self.header_checksum { good } else { spoil(good) };
+        let value = if self.header_checksum {
+            good
+        } else {
+            spoil(good)
+        };
         bytes[10..12].copy_from_slice(&value.to_be_bytes());
         bytes.append(&mut body);
         if self.header == Header::TrailingByte {
@@ -343,7 +395,9 @@ impl Packet {
                 Transport::Tcp { offset, length, .. } => {
                     length >= 20 && offset >= 5 && usize::from(offset) * 4 <= length
                 }
-                Transport::Udp { length, declared, .. } => length >= 8 && declared == 0,
+                Transport::Udp {
+                    length, declared, ..
+                } => length >= 8 && declared == 0,
                 Transport::Icmp { length } => length >= 8,
                 Transport::Other(_) => false,
             }
@@ -373,8 +427,17 @@ fn packet() -> impl Strategy<Value = (Packet, Option<prop::sample::Index>)> {
         1 => Just(Header::TotalTooLong),
     ];
     let flags = prop_oneof![
-        Just(SYN), Just(ACK), Just(SYN | ACK), Just(RST), Just(RST | ACK), Just(SYN | RST),
-        Just(SYN | RST | ACK), Just(FIN), Just(FIN | ACK), Just(0u8), Just(ACK | 8),
+        Just(SYN),
+        Just(ACK),
+        Just(SYN | ACK),
+        Just(RST),
+        Just(RST | ACK),
+        Just(SYN | RST),
+        Just(SYN | RST | ACK),
+        Just(FIN),
+        Just(FIN | ACK),
+        Just(0u8),
+        Just(ACK | 8),
     ];
     let transport = prop_oneof![
         5 => (flags, prop_oneof![8 => Just((5u8, 20usize)), 2 => Just((5, 27)), 1 => Just((6, 24)),
@@ -398,7 +461,16 @@ fn packet() -> impl Strategy<Value = (Packet, Option<prop::sample::Index>)> {
         prop::option::weighted(0.45, any::<prop::sample::Index>()),
     )
         .prop_map(
-            |((peer, host), source_port, local, local_port, header, header_checksum, transport, aim)| {
+            |(
+                (peer, host),
+                source_port,
+                local,
+                local_port,
+                header,
+                header_checksum,
+                transport,
+                aim,
+            )| {
                 let packet = Packet {
                     peer,
                     source: SocketAddrV4::new(ip(host), source_port),
@@ -434,13 +506,15 @@ fn flow() -> impl Strategy<Value = Flow> {
         prop::bool::weighted(0.8),
         prop_oneof![Just(0u64), Just(1), Just(50)],
     )
-        .prop_map(|((peer, host), local_port, remote_port, alive, queued)| Flow {
-            peer,
-            local_port,
-            remote: SocketAddrV4::new(ip(host), remote_port),
-            alive,
-            queued,
-        })
+        .prop_map(
+            |((peer, host), local_port, remote_port, alive, queued)| Flow {
+                peer,
+                local_port,
+                remote: SocketAddrV4::new(ip(host), remote_port),
+                alive,
+                queued,
+            },
+        )
 }
 
 #[derive(Clone, Debug)]
@@ -530,12 +604,17 @@ impl Scenario {
         match packet.transport {
             // "Reply admission requires valid IPv4 and TCP checksums and an
             // ACK or RST; bare SYN and SYN+RST are rejected."
-            Transport::Tcp { flags, checksum, .. }
-                if packet.header_checksum
-                    && checksum
-                    && flags & (ACK | RST) != 0
-                    && !(flags & SYN != 0 && (flags & ACK == 0 || flags & RST != 0))
-                    && self.tcp.iter().filter(|flow| flow.alive).any(|flow| same(&flow)) =>
+            Transport::Tcp {
+                flags, checksum, ..
+            } if packet.header_checksum
+                && checksum
+                && flags & (ACK | RST) != 0
+                && !(flags & SYN != 0 && (flags & ACK == 0 || flags & RST != 0))
+                && self
+                    .tcp
+                    .iter()
+                    .filter(|flow| flow.alive)
+                    .any(|flow| same(&flow)) =>
             {
                 Verdict::TcpReply
             }
@@ -572,7 +651,13 @@ impl Scenario {
         for (index, update) in self.updates.iter().enumerate() {
             let upserts: &[Peer] = if index == 0 { &peers } else { &[] };
             plane
-                .apply_update(update.full, upserts, &[], &update.json(), 1000 + index as u64)
+                .apply_update(
+                    update.full,
+                    upserts,
+                    &[],
+                    &update.json(),
+                    1000 + index as u64,
+                )
                 .unwrap();
             update.apply(&mut groups);
         }
@@ -595,7 +680,13 @@ impl Scenario {
             let socket = bindings.bind(1000 + index as u16).unwrap();
             let local = SocketAddrV4::new(LOCAL, flow.local_port);
             let reply = plane
-                .prepare_udp_reply(key(flow.peer), socket, local, flow.remote, START + flow.queued)
+                .prepare_udp_reply(
+                    key(flow.peer),
+                    socket,
+                    local,
+                    flow.remote,
+                    START + flow.queued,
+                )
                 .unwrap();
             plane.commit_udp_reply(reply).unwrap();
         }

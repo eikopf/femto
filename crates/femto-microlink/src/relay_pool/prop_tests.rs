@@ -153,10 +153,15 @@ enum Step {
     /// This node queues a datagram.
     Send(u8, Vec<u8>),
     /// One poll: read limits, output bytes accepted, whether output flushes.
-    Poll { reads: Vec<usize>, accept: usize, flushed: bool },
+    Poll {
+        reads: Vec<usize>,
+        accept: usize,
+        flushed: bool,
+    },
 }
 fn step() -> impl Strategy<Value = Step> {
-    let read = prop_oneof![3 => Just(usize::MAX), 2 => 1..8usize, 1 => Just(0usize), 1 => Just(700usize)];
+    let read =
+        prop_oneof![3 => Just(usize::MAX), 2 => 1..8usize, 1 => Just(0usize), 1 => Just(700usize)];
     let accept = prop_oneof![4 => Just(usize::MAX), 2 => Just(0usize), 2 => 1..50usize];
     prop_oneof![
         2 => prop::collection::vec(incoming(), 1..4).prop_map(Step::Deliver),
@@ -170,7 +175,11 @@ fn step() -> impl Strategy<Value = Step> {
 /// Runs the steps, then lets the connection finish everything it holds.
 /// `tolerate_ping_overflow` ends the case at the known refusal of a ping
 /// that arrives while two output frames wait (see the regression test).
-fn run(steps: &[Step], end_of_stream: bool, tolerate_ping_overflow: bool) -> Result<(), TestCaseError> {
+fn run(
+    steps: &[Step],
+    end_of_stream: bool,
+    tolerate_ping_overflow: bool,
+) -> Result<(), TestCaseError> {
     let mut connection = Connection {
         tls: Script::default(),
         decoder: Decoder::default(),
@@ -195,9 +204,9 @@ fn run(steps: &[Step], end_of_stream: bool, tolerate_ping_overflow: bool) -> Res
             .count()
     };
     let poll = |connection: &mut Connection<Script>,
-                    owed: &mut VecDeque<Event>,
-                    queued: &mut Vec<Vec<u8>>,
-                    now: u64|
+                owed: &mut VecDeque<Event>,
+                queued: &mut Vec<Vec<u8>>,
+                now: u64|
      -> Result<bool, TestCaseError> {
         let before = waiting(connection, queued);
         match connection.poll(now) {
@@ -225,7 +234,9 @@ fn run(steps: &[Step], end_of_stream: bool, tolerate_ping_overflow: bool) -> Res
                 if tolerate_ping_overflow && ping_next && before >= 2 {
                     return Ok(false);
                 }
-                Err(TestCaseError::fail(format!("poll failed with {before} unflushed frames: {error}")))
+                Err(TestCaseError::fail(format!(
+                    "poll failed with {before} unflushed frames: {error}"
+                )))
             }
         }
     };
@@ -243,14 +254,19 @@ fn run(steps: &[Step], end_of_stream: bool, tolerate_ping_overflow: bool) -> Res
                 let busy = waiting(&connection, &queued) >= 2;
                 match connection.send(PublicKey::from_bytes([*peer; 32]), payload, now) {
                     Ok(()) => queued.push(
-                        derp_frames::send_packet(PublicKey::from_bytes([*peer; 32]), payload).unwrap(),
+                        derp_frames::send_packet(PublicKey::from_bytes([*peer; 32]), payload)
+                            .unwrap(),
                     ),
                     Err(Error::Busy) => prop_assert!(busy, "refused with room in the queue"),
                     Err(error) => prop_assert!(false, "send failed: {error}"),
                 }
                 prop_assert!(!connection.closed);
             }
-            Step::Poll { reads, accept, flushed } => {
+            Step::Poll {
+                reads,
+                accept,
+                flushed,
+            } => {
                 connection.tls.reads = reads.iter().copied().collect();
                 connection.tls.accept = *accept;
                 connection.tls.flushed = *flushed;
@@ -260,7 +276,10 @@ fn run(steps: &[Step], end_of_stream: bool, tolerate_ping_overflow: bool) -> Res
             }
         }
         let expected = queued.concat();
-        prop_assert!(expected.starts_with(&connection.tls.wire), "output is not the queued frames in order");
+        prop_assert!(
+            expected.starts_with(&connection.tls.wire),
+            "output is not the queued frames in order"
+        );
     }
     // Nothing in the way any more: everything owed arrives within a bounded
     // number of polls.
@@ -314,7 +333,11 @@ fn ping_while_two_datagrams_wait_does_not_close_the_connection() {
         Step::Send(1, vec![2]),
         Step::Deliver(vec![Incoming::Ping([7; 8])]),
         // The socket takes no output on this poll.
-        Step::Poll { reads: vec![], accept: 0, flushed: false },
+        Step::Poll {
+            reads: vec![],
+            accept: 0,
+            flushed: false,
+        },
     ];
     run(&steps, false, false).unwrap();
 }

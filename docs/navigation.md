@@ -45,7 +45,7 @@ This book, Go to lists places 5% of the book apart and opens on the one being re
 
 Settings, Status line shows the progress estimate at the bottom left of the reading page and the battery charge with a small cell symbol at the bottom right. The layout keeps the bottom 32 rows free of book content for it (`LayoutConfig::footer`); these overlap the bottom margin, so a deeper margin is unchanged and a shallower one gives way. The line is drawn only when the page is, and adds no display refreshes. Changing the setting lays the book out again.
 
-The sleep page is the book's cover, reduced to fit the screen and centered; a smaller cover keeps its size. A book with no cover, or with one the image limits refuse (over 2 MiB encoded or one megapixel), shows its title, author and progress as before.
+The sleep page is the book's cover, reduced to fit the screen and centered; a smaller cover keeps its size. A cover may be larger than an image on a page, up to four megapixels, since it is decoded when little else is; its pixels are allocated fallibly with room to spare, so a cover the device has no memory for is refused and not fatal. A progressive JPEG over one megapixel is refused, because it needs memory for every coefficient at once. A book with no cover, or with one refused, shows its title, author and progress as before.
 
 Host tests cover all three. On the Picco the status line and Go to were checked from framebuffer dumps; the cover sleep page was not, because the framebuffer cannot be read while the reader sleeps.
 

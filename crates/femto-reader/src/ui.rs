@@ -192,9 +192,15 @@ impl Gesture {
 /// smaller than the screen keeps its size.
 fn sleep_cover(reader: &mut Reader, levels: u16) -> Option<Vec<u8>> {
     let (width, height) = (reader.state.layout.width, reader.state.layout.height);
-    let cover = crate::image::decode(&reader.document.cover()?).ok()?;
-    let size = cover.size.fit(width, height).ok()?;
-    let cover = cover.resize(size).ok()?;
+    let cover =
+        crate::image::decode_within(&reader.document.cover()?, crate::image::Limits::ALONE).ok()?;
+    let size = cover.size.reduced(width, height).ok()?;
+    // The full-size cover is released before the page is made.
+    let cover = {
+        let reduced = cover.resize(size).ok()?;
+        drop(cover);
+        reduced
+    };
     let mut pixels = vec![255; (width * height) as usize];
     let (left, top) = ((width - size.width) / 2, (height - size.height) / 2);
     for (row, source) in cover.pixels.chunks_exact(size.width as usize).enumerate() {

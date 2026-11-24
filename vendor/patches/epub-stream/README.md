@@ -17,7 +17,7 @@ This is the most heavily modified vendored crate: roughly 1,400 added lines acro
 The vendored directory is not a copy of the archive with edits; it is a reduced file set with a hand-written manifest.
 
 - Removed: `AGENTS.md`, `CHANGELOG.md`, `README.md`, `Cargo.lock`, `Cargo.toml.orig`, `.cargo_vcs_info.json`, `.gitignore`, `.github/`, `clippy.toml`, `justfile`, `benches/`, `docs/`, `scripts/`, `tests/`.
-- `Cargo.toml` is rewritten by hand. Compared field by field with the archive's manifest after patch 0001, the only differences are removals: the `[lib]`, `[[bin]]`, `[[test]]` and `[[bench]]` target tables, both dev-dependencies (`epub`, `epub-parser`), `description`, `readme`, `keywords`, `categories`, `exclude`, the docs.rs metadata and the `auto*`/`build` keys other than `autobins = false`. Dependencies and features are otherwise identical.
+- `Cargo.toml` is rewritten by hand. Compared field by field with the archive's manifest after patch 0001, the only differences are removals: the `[lib]`, `[[bin]]`, `[[test]]` and `[[bench]]` target tables, both dev-dependencies (`epub`, `epub-parser`), `description`, `readme`, `keywords`, `categories`, `exclude`, the docs.rs metadata and the `auto*`/`build` keys other than `autobins = false`. Dependencies and features are otherwise identical, except that `quick-xml` has its `escape-html` feature enabled (see 0006).
 - `src/bin/epub-stream.rs` is still present but is no longer a build target. `docs/dependencies.md` says the manifest "omits ... binary targets"; the source file was left behind.
 
 ## Patches
@@ -80,13 +80,21 @@ Points the unit tests in `src/book.rs` at `tests/fixtures/book-api.epub` and `bo
 - Evidence: source check. The archive's manifest has `exclude = ["tests/fixtures/"]` and the tests open files under that path.
 - Upstream: femto-specific. The paths only resolve inside this repository.
 
+### 0006-books-in-circulation
+
+Accepts trailing whitespace after `application/epub+zip` in the `mimetype` entry, and raises the central directory cache from 256 to 2048 entries. The hand-written manifest also enables `quick-xml`'s `escape-html` feature, so that HTML named entities resolve.
+
+- Why: of the 110 EPUBs in one library, two had a line break after the mimetype and did not open, two had more than 256 archive entries (302 and 437) and lost the files past the limit, and six used entities such as `&nbsp;` and `&iuml;` and lost the chapters that did.
+- Evidence: `crates/femto-reader/tests/library_sweep.rs` run over that library before and after; a unit test for the mimetype in `src/zip.rs`.
+- Upstream: upstreamable.
+
 ## Dependencies between patches
 
-0001 is independent of the rest. 0002 and 0003 are independent of each other in behaviour. 0004 applies on top of 0002 and 0003 because it touches neighbouring lines. 0005 depends on 0004 for one hunk (a test `match` that lists the new `StyledEventOrRun` variants was placed in 0004 so that each state compiles). The library type-checks after each patch.
+0001 is independent of the rest. 0002 and 0003 are independent of each other in behaviour. 0004 applies on top of 0002 and 0003 because it touches neighbouring lines. 0006 is independent of the rest. 0005 depends on 0004 for one hunk (a test `match` that lists the new `StyledEventOrRun` variants was placed in 0004 so that each state compiles). The library type-checks after each patch.
 
 ## Verification
 
-Applying 0001 to 0005 in order to the extracted archive reproduces every file under `vendor/epub-stream/src` and `LICENSE` byte for byte. The remaining `diff -r` output is exactly the removed files listed above plus `Cargo.toml`, which was compared structurally (parsed as TOML, dependency tables normalised) with the result described under "Differences that are not patches". `cargo check --lib` passes after each patch with default features. The crate's tests were not run at intermediate states; `scripts/check` runs `cargo test --locked -p epub-stream --lib` on the final state.
+Applying 0001 to 0006 in order to the extracted archive reproduces every file under `vendor/epub-stream/src` and `LICENSE` byte for byte. The remaining `diff -r` output is exactly the removed files listed above plus `Cargo.toml`, which was compared structurally (parsed as TOML, dependency tables normalised) with the result described under "Differences that are not patches". `cargo check --lib` passes after each patch with default features. The crate's tests were not run at intermediate states; `scripts/check` runs `cargo test --locked -p epub-stream --lib` on the final state.
 
 ## Re-vendoring
 

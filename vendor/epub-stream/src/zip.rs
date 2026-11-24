@@ -1,7 +1,7 @@
 //! Streaming ZIP reader for EPUB files
 //!
 //! Memory-efficient ZIP reader that streams files without loading entire archive.
-//! Uses a heap-allocated central directory cache bounded to 256 entries.
+//! Uses a heap-allocated central directory cache bounded to 2048 entries.
 //! Supports DEFLATE decompression using miniz_oxide.
 
 extern crate alloc;
@@ -19,7 +19,7 @@ const DEFAULT_ZIP_SCRATCH_BYTES: usize = 2 * 1024;
 const DEFAULT_ZIP_SCRATCH_BYTES: usize = 8 * 1024;
 
 /// Maximum number of central directory entries to cache
-const MAX_CD_ENTRIES: usize = 256;
+const MAX_CD_ENTRIES: usize = 2048;
 
 /// Maximum filename length in ZIP entries
 const MAX_FILENAME_LEN: usize = 256;
@@ -882,8 +882,10 @@ impl<F: Read + Seek> StreamingZip<F> {
 
     /// Validate that the archive contains a valid EPUB mimetype file
     ///
-    /// Checks that a file named "mimetype" exists and its content is exactly
-    /// `application/epub+zip`, as required by the EPUB specification.
+    /// Checks that a file named "mimetype" exists and its content is
+    /// `application/epub+zip`. The specification allows nothing else in the
+    /// file, but books in circulation end it with a line break or spaces,
+    /// and other readers open them; trailing ASCII whitespace is accepted.
     pub fn validate_mimetype(&mut self) -> Result<(), ZipError> {
         let entry = self
             .get_entry("mimetype")
@@ -909,7 +911,7 @@ impl<F: Read + Seek> StreamingZip<F> {
             ZipError::InvalidMimetype("mimetype file is not valid UTF-8".to_string())
         })?;
 
-        if content != "application/epub+zip" {
+        if content.trim_end_matches([' ', '\t', '\r', '\n']) != "application/epub+zip" {
             return Err(ZipError::InvalidMimetype(format!(
                 "expected 'application/epub+zip', got '{}'",
                 content
@@ -1182,6 +1184,20 @@ mod tests {
         let cursor = std::io::Cursor::new(zip_data);
         let mut zip = StreamingZip::new(cursor).unwrap();
         assert!(zip.validate_mimetype().is_ok());
+    }
+
+    #[test]
+    fn test_validate_mimetype_accepts_trailing_whitespace_only() {
+        for (content, valid) in [
+            (&b"application/epub+zip\n"[..], true),
+            (b"application/epub+zip\r\n ", true),
+            (b" application/epub+zip", false),
+            (b"application/epub+zip\nx", false),
+        ] {
+            let cursor = std::io::Cursor::new(build_single_file_zip("mimetype", content));
+            let mut zip = StreamingZip::new(cursor).unwrap();
+            assert_eq!(zip.validate_mimetype().is_ok(), valid);
+        }
     }
 
     #[test]

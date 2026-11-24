@@ -413,7 +413,13 @@ fn embedded_device_text_uses_the_same_navigation_and_monochrome_rendering() {
         reader.dispatch(Action::Previous).unwrap();
     }
     assert_eq!(reader.render(2).unwrap(), first);
-    assert!(Document::from_text("too long", &"x".repeat(512 * 1024 + 1)).is_err());
+    assert!(
+        Document::from_text(
+            "too long",
+            &"x".repeat(femto_reader::document::MAX_CHAPTER_BYTES + 1)
+        )
+        .is_err()
+    );
 }
 
 #[test]

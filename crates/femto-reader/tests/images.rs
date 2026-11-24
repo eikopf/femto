@@ -297,3 +297,42 @@ fn asset_failures_are_reported_but_invalid_geometry_still_fails() {
     page.images = vec![page.images[0].clone(); 100];
     assert_eq!(render(&page).unwrap().warnings.len(), 64);
 }
+
+#[test]
+fn an_image_decoded_alone_may_be_larger_unless_it_is_progressive() {
+    let baseline = fs::read(fixture("large-baseline.jpg")).unwrap();
+    let progressive = fs::read(fixture("large-progressive.jpg")).unwrap();
+    // 1400x2100 is more than a page image may be.
+    assert!(image::decode(&baseline).is_err());
+    assert!(image::dimensions(&baseline).is_err());
+    let decoded = image::decode_within(&baseline, image::Limits::ALONE).unwrap();
+    assert_eq!(
+        decoded.size,
+        Size {
+            width: 1400,
+            height: 2100
+        }
+    );
+    // The gradient runs from black at the top to white at the bottom.
+    assert!(decoded.pixels[0] < 8 && *decoded.pixels.last().unwrap() > 247);
+    let reduced = decoded
+        .resize(decoded.size.reduced(480, 800).unwrap())
+        .unwrap();
+    assert_eq!(
+        reduced.size,
+        Size {
+            width: 480,
+            height: 720
+        }
+    );
+    assert!(decoded.size.fit(480, 800).is_err());
+    // A progressive image of that size needs its coefficients all at once.
+    assert!(image::decode_within(&progressive, image::Limits::ALONE).is_err());
+    assert!(
+        image::decode_within(
+            &fs::read(fixture("progressive.jpg")).unwrap(),
+            image::Limits::ALONE
+        )
+        .is_ok()
+    );
+}

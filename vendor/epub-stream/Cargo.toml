@@ -16,7 +16,7 @@ async = ["std", "dep:tokio"]
 cli = ["std"]
 
 [dependencies]
-quick-xml = { version = "0.39", default-features = false }
+quick-xml = { version = "0.39", default-features = false, features = ["escape-html"] }
 miniz_oxide = { version = "0.9", default-features = false, features = ["with-alloc"], optional = true }
 heapless = { version = "0.9", optional = true }
 crc32fast = { version = "1", default-features = false, optional = true }

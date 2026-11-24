@@ -13,6 +13,29 @@ pub const MAX_ENCODED_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_IMAGE_PIXELS: usize = 1024 * 1024;
 pub const MAX_DIMENSION: u32 = 8192;
 
+/// How large an image may be, encoded and decoded.
+#[derive(Clone, Copy)]
+pub struct Limits {
+    pub encoded: usize,
+    pub pixels: usize,
+}
+impl Limits {
+    /// An image on a page, decoded beside everything a page needs.
+    pub const PAGE: Self = Self {
+        encoded: MAX_ENCODED_BYTES,
+        pixels: MAX_IMAGE_PIXELS,
+    };
+    /// An image decoded when little else is, such as the cover behind the
+    /// sleep page. Covers are often two to four megapixels. The decoded
+    /// pixels are allocated fallibly, so an image the device has no room
+    /// for is refused and not fatal. The archive reader caps every entry at
+    /// the same encoded size as a page image.
+    pub const ALONE: Self = Self {
+        encoded: MAX_ENCODED_BYTES,
+        pixels: 4 * 1024 * 1024,
+    };
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Size {
     pub width: u32,
@@ -21,19 +44,28 @@ pub struct Size {
 
 impl Size {
     fn validate(self) -> Result<Self> {
+        self.within(MAX_IMAGE_PIXELS)
+    }
+    fn within(self, pixels: usize) -> Result<Self> {
         if self.width == 0
             || self.height == 0
             || self.width > MAX_DIMENSION
             || self.height > MAX_DIMENSION
-            || self.width as u64 * self.height as u64 > MAX_IMAGE_PIXELS as u64
+            || self.width as u64 * self.height as u64 > pixels as u64
         {
             return Err(Error::Limit("image dimensions"));
         }
         Ok(self)
     }
 
+    /// The size reduced to fit a box, for an image a page may hold.
     pub fn fit(self, max_width: u32, max_height: u32) -> Result<Self> {
         self.validate()?;
+        self.reduced(max_width, max_height)
+    }
+    /// The size reduced to fit a box; never enlarged.
+    pub fn reduced(self, max_width: u32, max_height: u32) -> Result<Self> {
+        self.within(usize::MAX)?;
         if max_width == 0 || max_height == 0 {
             return Err(Error::Layout("empty image box"));
         }
@@ -52,14 +84,49 @@ pub struct GrayImage {
     pub pixels: Vec<u8>,
 }
 
-fn encoded(bytes: &[u8]) -> Result<()> {
-    if bytes.len() > MAX_ENCODED_BYTES {
+fn encoded(bytes: &[u8], limits: Limits) -> Result<()> {
+    if bytes.len() > limits.encoded {
         return Err(Error::Limit("encoded image"));
     }
     Ok(())
 }
 
-fn png_reader(bytes: &[u8]) -> Result<png::Reader<Cursor<&[u8]>>> {
+/// A buffer for decoded pixels, refused when there is no memory for it or
+/// too little would be left beside it. What follows allocates infallibly:
+/// the decoder's working rows, and a copy reduced to the size of a screen.
+fn buffer(capacity: usize) -> Result<Vec<u8>> {
+    const BESIDE: usize = 768 * 1024;
+    let reserve = |bytes| {
+        let mut buffer = Vec::new();
+        buffer
+            .try_reserve_exact(bytes)
+            .map(|()| buffer)
+            .map_err(|_| Error::Limit("image memory"))
+    };
+    let pixels = reserve(capacity)?;
+    reserve(BESIDE)?;
+    Ok(pixels)
+}
+
+/// Whether a JPEG is progressive, which takes memory for every coefficient
+/// of the image at once and not only for its pixels.
+fn progressive(bytes: &[u8]) -> bool {
+    let mut at = 2;
+    while let Some(&[0xff, marker, high, low]) = bytes
+        .get(at..at + 4)
+        .and_then(|header| <&[u8; 4]>::try_from(header).ok())
+    {
+        match marker {
+            0xc2 | 0xc6 | 0xca | 0xce => return true,
+            // Another frame type, or the scan: the frame header has passed.
+            0xc0 | 0xc1 | 0xc3 | 0xc5 | 0xc7 | 0xc9 | 0xcb | 0xcd | 0xcf | 0xda => return false,
+            _ => at += 2 + usize::from(u16::from_be_bytes([high, low])),
+        }
+    }
+    false
+}
+
+fn png_reader(bytes: &[u8], limits: Limits) -> Result<png::Reader<Cursor<&[u8]>>> {
     let mut decoder = png::Decoder::new(Cursor::new(bytes));
     decoder.set_limits(png::Limits {
         bytes: 2 * 1024 * 1024,
@@ -75,13 +142,13 @@ fn png_reader(bytes: &[u8]) -> Result<png::Reader<Cursor<&[u8]>>> {
         width: reader.info().width,
         height: reader.info().height,
     }
-    .validate()?;
+    .within(limits.pixels)?;
     Ok(reader)
 }
 
 /// The decoder holds tens of kilobytes of tables. It stays on the heap so
 /// that callers do not each reserve a copy on a small device stack.
-fn jpeg_reader(bytes: &[u8]) -> Result<Box<JpegDecoder<ZCursor<&[u8]>>>> {
+fn jpeg_reader(bytes: &[u8], limits: Limits) -> Result<Box<JpegDecoder<ZCursor<&[u8]>>>> {
     let options = DecoderOptions::default()
         .set_max_width(MAX_DIMENSION as usize)
         .set_max_height(MAX_DIMENSION as usize)
@@ -97,20 +164,24 @@ fn jpeg_reader(bytes: &[u8]) -> Result<Box<JpegDecoder<ZCursor<&[u8]>>>> {
         width: info.width as u32,
         height: info.height as u32,
     }
-    .validate()?;
+    .within(if progressive(bytes) {
+        limits.pixels.min(MAX_IMAGE_PIXELS)
+    } else {
+        limits.pixels
+    })?;
     Ok(decoder)
 }
 
 pub fn dimensions(bytes: &[u8]) -> Result<Size> {
-    encoded(bytes)?;
+    encoded(bytes, Limits::PAGE)?;
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        let reader = png_reader(bytes)?;
+        let reader = png_reader(bytes, Limits::PAGE)?;
         Ok(Size {
             width: reader.info().width,
             height: reader.info().height,
         })
     } else if bytes.starts_with(&[0xff, 0xd8]) {
-        let decoder = jpeg_reader(bytes)?;
+        let decoder = jpeg_reader(bytes, Limits::PAGE)?;
         let info = decoder
             .info()
             .ok_or_else(|| Error::Image("missing JPEG dimensions".into()))?;
@@ -124,9 +195,13 @@ pub fn dimensions(bytes: &[u8]) -> Result<Size> {
 }
 
 pub fn decode(bytes: &[u8]) -> Result<GrayImage> {
-    encoded(bytes)?;
+    decode_within(bytes, Limits::PAGE)
+}
+
+pub fn decode_within(bytes: &[u8], limits: Limits) -> Result<GrayImage> {
+    encoded(bytes, limits)?;
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        let mut reader = png_reader(bytes)?;
+        let mut reader = png_reader(bytes, limits)?;
         let size = Size {
             width: reader.info().width,
             height: reader.info().height,
@@ -137,7 +212,7 @@ pub fn decode(bytes: &[u8]) -> Result<GrayImage> {
                 "PNG transformation did not produce eight-bit samples".into(),
             ));
         }
-        let mut pixels = Vec::with_capacity(size.width as usize * size.height as usize);
+        let mut pixels = buffer(size.width as usize * size.height as usize)?;
         if reader.info().interlaced {
             let length = reader
                 .output_buffer_size()
@@ -153,7 +228,7 @@ pub fn decode(bytes: &[u8]) -> Result<GrayImage> {
         } else {
             while let Some(row) = reader.next_row().map_err(|e| Error::Image(e.to_string()))? {
                 grayscale(row.data(), color, &mut pixels)?;
-                if pixels.len() > MAX_IMAGE_PIXELS {
+                if pixels.len() > limits.pixels {
                     return Err(Error::Limit("PNG pixels"));
                 }
             }
@@ -164,7 +239,7 @@ pub fn decode(bytes: &[u8]) -> Result<GrayImage> {
         }
         Ok(GrayImage { size, pixels })
     } else if bytes.starts_with(&[0xff, 0xd8]) {
-        let mut decoder = jpeg_reader(bytes)?;
+        let mut decoder = jpeg_reader(bytes, limits)?;
         let info = decoder
             .info()
             .ok_or_else(|| Error::Image("missing JPEG dimensions".into()))?;
@@ -172,12 +247,16 @@ pub fn decode(bytes: &[u8]) -> Result<GrayImage> {
             width: info.width as u32,
             height: info.height as u32,
         };
-        let pixels = decoder.decode().map_err(|e| Error::Image(e.to_string()))?;
-        if pixels.len() != size.width as usize * size.height as usize {
+        if decoder.output_buffer_size() != Some(size.width as usize * size.height as usize) {
             return Err(Error::Image(
                 "JPEG did not produce a grayscale frame".into(),
             ));
         }
+        let mut pixels = buffer(size.width as usize * size.height as usize)?;
+        pixels.resize(pixels.capacity(), 0);
+        decoder
+            .decode_into(&mut pixels)
+            .map_err(|e| Error::Image(e.to_string()))?;
         Ok(GrayImage { size, pixels })
     } else {
         Err(Error::Image("supported image formats: PNG and JPEG".into()))
@@ -215,7 +294,7 @@ impl GrayImage {
     /// Area averaging uses every source pixel during reduction and avoids
     /// dropping thin strokes in diagrams when an image is reduced to fit a page.
     pub fn resize(&self, target: Size) -> Result<Self> {
-        self.size.validate()?;
+        self.size.within(usize::MAX)?;
         target.validate()?;
         if self.pixels.len() != self.size.width as usize * self.size.height as usize {
             return Err(Error::Image("invalid grayscale buffer".into()));

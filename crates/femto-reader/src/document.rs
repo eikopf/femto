@@ -69,8 +69,21 @@ fn list_number(mut number: i64, style: ListNumberStyle) -> String {
     label
 }
 
-pub const MAX_CHAPTER_BYTES: usize = 512 * 1024;
+/// Limits on one chapter. In 5,146 chapters of the 110 EPUBs of one
+/// library the largest source file was 892 KiB (a bibliography), and the
+/// most a parsed chapter held was 3,116 blocks, 448 KiB of text and 6,285
+/// spans. Five chapters produced more than 16,384 parser events, which was
+/// the limit on events before it had its own.
+pub const MAX_CHAPTER_BYTES: usize = 1024 * 1024;
+/// Blocks kept for a chapter.
 pub const MAX_CHAPTER_ITEMS: usize = 16_384;
+/// Styled spans kept for a chapter, across its paragraphs.
+pub const MAX_CHAPTER_SPANS: usize = 32_768;
+/// Events the parser may produce for a chapter. They are not kept; this
+/// bounds the work, and what is kept has the limits above.
+const MAX_CHAPTER_EVENTS: usize = 131_072;
+/// The navigation document. The largest in the same library was 163 KiB.
+const MAX_NAVIGATION_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Metadata {
@@ -373,7 +386,7 @@ impl Document {
             Some("epub") => {
                 let options = EpubBookOptions {
                     zip_limits: Some(ZipLimits::new(image::MAX_ENCODED_BYTES, 64)),
-                    max_nav_bytes: Some(128 * 1024),
+                    max_nav_bytes: Some(MAX_NAVIGATION_BYTES),
                     ..Default::default()
                 };
                 let mut book = EpubBook::from_reader_with_options(file, options)
@@ -608,7 +621,7 @@ impl Document {
                 let mut lists: Vec<(bool, i64, i64, ListNumberStyle)> = Vec::new();
                 let mut items: Vec<(ListItem, ListNumberStyle)> = Vec::new();
                 let mut options = ChapterEventsOptions {
-                    max_items: MAX_CHAPTER_ITEMS,
+                    max_items: MAX_CHAPTER_EVENTS,
                     ..Default::default()
                 };
                 options.render.track_source = track_source;
@@ -919,6 +932,13 @@ impl Document {
         if blocks.len() > MAX_CHAPTER_ITEMS {
             return Err(Error::Limit("chapter blocks"));
         }
+        let spans = blocks.iter().map(|block| match block {
+            Block::Text(paragraph) => paragraph.spans.len(),
+            Block::Image(_) => 0,
+        });
+        if spans.sum::<usize>() > MAX_CHAPTER_SPANS {
+            return Err(Error::Limit("chapter spans"));
+        }
         if blocks
             .iter()
             .filter(|block| matches!(block, Block::Image(_)))
@@ -1104,7 +1124,7 @@ impl Document {
             return None;
         };
         let mut options = epub_stream::book::CoverImageOptions::default();
-        options.image.max_bytes = image::MAX_ENCODED_BYTES;
+        options.image.max_bytes = image::Limits::ALONE.encoded;
         let mut bytes = Vec::new();
         book.read_cover_image_into_with_options(&mut bytes, options)
             .ok()?

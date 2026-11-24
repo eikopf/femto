@@ -50,6 +50,29 @@ For a terminal preview, use `read` with the same book and font arguments. It wri
 
 `./scripts/check-kosync` uses rootless Podman to run the protocol, CLI and native menu fixtures against a disposable official KOReader server. The native fixture runs on a private Xvfb display. The CLI-only Headscale fixture also uses that server behind its official Tailscale peer. [KOReader sync](koreader-sync.md) covers configuration, commands and the independent position checks.
 
+### Library sweep
+
+`crates/femto-reader/tests/library_sweep.rs` opens every EPUB and plain-text book in a directory, lays out every chapter page after page as the reader does, and decodes the cover. It needs a library, so the routine checks skip it:
+
+```sh
+FEMTO_SWEEP_DIR=/path/to/books cargo test --release -p femto-reader --test library_sweep -- --ignored --nocapture
+```
+
+Run on 2026-11-24 over the 110 EPUBs of one personal library (5,146 chapters), it first failed on 11 books, for five reasons, all since fixed:
+
+| Books | Failure | Fix |
+| --- | --- | --- |
+| 6 | HTML named entities such as `&nbsp;` in XHTML: the chapter did not parse | `quick-xml`'s `escape-html` feature |
+| 5 | A chapter produced more than 16,384 parser events | Events have their own limit of 131,072; what a chapter keeps is still limited to 16,384 blocks, and now 32,768 spans |
+| 3 | A navigation document over 128 KiB: the book did not open | 512 KiB |
+| 2 | A line break after the `mimetype` entry: the book did not open | Trailing whitespace accepted |
+| 2 | More than 256 archive entries: files past the limit were not found | 2,048 entries |
+| 1 | A chapter source over 512 KiB | 1 MiB |
+
+Some books failed for more than one reason. All 110 now pass on the host, in 70 seconds; the slowest chapter took 0.4 seconds there. The largest chapter kept 3,116 blocks, 448 KiB of text and 6,285 spans. None of this was run on the Picco, where the larger limits also mean larger allocations: a chapter near them may exhaust memory where it was refused before.
+
+Covers in the same library: 106 books name one, and 98 decode on the host within the limits for an image decoded alone (`image::Limits::ALONE`). Of those, 55 are within the one megapixel a page image may have, which was the limit before; 21 are between one and 2.8 megapixels; and 22 are larger. Seven of the eight refused are progressive JPEGs over one megapixel, which need memory for every coefficient at once, or exceed four megapixels; one is in a format other than PNG and JPEG. The Picco has less memory than the limit allows for and refuses a cover it has no room for; with about 3.7 MiB in its largest free block while reading, that is expected above roughly 2.8 megapixels. This was not measured on the device.
+
 ## Firmware
 
 ```sh

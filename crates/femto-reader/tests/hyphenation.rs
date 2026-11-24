@@ -231,6 +231,37 @@ fn combining_sequences_and_oversized_words_remain_bounded() {
 }
 
 #[test]
+fn a_long_unbreakable_word_costs_about_what_prose_of_its_length_costs() {
+    let fonts = fonts();
+    let time = |text: &str| {
+        let text = text.trim();
+        let chapter = Document::from_text("Word", text)
+            .unwrap()
+            .chapter(0)
+            .unwrap();
+        let started = std::time::Instant::now();
+        let mut end = 0;
+        femto_reader::layout::paginate_from(
+            &chapter,
+            &fonts,
+            config(116),
+            Default::default(),
+            |page| {
+                end = page.end.byte;
+                Ok(true)
+            },
+        )
+        .unwrap();
+        assert_eq!(end, text.len());
+        started.elapsed()
+    };
+    // Every line of the word is an emergency break, at about twice the cost.
+    let prose = time(&"lorem ipsum dolor sit amet ".repeat(128 * 1024 / 27));
+    let word = time(&"a".repeat(128 * 1024));
+    assert!(word < 4 * prose, "{word:?} for a word, {prose:?} for prose");
+}
+
+#[test]
 fn soft_hyphen_is_invisible_until_used_and_keeps_offsets() {
     let fonts = fonts();
     let text = "ex\u{ad}tensive";

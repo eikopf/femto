@@ -1,7 +1,7 @@
 //! Discovery properties for the vendored archive reader, through the same
 //! public API the reader uses: generated archives read back what was put in,
 //! and archives that lie about themselves are refused within the limits.
-use epub_stream::zip::{StreamingZip, ZipLimits};
+use epub_stream::zip::{CdEntry, StreamingZip, ZipError, ZipLimits};
 use femto_reader::document::Document;
 use proptest::prelude::*;
 use std::io::Cursor;
@@ -234,7 +234,13 @@ fn entries() -> impl Strategy<Value = Vec<Entry>> {
     })
 }
 const LIMIT: usize = 16 * 1024;
-fn open(bytes: Vec<u8>) -> Result<StreamingZip<Cursor<Vec<u8>>>, epub_stream::zip::ZipError> {
+/// `ZipLimits::max_file_read_size` is the "maximum compressed or uncompressed
+/// file size allowed for reads". No generated file is that large, but many
+/// small DEFLATE blocks can pack one to several times its size.
+fn over_the_limit(listed: &CdEntry) -> bool {
+    listed.compressed_size > LIMIT as u64
+}
+fn open(bytes: Vec<u8>) -> Result<StreamingZip<Cursor<Vec<u8>>>, ZipError> {
     StreamingZip::new_with_limits(Cursor::new(bytes), Some(ZipLimits::new(LIMIT, 64)))
 }
 
@@ -253,6 +259,11 @@ proptest! {
             prop_assert_eq!(listed.uncompressed_size, entry.data.len() as u64);
             // A byte to spare; `a_buffer_of_the_exact_size_is_enough` has none.
             let mut buffer = vec![0xaa; entry.data.len() + 1];
+            if over_the_limit(listed) {
+                prop_assert_eq!(zip.read_file(listed, &mut buffer), Err(ZipError::FileTooLarge));
+                prop_assert_eq!(zip.read_file_to_writer(listed, &mut std::io::sink()), Err(ZipError::FileTooLarge));
+                continue;
+            }
             let count = zip.read_file(listed, &mut buffer).unwrap();
             prop_assert_eq!(&buffer[..count], &entry.data[..]);
             let mut written = Vec::new();
@@ -489,6 +500,10 @@ proptest! {
         let mut zip = open(archive(&entries, 0, 0).bytes).unwrap();
         for (listed, entry) in zip.entries().cloned().collect::<Vec<_>>().iter().zip(&entries) {
             let mut buffer = vec![0xaa; entry.data.len()];
+            if over_the_limit(listed) {
+                prop_assert_eq!(zip.read_file(listed, &mut buffer), Err(ZipError::FileTooLarge));
+                continue;
+            }
             prop_assert_eq!(zip.read_file(listed, &mut buffer).map_err(|e| format!("{e:?}")), Ok(entry.data.len()));
             prop_assert_eq!(&buffer, &entry.data);
         }

@@ -255,13 +255,18 @@ proptest! {
     /// Bindings: one direction wins only when no opposing key is down.
     #[test]
     fn bindings_resolve_by_direction(
-        entries in prop::collection::vec((prop_oneof![4 => 4u32..40, 1 => 0u32..4], prop::sample::select(vec![7u32, 12, 1]), any::<bool>()), 0..18),
-        down in prop::collection::btree_set(4u8..40, 0..6),
+        entries in prop::collection::btree_map(4u32..24, (prop_oneof![5 => Just(7u32), 1 => Just(12u32)], any::<bool>()), 0..17),
+        fault in prop::option::weighted(0.2, (prop::sample::select(vec![0x70000u32, 0x70003, 0xc0000, 0x10004, 0x70004]), 0usize..20)),
+        down in prop::collection::btree_set(4u8..24, 0..6),
     ) {
-        let table: Vec<(u32, PageTurn)> = entries
+        let mut table: Vec<(u32, PageTurn)> = entries
             .iter()
-            .map(|(id, page, next)| (page << 16 | id, if *next { PageTurn::Next } else { PageTurn::Previous }))
+            .map(|(id, (page, next))| (page << 16 | id, if *next { PageTurn::Next } else { PageTurn::Previous }))
             .collect();
+        // Sometimes an unsupported, reserved, zero or (possibly) duplicate usage.
+        if let Some((usage, at)) = fault {
+            table.insert(at.min(table.len()), (usage, PageTurn::Next));
+        }
         let unique = table.iter().map(|(usage, _)| usage).collect::<BTreeSet<_>>().len() == table.len();
         let supported = table.iter().all(|(usage, _)| match usage >> 16 {
             7 => usage & 0xffff > 3,
@@ -721,6 +726,52 @@ fn step() -> impl Strategy<Value = Step> {
     ]
 }
 
+/// A complete discovery with two reads, with some steps replaced and some
+/// extra events interleaved, so that late phases are reached often.
+fn script() -> impl Strategy<Value = Vec<Step>> {
+    let c = Connection {
+        interface: 4,
+        id: 12,
+    };
+    let canonical = move |map_len: usize, reference_len: usize| vec![
+        Step::Registered(4, true),
+        Step::TakeCommand,
+        Step::Opened(c, true, true),
+        Step::TakeCommand,
+        Step::Service(c, 1, 4, true),
+        Step::Searched(c, true),
+        Step::TakeCommand,
+        Step::Inspected(c),
+        Step::BeginRead(c, 1, true),
+        Step::ReadCompleted(c, 1, true, true, map_len),
+        Step::TakeRead,
+        Step::BeginRead(c, 2, false),
+        Step::ReadCompleted(c, 2, false, true, reference_len),
+        Step::TakeRead,
+        Step::Finish(c),
+        Step::TakeCommand,
+    ];
+    (
+        prop::sample::select(vec![1usize, 1, 17, 512, 0, 513]),
+        prop::sample::select(vec![2usize, 2, 2, 2, 0, 1, 3]),
+        prop::collection::vec(
+            (
+                prop::option::weighted(0.06, step()),
+                prop::option::weighted(0.12, step()),
+            ),
+            canonical(1, 2).len(),
+        ),
+    )
+    .prop_map(move |(map_len, reference_len, edits)| {
+        let mut steps = Vec::new();
+        for (original, (replacement, extra)) in canonical(map_len, reference_len).iter().zip(edits) {
+            steps.push(replacement.unwrap_or_else(|| original.clone()));
+            steps.extend(extra);
+        }
+        steps
+    })
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(4000))]
 
@@ -728,12 +779,15 @@ proptest! {
     /// is commanded after a failure, an error never clears, and completion
     /// requires that every step was acknowledged for the configured peer.
     #[test]
-    fn discovery_survives_any_event_order(steps in prop::collection::vec(step(), 0..50)) {
+    fn discovery_survives_any_event_order(
+        steps in prop_oneof![3 => script(), 1 => prop::collection::vec(step(), 0..50)],
+    ) {
         let peer = Peer::parse(b"public 12:34:56:78:9a:bc").unwrap();
         let mut discovery = Discovery::new(peer);
-        let mut commands = Vec::new();
+        let mut commands: Vec<discovery::Command> = Vec::new();
         let mut error = None;
         let mut opened_ok = false;
+        let (mut services, mut searched) = (0, false);
         let mut reads_delivered = 0;
         let mut pending_read: Option<ReadRequest> = None;
         for step in steps.iter() {
@@ -741,13 +795,39 @@ proptest! {
                 Step::Registered(interface, success) => discovery.registered(interface, success),
                 Step::Opened(connection, success, right_address) => {
                     let address = if right_address { peer.address() } else { [9; 6] };
+                    // The open was dispatched and this is its first completion.
+                    let awaited = commands.len() == 1
+                        && error.is_none()
+                        && !opened_ok
+                        && discovery.interface() == Some(connection.interface);
                     discovery.opened(connection, address, success);
-                    opened_ok |= success && right_address;
+                    if awaited {
+                        if success && right_address {
+                            opened_ok = true;
+                            prop_assert_eq!(discovery.error(), None);
+                            prop_assert_eq!(discovery.connection(), Some(connection));
+                        } else {
+                            prop_assert!(discovery.error().is_some(), "a failed or foreign open was accepted");
+                        }
+                    }
                 }
                 Step::Service(connection, start, end, primary) => {
-                    discovery.hid_service(connection, ServiceRange { start, end }, primary)
+                    // The search was dispatched and has not completed.
+                    let searching = commands.len() == 2
+                        && error.is_none()
+                        && !searched
+                        && discovery.connection() == Some(connection);
+                    discovery.hid_service(connection, ServiceRange { start, end }, primary);
+                    if searching {
+                        let acceptable = primary && start != 0 && start < end && services == 0;
+                        services += 1;
+                        prop_assert_eq!(discovery.error().is_none(), acceptable, "service {} of this search", services);
+                    }
                 }
-                Step::Searched(connection, success) => discovery.searched(connection, success),
+                Step::Searched(connection, success) => {
+                    searched |= commands.len() == 2 && discovery.connection() == Some(connection);
+                    discovery.searched(connection, success)
+                }
                 Step::Inspected(connection) => discovery.inspected(connection),
                 Step::Disconnected(connection) => discovery.disconnected(connection),
                 Step::ServiceChanged(ours) => {
@@ -773,6 +853,10 @@ proptest! {
                         kind: if map { ReadKind::ReportMap } else { ReadKind::ReportReference },
                     };
                     discovery.read_completed(request, success, &vec![7; len]);
+                    // Another connection cannot complete or spoil a pending read.
+                    if pending_read.is_some_and(|pending| pending.connection != connection) {
+                        prop_assert_eq!(discovery.error(), error);
+                    }
                 }
                 Step::TakeRead => match discovery.take_read() {
                     Ok(Some(response)) => {
@@ -787,8 +871,15 @@ proptest! {
                     Ok(None) => {}
                     Err(_) => pending_read = None,
                 },
-                Step::Finish(connection) => discovery.finish(connection),
-                Step::TakeCommand => commands.extend(discovery.take_command()),
+                Step::Finish(connection) => {
+                    discovery.finish(connection);
+                    prop_assert!(!(discovery.is_done() && pending_read.is_some()), "finished with a read outstanding");
+                }
+                Step::TakeCommand => {
+                    let command = discovery.take_command();
+                    prop_assert!(command.is_none() || error.is_none(), "{:?} after {:?}", command, error);
+                    commands.extend(command);
+                }
                 Step::Abort => discovery.abort("test abort"),
             }
             if let Some(first) = error {
@@ -871,6 +962,12 @@ proptest! {
                 _ => {
                     let command = state.take_command();
                     prop_assert!(command.is_none() || state.is_stopping());
+                    // The application is unregistered only after its
+                    // connection is known to be closed.
+                    if let Some(shutdown::Command::Unregister(interface)) = command {
+                        prop_assert_eq!(state.connection(), None);
+                        prop_assert_eq!(state.interface(), Some(interface));
+                    }
                     issued.extend(command);
                 }
             }

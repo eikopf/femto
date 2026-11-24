@@ -149,7 +149,14 @@ impl Model {
 }
 
 fn ops() -> impl Strategy<Value = Vec<Op>> {
-    let dt = prop_oneof![6 => 1u64..120, 2 => 120u64..700, 1 => 2900u64..3100];
+    let dt = prop_oneof![
+        12 => 1u64..120,
+        4 => 120u64..700,
+        1 => 2900u64..3100,
+        1 => Just(2999u64),
+        1 => Just(3000u64),
+        1 => prop::sample::select(vec![39u64, 40, 599, 600, 1000, 1001]),
+    ];
     // A finger wandering near an anchor, with occasional long strokes.
     let point = (0u16..=480, 0u16..=800);
     let gesture = (

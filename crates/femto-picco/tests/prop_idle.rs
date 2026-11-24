@@ -362,6 +362,7 @@ fn battery_anchors() {
     assert_eq!(percent(3566, 0), 5);
     // Charging (status 0x0a): the duplicated top anchor interpolates from 90.
     assert_eq!(percent(4300, 0x0a), 90);
+    assert_eq!(percent(4304, 0x0a), 98);
     assert_eq!(percent(4306, 0x0a), 100);
     assert_eq!(percent(3500, 0x0a), 0);
 }

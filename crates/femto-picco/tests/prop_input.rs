@@ -128,6 +128,9 @@ fn trace() -> impl Strategy<Value = Vec<Sample>> {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(4000))]
 
+    /// Pins the present behaviour, in which a long press may be reported by a
+    /// sample that no longer shows the button. Once that is fixed, the strict
+    /// property below replaces this one.
     #[test]
     fn events_match_the_episode_oracle(samples in trace()) {
         prop_assert_eq!(actual(&samples), expected(&samples, false));

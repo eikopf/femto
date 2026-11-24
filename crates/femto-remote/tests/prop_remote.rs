@@ -1152,3 +1152,105 @@ proptest! {
         }
     }
 }
+
+// ------------------------------------------------- well-formed odd descriptors
+
+/// One main item with the globals and locals in front of it. Every group is
+/// well-formed enough for the preflight; the values are not sensible.
+fn group() -> impl Strategy<Value = (Option<u8>, Vec<u8>)> {
+    let page = prop_oneof![
+        4 => Just(vec![0x05, 7]),
+        3 => Just(vec![0x05, 12]),
+        1 => Just(vec![0x05, 1]),
+        1 => Just(vec![0x05, 9]),
+        1 => Just(vec![0x06, 0x00, 0xff]),
+        1 => Just(vec![]),
+    ];
+    let usages = prop_oneof![
+        3 => prop::collection::vec(prop_oneof![3 => (0u8..90).prop_map(|u| vec![0x09, u]), 1 => any::<u16>().prop_map(|u| [vec![0x0a], u.to_le_bytes().to_vec()].concat())], 1..5).prop_map(|u| u.concat()),
+        3 => (0u8..120, 0u8..120).prop_map(|(min, span)| vec![0x19, min, 0x29, min + span]),
+        1 => (any::<u16>(), prop::sample::select(vec![7u16, 12, 1])).prop_map(|(id, page)| [vec![0x0b], id.to_le_bytes().to_vec(), page.to_le_bytes().to_vec()].concat()),
+        1 => (0u16..300, 0u16..255).prop_map(|(min, span)| [vec![0x1a], min.to_le_bytes().to_vec(), vec![0x2a], (min + span).to_le_bytes().to_vec()].concat()),
+        1 => Just(vec![]),
+    ];
+    let logical = prop_oneof![
+        4 => Just(vec![0x15, 0, 0x25, 1]),
+        3 => Just(vec![0x15, 0, 0x26, 0xff, 0x00]),
+        2 => (any::<i8>(), any::<i8>()).prop_map(|(min, max)| vec![0x15, min as u8, 0x25, max as u8]),
+        1 => (any::<i16>(), any::<i16>()).prop_map(|(min, max)| [vec![0x16], min.to_le_bytes().to_vec(), vec![0x26], max.to_le_bytes().to_vec()].concat()),
+        1 => (any::<i32>(), any::<i32>()).prop_map(|(min, max)| [vec![0x17], min.to_le_bytes().to_vec(), vec![0x27], max.to_le_bytes().to_vec()].concat()),
+        1 => (0u8..4, 1u8..120).prop_map(|(min, span)| vec![0x15, min, 0x25, min + span]),
+    ];
+    let size = prop_oneof![4 => Just(1u8), 3 => Just(8u8), 1 => Just(16u8), 1 => Just(32u8), 2 => 1u8..=32];
+    let count = prop_oneof![8 => 1u8..=8, 1 => Just(32u8), 1 => Just(64u8)];
+    let main = prop_oneof![
+        8 => any::<u8>().prop_map(|flags| vec![0x81, flags]),
+        1 => any::<u16>().prop_map(|flags| [vec![0x82], flags.to_le_bytes().to_vec()].concat()),
+        1 => any::<u8>().prop_map(|flags| vec![0x91, flags]),
+        1 => any::<u8>().prop_map(|flags| vec![0xb1, flags]),
+    ];
+    let extra = prop_oneof![
+        6 => Just(vec![]),
+        1 => any::<u8>().prop_map(|v| vec![0x35, v, 0x45, v.wrapping_add(9)]),
+        1 => any::<u8>().prop_map(|v| vec![0x55, v, 0x65, v]),
+        1 => Just(vec![0xa4, 0xb4]),
+    ];
+    (prop::option::of(1u8..=4), page, usages, logical, size, count, main, extra).prop_map(
+        |(id, page, usages, logical, size, count, main, extra)| {
+            (id, [page, logical, vec![0x75, size, 0x95, count], extra, usages, main].concat())
+        },
+    )
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(2500))]
+
+    /// Descriptors that pass the preflight but describe odd fields: signed and
+    /// inverted ranges, wide fields, extended usages, constant and relative
+    /// items, output and feature reports. Decoding any notification of any
+    /// length returns an error or bounded, supported presses.
+    #[test]
+    fn odd_but_well_formed_descriptors_decode_without_panic(
+        groups in prop::collection::vec(group(), 1..6),
+        numbered in any::<bool>(),
+        nested in any::<bool>(),
+        fill in prop::collection::vec(any::<u8>(), 64),
+        pattern in 0u8..4,
+    ) {
+        let mut bytes = vec![0x05, 1, 0x09, 6, 0xa1, 1];
+        for (index, (id, group)) in groups.iter().enumerate() {
+            if numbered {
+                bytes.extend([0x85, id.unwrap_or(if index == 0 { 1 } else { 2 })]);
+            }
+            if nested && index == 1 {
+                bytes.extend([0x09, 1, 0xa1, 0]);
+            }
+            bytes.extend(group);
+        }
+        if nested && groups.len() > 1 {
+            bytes.push(0xc0);
+        }
+        bytes.push(0xc0);
+        let Ok(mut input) = RemoteInput::new(&bytes) else { return Ok(()) };
+        let payload: Vec<u8> = match pattern {
+            0 => vec![0; 64],
+            1 => vec![0xff; 64],
+            2 => fill.iter().map(|b| b % 6).collect(),
+            _ => fill,
+        };
+        for id in 0u8..=4 {
+            for len in 1..=64 {
+                if let Ok(presses) = input.accept(&[id, 1], &payload[..len]) {
+                    prop_assert!(presses.as_slice().len() <= 32);
+                    for usage in presses.as_slice() {
+                        prop_assert!(matches!(usage >> 16, 7 | 12) && usage & 0xffff != 0, "{:#x}", usage);
+                        prop_assert!(!(usage >> 16 == 7 && usage & 0xffff <= 3), "{:#x}", usage);
+                    }
+                    // The same report again presses nothing new.
+                    let again = input.accept(&[id, 1], &payload[..len]);
+                    prop_assert!(again.is_ok_and(|presses| presses.as_slice().is_empty()), "{:02x?}", bytes);
+                }
+            }
+        }
+    }
+}

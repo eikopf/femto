@@ -188,6 +188,33 @@ impl Gesture {
     }
 }
 
+/// Text broken at spaces into at most `limit` lines that a panel holds,
+/// ending in an ellipsis when it does not all fit.
+fn wrap(text: &str, limit: usize) -> Vec<String> {
+    const WIDTH: usize = 38;
+    let mut lines: Vec<String> = Vec::new();
+    for word in text.split_whitespace() {
+        let word: String = word.graphemes(true).take(WIDTH).collect();
+        let full = lines.len() == limit;
+        match lines.last_mut() {
+            Some(line) if line.chars().count() + 1 + word.chars().count() <= WIDTH => {
+                line.push(' ');
+                line.push_str(&word);
+            }
+            Some(last) if full => {
+                while last.chars().count() + 2 > WIDTH {
+                    last.pop();
+                }
+                last.push_str(" \u{2026}");
+                break;
+            }
+            _ if full => break,
+            _ => lines.push(word),
+        }
+    }
+    lines
+}
+
 /// The book's cover reduced to fit the screen and centered on white. A cover
 /// smaller than the screen keeps its size.
 fn sleep_cover(reader: &mut Reader, levels: u16) -> Option<Vec<u8>> {
@@ -1044,11 +1071,10 @@ impl ReaderUi {
             return Ok(pixels);
         }
         let metadata = &reader.document.metadata;
-        let clip = |text: &str| text.graphemes(true).take(120).collect::<String>();
-        let mut lines = vec![String::new(), clip(&metadata.title)];
-        if !metadata.author.is_empty() {
-            lines.push(clip(&metadata.author));
-        }
+        // The panel holds eight lines of forty characters: three for the
+        // title, two for the author, and the three below.
+        let mut lines = wrap(&metadata.title, 3);
+        lines.extend(wrap(&metadata.author, 2));
         if let Some(percent) = reader.book_progress_percent() {
             lines.push(format!("~{percent}% read"));
         }
@@ -1056,6 +1082,9 @@ impl ReaderUi {
             String::new(),
             "Sleeping. Hold the power button to wake.".into(),
         ]);
+        if lines.len() < 8 {
+            lines.insert(0, String::new());
+        }
         reader.render_panel(&lines, levels)
     }
     fn control(&self, reader: &Reader, command: &Command) -> Control {

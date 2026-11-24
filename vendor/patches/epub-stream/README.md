@@ -82,9 +82,9 @@ Points the unit tests in `src/book.rs` at `tests/fixtures/book-api.epub` and `bo
 
 ### 0006-books-in-circulation
 
-Accepts trailing whitespace after `application/epub+zip` in the `mimetype` entry, and raises the central directory cache from 256 to 2048 entries. The hand-written manifest also enables `quick-xml`'s `escape-html` feature, so that HTML named entities resolve.
+Accepts trailing whitespace after `application/epub+zip` in the `mimetype` entry, and raises the central directory cache from 256 to 2048 entries. Reads the spine without regard to a namespace prefix on its elements, and keeps 2048 spine items where it kept 256. The hand-written manifest also enables `quick-xml`'s `escape-html` feature, so that HTML named entities resolve.
 
-- Why: of the 110 EPUBs in one library, two had a line break after the mimetype and did not open, two had more than 256 archive entries (302 and 437) and lost the files past the limit, and six used entities such as `&nbsp;` and `&iuml;` and lost the chapters that did.
+- Why: of the 110 EPUBs in one library, two had a line break after the mimetype and did not open, two had more than 256 archive entries (302 and 437) and lost the files past the limit, six used entities such as `&nbsp;` and `&iuml;` and lost the chapters that did, one wrote its package with an `opf:` prefix on every element and had no chapters, and one had 419 spine items and silently lost the last 163.
 - Evidence: `crates/femto-reader/tests/library_sweep.rs` run over that library before and after; a unit test for the mimetype in `src/zip.rs`.
 - Upstream: upstreamable.
 

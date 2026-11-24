@@ -2471,11 +2471,15 @@ fn sleep_page_shows_the_cover_centered_and_falls_back_to_text() {
     assert_eq!(at(240, 100), 255);
     assert_eq!(at(82, 282), 0);
     assert!((0..800).all(|y| at(79, y) == 255 && at(400, y) == 255));
-    // A book without a cover names itself instead.
+    // A book without a cover names itself instead, however long its name.
     let mut plain = reader();
+    plain.document.metadata.title =
+        "The Song of the Cell: An Exploration of Medicine and the New Human ".repeat(3);
+    plain.document.metadata.author =
+        "An Author With A Remarkably Long Name, And Another; ".repeat(3);
     let text = ui.render_sleep(&mut plain, 4).unwrap();
     assert!(text.contains(&0));
-    assert_eq!(text[100 * 480 + 240], 255);
+    assert!(text[700 * 480..].iter().all(|pixel| *pixel == 255));
 }
 
 #[test]

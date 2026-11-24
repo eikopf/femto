@@ -38,6 +38,9 @@ fn sweep(path: &Path, fonts: &Fonts) -> Result<String, String> {
         },
     };
     let chapters = book.metadata.chapters.len();
+    if chapters == 0 {
+        return Err("no chapters".into());
+    }
     let (mut total, mut warnings, mut slowest) = (0, 0, 0);
     for index in 0..chapters {
         let started = Instant::now();

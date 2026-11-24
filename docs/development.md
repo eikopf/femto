@@ -58,7 +58,7 @@ For a terminal preview, use `read` with the same book and font arguments. It wri
 FEMTO_SWEEP_DIR=/path/to/books cargo test --release -p femto-reader --test library_sweep -- --ignored --nocapture
 ```
 
-Run on 2026-11-24 over the 110 EPUBs of one personal library (5,146 chapters), it first failed on 11 books, for five reasons, all since fixed:
+Run on 2026-11-24 over the 110 EPUBs of one personal library, it first failed on 11 books. A second pass, which opened each book through the reader's controller, turned sixty pages, went to three places and drew the sleep page, found three more. All are fixed:
 
 | Books | Failure | Fix |
 | --- | --- | --- |
@@ -68,8 +68,11 @@ Run on 2026-11-24 over the 110 EPUBs of one personal library (5,146 chapters), i
 | 2 | A line break after the `mimetype` entry: the book did not open | Trailing whitespace accepted |
 | 2 | More than 256 archive entries: files past the limit were not found | 2,048 entries |
 | 1 | A chapter source over 512 KiB | 1 MiB |
+| 1 | A package file with an `opf:` prefix on every element: the book had no chapters, which the sweep at first counted as passing | Spine element names compared without their prefix |
+| 1 | 419 spine items: the last 163 chapters were dropped without notice | 2,048 spine items |
+| 2 | A title too long for the text sleep page when the cover cannot be shown: on the Picco that refuses to sleep | The title and author are wrapped and cut |
 
-Some books failed for more than one reason. All 110 now pass on the host, in 70 seconds; the slowest chapter took 0.4 seconds there. The largest chapter kept 3,116 blocks, 448 KiB of text and 6,285 spans. None of this was run on the Picco, where the larger limits also mean larger allocations: a chapter near them may exhaust memory where it was refused before.
+Some books failed for more than one reason. All 110 now pass on the host, with 5,810 chapters and 139,680 pages; the slowest chapter took 0.4 seconds there. Before the spine fixes the library had 5,146 chapters, of which the largest kept 3,116 blocks, 448 KiB of text and 6,285 spans. None of this was run on the Picco, where the larger limits also mean larger allocations: a chapter near them may exhaust memory where it was refused before.
 
 Images inside the same books, counted by loading every chapter and rendering all 135,163 pages: 3,036 are shown and 1,194 are left out, of which 951 exceed the one megapixel a page image may have, 160 are GIF, 73 are SVG, 7 exceed 2 MiB encoded and 3 are missing from their archive. Sixty-seven of the 110 books have at least one image left out, often the cover page inside the book. Showing larger images on a page needs their decoding time measured on the Picco first, since a page is rendered in the event loop.
 

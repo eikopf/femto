@@ -14,7 +14,7 @@ use quick_xml::reader::Reader;
 use crate::error::EpubError;
 
 /// Maximum number of spine items (fixed-size constraint)
-const MAX_SPINE_ITEMS: usize = 256;
+const MAX_SPINE_ITEMS: usize = 2048;
 
 /// A single item in the EPUB spine (chapter reference)
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -206,6 +206,8 @@ pub fn parse_spine(content: &[u8]) -> Result<Spine, EpubError> {
                     .decode(e.name().as_ref())
                     .map_err(|e| EpubError::Parse(format!("Decode error: {:?}", e)))?
                     .to_string();
+                // Some packages write every element with a prefix.
+                let name = name.rsplit(':').next().unwrap_or(&name);
 
                 if name == "spine" {
                     in_spine = true;
@@ -243,6 +245,8 @@ pub fn parse_spine(content: &[u8]) -> Result<Spine, EpubError> {
                     .decode(e.name().as_ref())
                     .map_err(|e| EpubError::Parse(format!("Decode error: {:?}", e)))?
                     .to_string();
+                // Some packages write every element with a prefix.
+                let name = name.rsplit(':').next().unwrap_or(&name);
 
                 if name == "spine" {
                     in_spine = false;
@@ -275,6 +279,8 @@ fn parse_spine_reader<R: std::io::BufRead>(reader: R) -> Result<Spine, EpubError
                     .decode(e.name().as_ref())
                     .map_err(|e| EpubError::Parse(format!("Decode error: {:?}", e)))?
                     .to_string();
+                // Some packages write every element with a prefix.
+                let name = name.rsplit(':').next().unwrap_or(&name);
 
                 if name == "spine" {
                     in_spine = true;
@@ -311,6 +317,8 @@ fn parse_spine_reader<R: std::io::BufRead>(reader: R) -> Result<Spine, EpubError
                     .decode(e.name().as_ref())
                     .map_err(|e| EpubError::Parse(format!("Decode error: {:?}", e)))?
                     .to_string();
+                // Some packages write every element with a prefix.
+                let name = name.rsplit(':').next().unwrap_or(&name);
 
                 if name == "spine" {
                     in_spine = false;

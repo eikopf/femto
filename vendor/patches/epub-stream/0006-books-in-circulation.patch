@@ -1,8 +1,8 @@
 femto patch for epub-stream 0.1.0
 Subject: zip: open archives as books in circulation are made
 
-Two limits refused books that other reading systems open. Found by opening
-all 110 EPUBs of one library: four did not open for these reasons.
+Limits and strictness that refused or cut short books other reading systems
+open. Found by opening all 110 EPUBs of one library.
 
 1. validate_mimetype required the entry to be exactly
    "application/epub+zip". Two books end it with a line break. Trailing
@@ -12,12 +12,17 @@ all 110 EPUBs of one library: four did not open for these reasons.
    were not found. Two illustrated books have 302 and 437. The cache now
    holds 2048; an entry is about a hundred bytes on the heap.
 
+3. The spine reader compared element names with their prefix, so a
+   package written as <opf:spine><opf:itemref> had no chapters, and it
+   kept 256 items, so a book with 419 lost its last 163 without notice.
+   Names are now compared without the prefix and 2048 items are kept.
+
 The manifest also enables the escape-html feature of quick-xml, so that
 HTML named entities such as &nbsp; resolve. Six books use them in XHTML
 and their chapters did not parse. That change is in Cargo.toml, which is
 rewritten by hand and not part of this diff.
 
-Upstreamable: all three.
+Upstreamable: all four.
 
 --- a/src/zip.rs
 +++ b/src/zip.rs
@@ -82,3 +87,50 @@ Upstreamable: all three.
      fn test_eocd_found_with_long_comment() {
          let zip_data = add_zip_comment(
              build_single_file_zip("mimetype", b"application/epub+zip"),
+--- a/src/spine.rs
++++ b/src/spine.rs
+@@ -14,7 +14,7 @@
+ use crate::error::EpubError;
+ 
+ /// Maximum number of spine items (fixed-size constraint)
+-const MAX_SPINE_ITEMS: usize = 256;
++const MAX_SPINE_ITEMS: usize = 2048;
+ 
+ /// A single item in the EPUB spine (chapter reference)
+ #[derive(Clone, Debug, PartialEq, Eq)]
+@@ -206,6 +206,8 @@
+                     .decode(e.name().as_ref())
+                     .map_err(|e| EpubError::Parse(format!("Decode error: {:?}", e)))?
+                     .to_string();
++                // Some packages write every element with a prefix.
++                let name = name.rsplit(':').next().unwrap_or(&name);
+ 
+                 if name == "spine" {
+                     in_spine = true;
+@@ -243,6 +245,8 @@
+                     .decode(e.name().as_ref())
+                     .map_err(|e| EpubError::Parse(format!("Decode error: {:?}", e)))?
+                     .to_string();
++                // Some packages write every element with a prefix.
++                let name = name.rsplit(':').next().unwrap_or(&name);
+ 
+                 if name == "spine" {
+                     in_spine = false;
+@@ -275,6 +279,8 @@
+                     .decode(e.name().as_ref())
+                     .map_err(|e| EpubError::Parse(format!("Decode error: {:?}", e)))?
+                     .to_string();
++                // Some packages write every element with a prefix.
++                let name = name.rsplit(':').next().unwrap_or(&name);
+ 
+                 if name == "spine" {
+                     in_spine = true;
+@@ -311,6 +317,8 @@
+                     .decode(e.name().as_ref())
+                     .map_err(|e| EpubError::Parse(format!("Decode error: {:?}", e)))?
+                     .to_string();
++                // Some packages write every element with a prefix.
++                let name = name.rsplit(':').next().unwrap_or(&name);
+ 
+                 if name == "spine" {
+                     in_spine = false;

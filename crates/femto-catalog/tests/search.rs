@@ -116,3 +116,83 @@ fn search_requires_a_templated_opds_search_link() {
         assert!(link.search_url("https://example.org/", "books").is_err());
     }
 }
+#[test]
+fn a_template_with_a_stray_percent_sign_is_refused() {
+    for template in [
+        "%/é",
+        "/search?discount=5%,é{&query}",
+        "/search{?query}#100%aé",
+        "/caf%é{?query}",
+    ] {
+        assert!(
+            browser(template).search_url(0, "term").is_err(),
+            "{template}"
+        );
+    }
+}
+#[test]
+fn reserved_expansion_encodes_a_term_outside_ascii() {
+    for (term, encoded) in [
+        ("plain", "plain"),
+        ("100%", "100%25"),
+        ("é", "%C3%A9"),
+        ("書", "%E6%9B%B8"),
+        ("a😀b", "a%F0%9F%98%80b"),
+    ] {
+        assert_eq!(
+            browser("/search?query={+query}")
+                .search_url(0, term)
+                .unwrap(),
+            format!("https://example.org/search?query={encoded}")
+        );
+        // A fragment is never sent, and a term in the path is not the query.
+        for template in ["/search{#query}", "/s/{+query}?query=x"] {
+            assert!(
+                browser(template).search_url(0, term).is_err(),
+                "{template} {term}"
+            );
+        }
+    }
+    // Reserved expansion passes an encoded triplet through, so a term that
+    // looks encoded would arrive decoded: refused, whatever the bytes are.
+    for term in ["%41", "%C2%00%8A", "%CA%C0é"] {
+        assert!(
+            browser("/search?query={+query}")
+                .search_url(0, term)
+                .is_err(),
+            "{term}"
+        );
+    }
+}
+#[test]
+fn a_prefix_modifier_counts_characters_of_a_multi_byte_term() {
+    let browser = browser("/search{?query:3}");
+    for term in ["書書", "書書書"] {
+        assert_eq!(
+            browser.search_url(0, term).unwrap(),
+            format!(
+                "https://example.org/search?query={}",
+                "%E6%9B%B8".repeat(term.chars().count())
+            )
+        );
+    }
+    assert!(browser.search_url(0, "書書書書").is_err());
+    assert!(browser.search_url(0, "abcd").is_err());
+}
+#[test]
+fn reserved_expansion_passes_every_encoded_byte_of_a_term() {
+    // Triplets that are not UTF-8 pass as they are; none is dropped, and
+    // the one after an invalid triplet is not taken for part of it.
+    for term in ["%C2%00%8A", "%CA%C0é", "%C3%C3x", "%E3%81x%F0%90%41"] {
+        let path = term.replace('é', "%C3%A9");
+        assert_eq!(
+            browser("/s/{+query}?query={query}")
+                .search_url(0, term)
+                .unwrap(),
+            format!(
+                "https://example.org/s/{path}?query={}",
+                path.replace('%', "%25").replace("%25C3%25A9", "%C3%A9")
+            )
+        );
+    }
+}

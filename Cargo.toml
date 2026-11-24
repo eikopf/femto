@@ -1,10 +1,11 @@
 [workspace]
 members = ["crates/femto-kosync", "crates/femto-catalog", "crates/femto-reader", "crates/femto", "crates/femto-microlink", "crates/femto-picco", "crates/femto-remote"]
 resolver = "2"
-exclude = ["vendor/epub-stream", "vendor/swash", "vendor/miniz_oxide", "vendor/quireink-stardict", "vendor/hidreport"]
+exclude = ["vendor/epub-stream", "vendor/swash", "vendor/miniz_oxide", "vendor/quireink-stardict", "vendor/hidreport", "vendor/iri-string"]
 
 [patch.crates-io]
 hidreport = { path = "vendor/hidreport" }
+iri-string = { path = "vendor/iri-string" }
 quireink-stardict = { path = "vendor/quireink-stardict" }
 epub-stream = { path = "vendor/epub-stream" }
 swash = { path = "vendor/swash" }

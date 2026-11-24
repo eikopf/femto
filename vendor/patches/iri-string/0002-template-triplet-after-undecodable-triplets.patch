@@ -1,0 +1,207 @@
+femto patch for iri-string 0.7.15
+Subject: template: decode the triplet that follows undecodable triplets
+
+In reserved and fragment expansion ({+var}, {#var}) a value is decomposed into
+characters, plain text and percent-encoded triplets. When a triplet shows that
+the triplets before it are not UTF-8 (`%C2` followed by `%00`), the decoder
+gave up those triplets but kept the new one without looking at it. If that
+triplet is a character by itself, the next triplet found a complete character
+followed by more bytes in the buffer, and an assertion failed
+("`decoded` buffer contains at most one character"). At the end of the value
+the kept triplet was reported as undecodable although it is a character.
+
+Decode the head of the buffer in one place (DecoderBuffer::take_decoded) and
+call it again after undecodable triplets are given up, so the buffer never
+holds a complete character or an undecodable triplet between two pushes. The
+assertion is gone because the function no longer assumes it.
+
+femto expands templates from OPDS catalog servers with a keyword typed by the
+reader; the keyword `%C2%00%8A` with `{+query}` stopped the reader.
+
+--- a/src/parser/str/maybe_pct_encoded.rs
++++ b/src/parser/str/maybe_pct_encoded.rs
+@@ -131,6 +131,24 @@
+         }
+         Ok(())
+     }
++
++    /// Calls the output functions with the result of feeding data to the decoder.
++    fn output_push_result(&mut self, result: PushResult) -> fmt::Result {
++        match result {
++            PushResult::Decoded(len_written, c) => {
++                let len_written = usize::from(len_written.get());
++                let frag = core::str::from_utf8(&self.buf[..len_written])
++                    .expect("`DecoderBuffer` writes a valid ASCII string");
++                self.result = (self.f)(PctEncodedFragments::Char(frag, c));
++                self.result_continue_or_err()
++            }
++            PushResult::Undecodable(len_written) => self.output_as_undecodable(len_written),
++            PushResult::NeedMoreBytes => {
++                // Nothing to write at this time.
++                Ok(())
++            }
++        }
++    }
+ }
+ 
+ impl<F, B> fmt::Write for DecomposeWriter<'_, F, B>
+@@ -163,19 +181,14 @@
+             }
+ 
+             // Process decoding result.
+-            match result {
+-                PushResult::Decoded(len_written, c) => {
+-                    let len_written = usize::from(len_written.get());
+-                    let frag = core::str::from_utf8(&self.buf[..len_written])
+-                        .expect("`DecoderBuffer` writes a valid ASCII string");
+-                    self.result = (self.f)(PctEncodedFragments::Char(frag, c));
+-                    self.result_continue_or_err()?;
+-                }
+-                PushResult::Undecodable(len_written) => {
+-                    self.output_as_undecodable(len_written)?;
+-                }
+-                PushResult::NeedMoreBytes => {
+-                    // Nothing to write at this time.
++            self.output_push_result(result)?;
++            if matches!(result, PushResult::Undecodable(_)) {
++                // The triplet that made the sequence undecodable is not a
++                // part of it and is still in the decoder. That triplet can
++                // be a character or undecodable by itself, so process it
++                // now rather than when the next triplet comes.
++                while let Some(result) = self.decoder.take_decoded(self.buf) {
++                    self.output_push_result(result)?;
+                 }
+             }
+             rest = &rest[len_consumed..];
+@@ -307,47 +320,47 @@
+ 
+             // Now a new percent-encoded triplet is read.
+             // Check if the buffer contains a valid decodable content.
+-            let len_decoded = usize::from(self.len_encoded) / 3;
+-            match core::str::from_utf8(&self.decoded[..len_decoded]) {
+-                Ok(decoded_str) => {
+-                    // Successfully decoded.
+-                    let len_consumed = s.len() - chars.as_str().len();
+-                    let c = decoded_str
+-                        .chars()
+-                        .next()
+-                        .expect("`decoded` buffer is nonempty");
+-                    let len_result = NonZeroU8::new(self.len_encoded).expect(
+-                        "`encoded` buffer is nonempty since \
+-                         `push_single_encoded_byte()` was called",
+-                    );
+-                    self.write_and_pop(buf, len_result.get());
+-                    return (len_consumed, PushResult::Decoded(len_result, c));
+-                }
+-                Err(e) => {
+-                    // Undecodable.
+-                    assert_eq!(
+-                        e.valid_up_to(),
+-                        0,
+-                        "`decoded` buffer contains at most one character"
+-                    );
+-                    let skip_len_decoded = match e.error_len() {
+-                        // Unexpected EOF. Wait for remaining input.
+-                        None => continue,
+-                        // Skip invalid bytes.
+-                        Some(v) => v,
+-                    };
+-                    let len_consumed = s.len() - chars.as_str().len();
+-                    let len_result = skip_len_decoded as u8 * 3;
+-                    assert_ne!(skip_len_decoded, 0, "empty bytes cannot be invalid");
+-                    self.write_and_pop(buf, len_result);
+-                    return (len_consumed, PushResult::Undecodable(len_result));
+-                }
+-            };
++            if let Some(result) = self.take_decoded(buf) {
++                let len_consumed = s.len() - chars.as_str().len();
++                return (len_consumed, result);
++            }
++            // Unexpected EOF. Wait for remaining input.
+         }
+         let len_consumed = s.len() - chars.as_str().len();
+         (len_consumed, PushResult::NeedMoreBytes)
+     }
+ 
++    /// Takes the character at the beginning of the buffer, or the triplets
++    /// there that cannot be the beginning of a character.
++    ///
++    /// Returns `None` if the buffer has no complete triplets, or if the
++    /// triplets can be the beginning of a character when more triplets follow.
++    #[must_use]
++    fn take_decoded(&mut self, buf: &mut [u8]) -> Option<PushResult> {
++        let decoded = &self.decoded[..usize::from(self.len_encoded) / 3];
++        let (valid, error_len) = match core::str::from_utf8(decoded) {
++            Ok(valid) => (valid, None),
++            Err(e) => (
++                core::str::from_utf8(&decoded[..e.valid_up_to()])
++                    .expect("the bytes before `valid_up_to()` are valid UTF-8"),
++                e.error_len(),
++            ),
++        };
++        if let Some(c) = valid.chars().next() {
++            // Successfully decoded.
++            let len_result = NonZeroU8::new(c.len_utf8() as u8 * 3)
++                .expect("a character is encoded to one or more bytes");
++            self.write_and_pop(buf, len_result.get());
++            return Some(PushResult::Decoded(len_result, c));
++        }
++        // Undecodable, unless the input ended in the middle of a character.
++        let skip_len_decoded = error_len?;
++        // Skip invalid bytes.
++        let len_result = skip_len_decoded as u8 * 3;
++        self.write_and_pop(buf, len_result);
++        Some(PushResult::Undecodable(len_result))
++    }
++
+     /// Writes the incomplete data completely to the destination, and clears the internal buffer.
+     #[must_use]
+     pub(crate) fn flush(&mut self, buf: &mut [u8]) -> Option<NonZeroU8> {
+--- a/tests/template.rs
++++ b/tests/template.rs
+@@ -501,3 +501,45 @@
+         );
+     }
+ }
++
++#[test]
++fn reserved_expansion_of_triplet_after_undecodable_triplets() {
++    let mut context = SimpleContext::new();
++    // `%C2` cannot be followed by `%00`, and `%00` is a character by itself.
++    context.insert("nul", "%C2%00%8A");
++    context.insert("ascii", "%E3%81%41%42");
++    context.insert("invalid", "%C2%FF%41");
++    context.insert("end", "%C2%00");
++
++    // `&[(template, expected)]`.
++    const CASES: &[(&str, &str)] = &[
++        ("{+nul}", "%C2%00%8A"),
++        ("{+nul:1}", "%C2"),
++        ("{+nul:2}", "%C2%00"),
++        ("{+nul:3}", "%C2%00%8A"),
++        ("{#nul}", "#%C2%00%8A"),
++        ("{+ascii}", "%E3%81%41%42"),
++        // `%E3`, `%81`, `%41`, `%42`.
++        ("{+ascii:3}", "%E3%81%41"),
++        ("{+invalid}", "%C2%FF%41"),
++        ("{+invalid:2}", "%C2%FF"),
++        ("{+end}", "%C2%00"),
++        ("{+end:1}", "%C2"),
++    ];
++
++    for (template, expected) in CASES {
++        let template = UriTemplateStr::new(template).expect("must be valid template");
++        let expanded = template
++            .expand::<UriSpec, _>(&context)
++            .expect("must not have variable type error");
++        assert_eq!(expanded.to_string(), *expected, "template={template:?}");
++
++        let expanded_dynamic = template
++            .expand_dynamic_to_string::<UriSpec, _>(&mut context.clone())
++            .expect("must not have variable type error");
++        assert_eq!(
++            expanded_dynamic, *expected,
++            "dynamic, template={template:?}"
++        );
++    }
++}

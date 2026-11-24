@@ -1,12 +1,13 @@
 # Vendored crates and their patches
 
-Six crates are vendored under `vendor/` and wired in through `[patch.crates-io]` in the root `Cargo.toml` and in `firmware/picco/Cargo.toml` (`esp-idf-svc` only in the latter). Each is a published crates.io release with local source changes. This directory holds those changes as one patch series per crate, plus a README per crate that explains each patch.
+Seven crates are vendored under `vendor/` and wired in through `[patch.crates-io]` in the root `Cargo.toml` and in `firmware/picco/Cargo.toml` (`esp-idf-svc` only in the latter). Each is a published crates.io release with local source changes. This directory holds those changes as one patch series per crate, plus a README per crate that explains each patch.
 
 | Crate | Upstream release | Patches | Notes |
 | --- | --- | --- | --- |
 | [`epub-stream`](epub-stream/README.md) | 0.1.0 | 9 | One patch (0004) bundles thirteen entangled changes. Manifest and file set reduced by hand. |
 | [`esp-idf-svc`](esp-idf-svc/README.md) | 0.53.0 | 5 | Firmware only. |
 | [`hidreport`](hidreport/README.md) | 0.6.0 | 1 | |
+| [`iri-string`](iri-string/README.md) | 0.7.15 | 3 | Vendored 2026-11-24 to fix panics; each patch is meant for upstream. |
 | [`miniz_oxide`](miniz_oxide/README.md) | 0.9.1 | 2 | |
 | [`quireink-stardict`](quireink-stardict/README.md) | 0.3.0 | 6 | Lockfile regenerated; licence text added. |
 | [`swash`](swash/README.md) | 0.2.6 | 1 | File set reduced. |
@@ -23,7 +24,7 @@ Where several patches touch one file, later patches assume the earlier ones are 
 
 ## What was verified, and how
 
-Done on 2026-11-22 against repository commit `5718d90`:
+Done on 2026-11-22 against repository commit `5718d90`, for the six crates vendored then; `iri-string` was verified when it was vendored, as [its README](iri-string/README.md) records:
 
 1. Each `.crate` archive was downloaded from `https://static.crates.io/crates/<name>/<name>-<version>.crate`. Its SHA-256 matches the value that was recorded in the repository before this documentation was written.
 2. Each archive was extracted into an empty directory and the series applied in order, once with `patch -p1 -F0` (no fuzz) and once with `git apply`. Both gave identical trees for every crate.
@@ -53,6 +54,6 @@ For crate `<name>` moving from version `<old>` to `<new>`:
 4. Re-apply the non-patch differences listed in the crate README (remove the listed upstream files, restore the licence text, regenerate lockfiles, rewrite the reduced manifest where there is one).
 5. Replace `vendor/<name>` with the result, update the version pins in `Cargo.toml`, `firmware/picco/Cargo.toml` and the consuming crates, update both `Cargo.lock` files, and update the version and hash in `docs/dependencies.md` and the crate README here.
 6. Regenerate the patch files from the new tree so that they apply without offsets, and repeat the verification above.
-7. Run `./scripts/check`; it runs the vendored test suites for `epub-stream`, `miniz_oxide`, `quireink-stardict` and `hidreport`, and the host regressions in `tests/firmware` that compile code out of `vendor/esp-idf-svc`.
+7. Run `./scripts/check`; it runs the vendored test suites for `epub-stream`, `miniz_oxide`, `quireink-stardict`, `hidreport` and `iri-string`, and the host regressions in `tests/firmware` that compile code out of `vendor/esp-idf-svc`.
 
 To regenerate a single patch after editing vendored source, diff the file state before and after the change with `diff -u --label a/<path> --label b/<path>`, keep the existing header, and re-run the verification.

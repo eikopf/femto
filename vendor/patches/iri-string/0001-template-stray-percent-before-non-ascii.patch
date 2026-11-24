@@ -1,0 +1,77 @@
+femto patch for iri-string 0.7.15
+Subject: template: reject a stray `%` before a non-ASCII character without panicking
+
+validate_template_str() split the text after a `%` at byte 2 before checking
+that the two bytes are hexdigits. Byte 2 is inside a character when one ASCII
+character and then a multi-byte one follow the `%` (`%/é`), or when a
+character of three or four bytes follows it directly (`%あ`), and
+str::split_at() panics there. Check the two
+bytes first and split only once they are known to be ASCII hexdigits. Such a
+template is reported as InvalidPercentEncoding at the same location as an
+ASCII one.
+
+femto validates search templates sent by OPDS catalog servers with
+UriTemplateStr::new(); a server could stop the reader with one link.
+
+--- a/src/template/parser/validate.rs
++++ b/src/template/parser/validate.rs
+@@ -116,26 +116,29 @@
+             Some((literal, b'%', xdigits2_and_rest)) => {
+                 validate_literal(literal, offset)?;
+ 
+-                if xdigits2_and_rest.len() < 2 {
++                // Check the bytes before splitting: the two bytes after `%`
++                // are not necessarily ASCII, so the string cannot be split
++                // after them until they are known to be hexdigits.
++                let xdigits2 = xdigits2_and_rest.as_bytes();
++                if xdigits2.len() < 2 {
+                     return Err(Error::new(
+                         ErrorKind::InvalidPercentEncoding,
+                         offset + literal.len(),
+                     ));
+                 }
+-                let (xdigits2, new_rest) = xdigits2_and_rest.split_at(2);
+-                if !xdigits2.as_bytes()[0].is_ascii_hexdigit() {
++                if !xdigits2[0].is_ascii_hexdigit() {
+                     return Err(Error::new(
+                         ErrorKind::InvalidPercentEncoding,
+                         offset + literal.len() + 1,
+                     ));
+                 }
+-                if !xdigits2.as_bytes()[1].is_ascii_hexdigit() {
++                if !xdigits2[1].is_ascii_hexdigit() {
+                     return Err(Error::new(
+                         ErrorKind::InvalidPercentEncoding,
+                         offset + literal.len() + 2,
+                     ));
+                 }
+-                new_rest
++                &xdigits2_and_rest[2..]
+             }
+             Some((literal, b'{', expr_and_rest)) => {
+                 validate_literal(literal, offset)?;
+--- a/tests/template.rs
++++ b/tests/template.rs
+@@ -482,3 +482,22 @@
+         assert_eq!(expanded.to_string(), "%CE%B1%CE%B2");
+     }
+ }
++
++#[test]
++fn stray_percent_before_non_ascii_is_invalid() {
++    // `%` followed by one ASCII character and then a non-ASCII character:
++    // the two bytes after `%` end inside the non-ASCII character.
++    for template in [
++        "%/\u{00E9}",
++        "%a\u{00E9}",
++        "%\u{00E9}",
++        "%\u{3042}",
++        "a%4\u{3042}{x}",
++        "{x}%/\u{00E9}",
++    ] {
++        assert!(
++            UriTemplateStr::new(template).is_err(),
++            "template={template:?}"
++        );
++    }
++}

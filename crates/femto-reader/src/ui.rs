@@ -3454,3 +3454,7 @@ mod excerpt_tests {
         assert!(rows.iter().all(|row| row.graphemes(true).count() <= 32));
     }
 }
+
+#[cfg(test)]
+#[path = "ui_prop.rs"]
+mod machine;

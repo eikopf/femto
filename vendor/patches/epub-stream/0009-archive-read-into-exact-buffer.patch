@@ -1,0 +1,37 @@
+femto patch for epub-stream 0.1.0
+Subject: zip: read a deflated entry into a buffer of exactly its size
+
+read_file_with_scratch returned BufferTooSmall as soon as the buffer was
+full while compressed bytes remained. What remains may be only the end of
+the stream, which produces nothing: an empty file written with DEFLATE is
+two or five bytes of it, and the end marker of a larger file can fall in
+the next 8 KiB read after the one that produced its last byte. Such
+entries could not be read into a buffer of the size they state, which is
+the size validate_mimetype and the validator allocate.
+
+The check is removed. Inflate consumes the end of the stream without
+writing. It has no room past the size the entry states (patch 0007), so a
+stream that has more output than that makes no progress there and is
+refused by the existing check for that, now as SizeMismatch where with a
+buffer of exactly that size it was BufferTooSmall. A buffer smaller than
+the stated size is still BufferTooSmall, from the check before reading.
+
+Upstreamable.
+
+--- a/src/zip.rs
++++ b/src/zip.rs
+@@ -654,10 +654,10 @@
+                         compressed_remaining -= take;
+                     }
+ 
+-                    if written >= buf.len() && (compressed_remaining > 0 || !pending.is_empty()) {
+-                        return Err(ZipError::BufferTooSmall);
+-                    }
+-
++                    // A full buffer is not yet an error: what is left of the
++                    // stream may be only its end marker. With output still
++                    // to come and no room for it, inflate makes no progress,
++                    // which is refused below.
+                     let result = miniz_oxide::inflate::stream::inflate(
+                         &mut self.inflate_state,
+                         pending,

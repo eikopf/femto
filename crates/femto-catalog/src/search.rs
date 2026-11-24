@@ -50,6 +50,11 @@ pub fn opensearch_url(template: &str, source: &str, query: &str) -> Result<Strin
         };
         match name {
             "searchTerms" => {
+                // In a path, a segment of dots names another resource, and
+                // percent-encoding the dots does not change that.
+                if matches!(query, "." | "..") && !output.contains('?') {
+                    return Err(Error::Field("search query"));
+                }
                 searched = true;
                 for byte in query.bytes() {
                     if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {

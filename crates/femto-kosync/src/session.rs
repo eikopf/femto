@@ -430,16 +430,17 @@ impl Session {
                         !moved
                     };
                     if ask {
-                        // Not over a menu the user is in; it is asked when
-                        // the book is next opened.
-                        if same_book && !ui.is_open() {
+                        // Not over a menu the user is in or a page turn on
+                        // its way; it is asked when the book is next opened.
+                        if same_book
+                            && ui.ask_sync_conflict(percent, reader.book_progress_percent())
+                        {
                             self.conflict = Some(Conflict {
                                 book: origin.book,
                                 target,
                                 record,
                                 budget,
                             });
-                            ui.ask_sync_conflict(percent, reader.book_progress_percent());
                             self.outcome = Some("Asked which position to keep".into());
                             changed = true;
                         }

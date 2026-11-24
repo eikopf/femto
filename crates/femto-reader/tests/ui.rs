@@ -1680,6 +1680,37 @@ fn finish_navigation(ui: &mut ReaderUi, reader: &mut Reader) {
 }
 
 #[test]
+fn a_sync_question_is_not_asked_where_a_pending_page_turn_would_replace_it() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    let mut reader = Reader::new(
+        Document::open(root.join("navigation.epub")).unwrap(),
+        Fonts::new(Font::load(root.join("DejaVuSerif.ttf")).unwrap()),
+        ReaderState::default(),
+    )
+    .unwrap();
+    let mut ui = ReaderUi::default();
+    // Forward to the turn that leaves the first chapter.
+    for _ in 0..64 {
+        ui.turn(&mut reader, true).unwrap();
+        if ui.is_navigating() {
+            break;
+        }
+    }
+    assert!(ui.is_navigating() && !ui.is_open());
+    // The turn would close the question when it finished, so it is refused.
+    assert!(!ui.ask_sync_conflict(40, Some(10)));
+    assert!(!ui.is_open());
+    finish_navigation(&mut ui, &mut reader);
+    assert_eq!(reader.position().chapter, 1);
+    // On a page at rest it is asked, and not again over itself.
+    assert!(ui.ask_sync_conflict(40, Some(10)));
+    assert!(ui.is_open());
+    assert!(!ui.ask_sync_conflict(50, Some(10)));
+    ui.choose(&mut reader, "Go to 40%").unwrap();
+    assert!(ui.take_kosync_event().is_some());
+}
+
+#[test]
 fn chapter_menu_and_boundary_taps_keep_the_view_until_navigation_finishes() {
     use femto_reader::controller::Action;
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");

@@ -95,7 +95,7 @@ Each book keeps the position it had when it last agreed with the server, and whi
 | unmoved | moved | go to the other position | nothing |
 | moved | moved | the setting decides | nothing |
 
-If both moved offers ask (the default), take the other and keep this one. Asking opens a menu with Go to N% and Stay at N%; leaving it changes nothing, and the question returns when the book is next opened. It is not put over a menu the user is in. A reader that turned a page while the comparison was on its way counts as having moved. A book never synced counts as moved, so the first comparison with a record from another device asks.
+If both moved offers ask (the default), take the other and keep this one. Asking opens a menu with Go to N% and Stay at N%; leaving it changes nothing, and the question returns when the book is next opened. It is not put over a menu the user is in, nor while a page turn or other pending work would replace it on finishing; it is then left for the next opening. A reader that turned a page while the comparison was on its way counts as having moved. A book never synced counts as moved, so the first comparison with a record from another device asks.
 
 Before sleep the reader shows the sleep page at once and uploads behind it, then sleeps; a press in that time brings the page back. The upload is subject to the same 30-second silence limit as any request and to no other. What the reader left for the next opening (a moved other device) is not touched. The agreed position is saved as soon as it is set, since a reader that forgot it would take its own upload for a position it had yet to send.
 

@@ -536,12 +536,20 @@ impl ReaderUi {
         self.error = None;
     }
     /// Asks which of two positions to keep: the other device's, at
-    /// `remote` percent of the book, or this reader's.
-    pub fn ask_sync_conflict(&mut self, remote: u8, local: Option<u8>) {
+    /// `remote` percent of the book, or this reader's. False, and nothing is
+    /// asked, over a menu the user is in or while pending work, such as a
+    /// page turn into another chapter, would replace the question when it
+    /// finishes.
+    #[must_use]
+    pub fn ask_sync_conflict(&mut self, remote: u8, local: Option<u8>) -> bool {
+        if self.is_open() || self.is_busy() {
+            return false;
+        }
         self.sync_conflict = (remote.min(100), local);
         self.panel = Some(Panel::SyncConflict);
         self.selected = 0;
         self.error = None;
+        true
     }
     pub fn set_dictionary_path(&mut self, path: Option<PathBuf>) {
         self.dictionary_choices = path

@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ac85dfd4fd903f9736cd5c1bce2fd1a8b64e37dc14c41c4488f0bf6b5d08a19a # shrinks to entries = [Entry { name: "B", data: [], method: Stored, local_extra: 0, central_extra: 0, comment: 0, checksum: false }, Entry { name: "b", data: [], method: Stored, local_extra: 0, central_extra: 0, comment: 0, checksum: false }]
+cc 750746f81a53d5682369e3d827eda86167adf055106eda9c8e3a5e7b0d97d0af # shrinks to entries = [Entry { name: "a", data: [], method: Deflated, local_extra: 0, central_extra: 0, comment: 0, checksum: false }]

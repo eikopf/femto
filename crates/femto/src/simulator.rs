@@ -157,6 +157,22 @@ fn save(reader: &mut Reader, path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+/// Identifies this build to the page index store, whose records hold only for
+/// the layout code that made them. The Picco uses its image hash; the path,
+/// size and modification time of the running executable stand in for one
+/// here, and differ after every rebuild.
+fn build_salt() -> Result<String> {
+    let path = std::env::current_exe()?;
+    let file = std::fs::metadata(&path)?;
+    let modified = file.modified()?.duration_since(UNIX_EPOCH)?;
+    Ok(format!(
+        "{}:{}:{}",
+        path.display(),
+        file.len(),
+        modified.as_nanos()
+    ))
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
     #[cfg(all(unix, not(target_os = "espidf")))]
@@ -232,11 +248,11 @@ fn main() -> Result<()> {
     }
     let mut reader = startup.finish()?;
     reader.record_position(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs());
-    // Chapter page indexes are kept beside the state file.
-    reader.set_index_store(Some(femto_reader::page_index::IndexStore::new(
-        args.state.with_extension("index"),
-        env!("CARGO_PKG_VERSION"),
-    )));
+    // Chapter page indexes are kept beside the state file, and not at all
+    // when nothing tells this build from another.
+    reader.set_index_store(build_salt().ok().map(|salt| {
+        femto_reader::page_index::IndexStore::new(args.state.with_extension("index"), &salt)
+    }));
     drop(loading);
     let mut ui = ReaderUi::default();
     if let Some(directory) = args.dictionary_directory {

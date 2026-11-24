@@ -331,3 +331,110 @@ fn opening_shows_the_saved_page_before_the_chapter_is_indexed_and_reuses_a_recor
     resized.books.clear();
     assert!(!open(resized, store()).0.is_indexed());
 }
+
+#[test]
+fn a_recorded_index_that_stops_matching_layout_is_replaced_and_reading_continues() {
+    use femto_reader::page_index::IndexStore;
+    let text = "A build that breaks one line differently must not strand the reader. ".repeat(600);
+    let directory = tempfile::tempdir().unwrap();
+    let open = |state: ReaderState, recorded: bool| {
+        let other = Document::from_text("other.txt", "Another book.").unwrap();
+        let mut reader = Reader::new(other, fonts(), state).unwrap();
+        reader.set_index_store(recorded.then(|| IndexStore::new(directory.path(), "build")));
+        let mut opening = reader
+            .begin_open(Document::from_text("book.txt", &text).unwrap())
+            .unwrap();
+        while !reader.step_open(&mut opening).unwrap() {}
+        reader.finish_open(opening).unwrap();
+        reader
+    };
+    let mut fresh = open(ReaderState::default(), false);
+    let mut recording = open(ReaderState::default(), true);
+    while recording.index_step().unwrap() {}
+    let pages = recording.page_count();
+    assert!(pages > 8);
+    let file = std::fs::read_dir(directory.path())
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let sound = std::fs::read(&file).unwrap();
+
+    // Move the boundary between the third and fourth pages by one byte, as a
+    // build with other line breaking and the same salt would have recorded
+    // it. Twelve header bytes, eight record header bytes, sixteen bytes a
+    // page: start block, start byte, end block, end byte.
+    let mut stale = sound.clone();
+    let (end, next_start) = (20 + 16 * 2 + 12, 20 + 16 * 3 + 4);
+    assert_eq!(stale[end..end + 4], stale[next_start..next_start + 4]);
+    let moved = u32::from_le_bytes(stale[end..end + 4].try_into().unwrap()) + 1;
+    stale[end..end + 4].copy_from_slice(&moved.to_le_bytes());
+    stale[next_start..next_start + 4].copy_from_slice(&moved.to_le_bytes());
+
+    // The opening page reproduces, so the record is accepted, in every
+    // session. Turning onto the damaged page continues with a fresh index.
+    for _ in 0..2 {
+        std::fs::write(&file, &stale).unwrap();
+        let mut reader = open(ReaderState::default(), true);
+        assert!(reader.is_indexed());
+        for index in 1..=5 {
+            reader.dispatch(Action::Next).unwrap();
+            fresh.dispatch(Action::Next).unwrap();
+            assert_eq!(reader.page_index(), index);
+            assert_eq!(reader.render(2).unwrap(), fresh.render(2).unwrap());
+        }
+        // The fresh index replaces the record once it is complete.
+        assert!(!reader.is_indexed());
+        while reader.index_step().unwrap() {}
+        assert_eq!(reader.page_count(), pages);
+        assert_eq!(std::fs::read(&file).unwrap(), sound);
+        while fresh.page_index() > 0 {
+            fresh.dispatch(Action::Previous).unwrap();
+        }
+    }
+
+    // Preparing a turn while idle, as the Picco does, meets the damage first.
+    std::fs::write(&file, &stale).unwrap();
+    let mut reader = open(ReaderState::default(), true);
+    reader.dispatch(Action::Next).unwrap();
+    while reader.prepare_turn(true, 2).unwrap() || reader.prepare_turn(false, 2).unwrap() {}
+    assert_eq!(reader.page_index(), 1);
+    for index in 1..=2 {
+        assert_eq!(reader.page_index(), index);
+        fresh.dispatch(Action::Next).unwrap();
+        assert_eq!(reader.render(2).unwrap(), fresh.render(2).unwrap());
+        reader.dispatch(Action::Next).unwrap();
+    }
+
+    // Turning backwards from a saved position beyond the damage.
+    std::fs::write(&file, &stale).unwrap();
+    while fresh.page_index() < 5 {
+        fresh.dispatch(Action::Next).unwrap();
+    }
+    fresh.record_position(1);
+    let mut reader = open(fresh.state.clone(), true);
+    assert_eq!(reader.page_index(), 5);
+    for index in (0..5).rev() {
+        reader.dispatch(Action::Previous).unwrap();
+        fresh.dispatch(Action::Previous).unwrap();
+        assert_eq!(reader.page_index(), index);
+    }
+    assert_eq!(reader.render(2).unwrap(), fresh.render(2).unwrap());
+
+    // A recorded page that starts outside the chapter cannot be laid out at
+    // all; the index is replaced just the same.
+    let mut outside = sound.clone();
+    let last = 20 + 16 * (pages - 1);
+    outside[last..last + 4].copy_from_slice(&0x00ff_ffff_u32.to_le_bytes());
+    std::fs::write(&file, &outside).unwrap();
+    let mut reader = open(ReaderState::default(), true);
+    assert_eq!(reader.page_count(), pages);
+    for index in 1..pages {
+        reader.dispatch(Action::Next).unwrap();
+        fresh.dispatch(Action::Next).unwrap();
+        assert_eq!(reader.page_index(), index);
+    }
+    assert_eq!(reader.page_count(), pages);
+    assert_eq!(reader.render(2).unwrap(), fresh.render(2).unwrap());
+}

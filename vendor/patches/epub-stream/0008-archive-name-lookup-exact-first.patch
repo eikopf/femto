@@ -1,0 +1,46 @@
+femto patch for epub-stream 0.1.0
+Subject: zip: find the entry of exactly the name asked for
+
+get_entry tested every entry against the exact name and against its
+fallbacks (ASCII case ignored, a leading slash on either side ignored) in
+one pass, so the first entry that matched in any of those ways was
+returned. In an archive that holds both OEBPS/Chapter.xhtml and
+OEBPS/chapter.xhtml, asking for the second returned the first; the same
+for "/a" and "a". Names that differ in case are different files (EPUB OCF
+3.3, section 4.2.2).
+
+The entry of exactly that name is now looked for first. Only when there
+is none do the fallbacks apply, as before, to the first entry they match.
+
+Upstreamable.
+
+--- a/src/zip.rs
++++ b/src/zip.rs
+@@ -545,14 +545,20 @@
+         Ok(Some(entry))
+     }
+ 
+-    /// Get entry by filename (case-insensitive)
++    /// Get entry by filename: the entry of exactly that name, or failing that
++    /// the first whose name differs only in ASCII case or by a leading slash
+     pub fn get_entry(&self, name: &str) -> Option<&CdEntry> {
+-        self.entries.iter().find(|e| {
+-            e.filename == name
+-                || e.filename.eq_ignore_ascii_case(name)
+-                || (name.starts_with('/') && e.filename.eq_ignore_ascii_case(&name[1..]))
+-                || (e.filename.starts_with('/') && e.filename[1..].eq_ignore_ascii_case(name))
+-        })
++        self.entries
++            .iter()
++            .find(|e| e.filename == name)
++            .or_else(|| {
++                self.entries.iter().find(|e| {
++                    e.filename.eq_ignore_ascii_case(name)
++                        || (name.starts_with('/') && e.filename.eq_ignore_ascii_case(&name[1..]))
++                        || (e.filename.starts_with('/')
++                            && e.filename[1..].eq_ignore_ascii_case(name))
++                })
++            })
+     }
+ 
+     /// Debug: Log all entries in the ZIP (for troubleshooting)

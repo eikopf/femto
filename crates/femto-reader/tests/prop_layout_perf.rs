@@ -33,6 +33,42 @@ fn time(text: &str) -> (usize, f64) {
     (pages, elapsed)
 }
 
+/// Soft hyphens are break opportunities like any other, so a run of them
+/// should cost about what the same run costs with zero-width spaces.
+#[test]
+#[ignore = "bug: each line of a long run of soft hyphens shapes every later soft hyphen candidate in the 4096-byte line buffer"]
+fn soft_hyphen_runs_lay_out_in_time_comparable_to_other_break_opportunities() {
+    let (_, control) = time(&"ab\u{200b}".repeat(600));
+    let (pages, soft) = time(&"ab\u{ad}".repeat(600));
+    assert!(pages > 0);
+    assert!(
+        soft < 20.0 * control + 0.05,
+        "{soft:.3} s with soft hyphens, {control:.3} s with zero-width spaces"
+    );
+}
+
+/// Layout of one unbreakable word should grow linearly with its length:
+/// four times the text in about four times the time.
+#[test]
+#[ignore = "bug: each line of an unbreakable word scans the rest of the paragraph for a break opportunity"]
+fn unbreakable_words_lay_out_in_linear_time() {
+    let (_, small) = time(&"a".repeat(128 * 1024));
+    let (_, large) = time(&"a".repeat(512 * 1024));
+    assert!(
+        large < 6.0 * small,
+        "128 KiB took {small:.3} s and 512 KiB {large:.3} s"
+    );
+}
+
+/// A grapheme is never split, so one longer than the line buffer cannot be
+/// laid out; the whole chapter then fails to open.
+#[test]
+#[ignore = "ambiguous: one grapheme of more than 4096 bytes makes its chapter unreadable"]
+fn a_grapheme_longer_than_the_line_buffer_is_still_paginated() {
+    let (pages, _) = time(&format!("before a{} after", "\u{301}".repeat(2100)));
+    assert!(pages > 0);
+}
+
 #[test]
 #[ignore = "measurement"]
 fn measure() {

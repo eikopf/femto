@@ -88,15 +88,17 @@ fn style() -> impl Strategy<Value = TextStyle> {
         prop_oneof![5 => Just(1.0f32), 1 => 0.5f32..2.0],
         any::<bool>(),
     )
-        .prop_map(|(align, direction, hyphens, indent, scale, bold)| TextStyle {
-            align,
-            direction,
-            hyphens,
-            indent,
-            scale,
-            bold,
-            ..Default::default()
-        })
+        .prop_map(
+            |(align, direction, hyphens, indent, scale, bold)| TextStyle {
+                align,
+                direction,
+                hyphens,
+                indent,
+                scale,
+                bold,
+                ..Default::default()
+            },
+        )
 }
 
 /// A paragraph of one or more spans. Empty and whitespace-only texts occur.
@@ -347,7 +349,12 @@ fn check_fit(pages: &[Page], config: LayoutConfig) -> Result<(), TestCaseError> 
     Ok(())
 }
 
-fn check_chapter(chapter: &Chapter, fonts: &Fonts, config: LayoutConfig, picks: &[usize]) -> Result<(), TestCaseError> {
+fn check_chapter(
+    chapter: &Chapter,
+    fonts: &Fonts,
+    config: LayoutConfig,
+    picks: &[usize],
+) -> Result<(), TestCaseError> {
     let start = Locator {
         chapter: chapter.index,
         ..Default::default()
@@ -384,7 +391,12 @@ fn check_chapter(chapter: &Chapter, fonts: &Fonts, config: LayoutConfig, picks: 
     for &pick in picks {
         let from = pick % pages.len();
         let resumed = all_pages(chapter, fonts, config, pages[from].start).unwrap();
-        prop_assert_eq!(resumed.len(), pages.len() - from, "resumed at page {}", from);
+        prop_assert_eq!(
+            resumed.len(),
+            pages.len() - from,
+            "resumed at page {}",
+            from
+        );
         for (a, b) in pages[from..].iter().zip(&resumed) {
             prop_assert_eq!(fingerprint(a), fingerprint(b), "resumed at page {}", from);
         }
@@ -452,8 +464,210 @@ fn cases() -> u32 {
         .unwrap_or(64)
 }
 
+fn plain_chapter(text: String) -> Chapter {
+    Chapter {
+        language: "en".into(),
+        index: 0,
+        href: "c.xhtml".into(),
+        blocks: vec![Block::Text(Paragraph {
+            list: None,
+            spans: vec![Span {
+                language: None,
+                range: 0..text.len(),
+                style: TextStyle::default(),
+            }],
+            text,
+        })],
+        warnings: vec![],
+        anchors: Default::default(),
+        notes: vec![],
+        links: vec![],
+    }
+}
+
+/// Words whose shaped width differs from the sum of their unshaped advances:
+/// kerning pairs and ligatures.
+fn latin_text() -> impl Strategy<Value = String> {
+    let words = prop::sample::select(vec![
+        "AV",
+        "AVAVAVAV",
+        "To",
+        "Wa",
+        "WAVE",
+        "Ty",
+        "LT",
+        "VA",
+        "fi",
+        "office",
+        "T.",
+        "r,",
+        "Yo",
+        "PA",
+        "a",
+        "the",
+        "water",
+        "AWAY",
+        "TAVATAVA",
+        "AVAVAVAVAVAVAVAVAVAV",
+        "ToToToToToToTo",
+        "WAWAWAWAWAWAWAWA",
+        "LTLTLTLTLTLTLTLT",
+        "YoYoYoYoYoYoYoYo",
+    ]);
+    prop::collection::vec(words, 2..60).prop_map(|words| words.join(" "))
+}
+
+/// Words of joining letters, far narrower shaped than as isolated forms.
+fn arabic_text() -> impl Strategy<Value = String> {
+    let words = prop::sample::select(vec![
+        "السلام",
+        "عليكم",
+        "لا",
+        "بسم",
+        "الله",
+        "محمد",
+        "تتتتتتتت",
+        "ببببب",
+        "للللل",
+        "في",
+    ]);
+    prop::collection::vec(words, 2..60).prop_map(|words| words.join(" "))
+}
+
+fn lines_of(text: &str, fonts: &Fonts, config: LayoutConfig) -> Vec<femto_reader::layout::Line> {
+    all_pages(
+        &plain_chapter(text.into()),
+        fonts,
+        config,
+        Locator::default(),
+    )
+    .unwrap()
+    .into_iter()
+    .flat_map(|page| page.lines)
+    .collect()
+}
+
+/// A line ends at the last break opportunity that fits: the line with the
+/// next word added is wider than the column.
+fn check_maximal(text: &str, width: u32, font_size: f32, serif: bool) -> Result<(), TestCaseError> {
+    let config = LayoutConfig {
+        width,
+        height: 2048,
+        margin: 0,
+        footer: 0,
+        font_size,
+        line_height: 1.0,
+        hyphenation: Hyphenation::Off,
+    };
+    let fonts = fonts(serif);
+    let lines = lines_of(text, &fonts, config);
+    for pair in lines.windows(2) {
+        let start = pair[0].start.byte;
+        let next = pair[1].start.byte;
+        let word = unicode_linebreak::linebreaks(&text[next..])
+            .next()
+            .unwrap()
+            .0;
+        let longer = &text[start..next + word];
+        // On a page wide enough for anything the longer line is shaped
+        // whole, without the line breaker's shortcuts.
+        let wide = LayoutConfig {
+            width: 2048,
+            ..config
+        };
+        let alone = lines_of(longer, &fonts, wide);
+        prop_assume!(alone.len() == 1);
+        let shaped = alone[0].width;
+        prop_assert!(
+            shaped > width as f32,
+            "line {:?} ({} of {width}) stopped before a word that fits: {:?} is {shaped} wide",
+            pair[0].text,
+            pair[0].width,
+            longer,
+        );
+    }
+    Ok(())
+}
+
+/// `break_line` promises the last break opportunity that fits, "as a scan
+/// over every opportunity in order would". Its shortcut takes the unshaped
+/// advances of the next word for a lower bound on its shaped width, which
+/// joined Arabic letters are far below.
+#[test]
+#[ignore = "bug: a line stops before an Arabic word that fits when the regular font has Arabic"]
+fn a_joined_arabic_word_that_fits_stays_on_the_line() {
+    let fonts = fonts(false);
+    let config = LayoutConfig {
+        margin: 0,
+        hyphenation: Hyphenation::Off,
+        ..Default::default()
+    };
+    let wide = LayoutConfig {
+        width: 2048,
+        ..config
+    };
+    let two = lines_of("ببببب ببببب", &fonts, wide);
+    assert_eq!(two.len(), 1);
+    let width = two[0].width.ceil() as u32 + 1;
+    assert!(width >= 80);
+    let lines = lines_of(
+        "ببببب ببببب ببببب",
+        &fonts,
+        LayoutConfig { width, ..config },
+    );
+    assert_eq!(lines[0].text, "ببببب ببببب");
+}
+
+/// The same shortcut allows 3% for kerning, which a word of kerning pairs
+/// exceeds.
+#[test]
+#[ignore = "bug: a line stops before a heavily kerned word that fits"]
+fn a_kerned_word_that_fits_stays_on_the_line() {
+    let fonts = fonts(false);
+    let config = LayoutConfig {
+        margin: 0,
+        hyphenation: Hyphenation::Off,
+        ..Default::default()
+    };
+    let wide = LayoutConfig {
+        width: 2048,
+        ..config
+    };
+    let two = lines_of("Yo YoYoYoYoYoYoYoYo", &fonts, wide);
+    assert_eq!(two.len(), 1);
+    let width = two[0].width.ceil() as u32 + 1;
+    let lines = lines_of(
+        "Yo YoYoYoYoYoYoYoYo Yo",
+        &fonts,
+        LayoutConfig { width, ..config },
+    );
+    assert_eq!(lines[0].text, "Yo YoYoYoYoYoYoYoYo");
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: cases(), max_shrink_iters: 2000, ..ProptestConfig::default() })]
+
+    #[test]
+    #[ignore = "bug: a line stops before a heavily kerned word that fits"]
+    fn latin_lines_take_every_word_that_fits(
+        text in latin_text(),
+        width in 80u32..400,
+        font_size in 8.0f32..40.0,
+        serif in any::<bool>(),
+    ) {
+        check_maximal(&text, width, font_size, serif)?;
+    }
+
+    #[test]
+    #[ignore = "bug: a line stops before an Arabic word that fits when the regular font has Arabic"]
+    fn arabic_lines_take_every_word_that_fits(
+        text in arabic_text(),
+        width in 80u32..400,
+        font_size in 8.0f32..40.0,
+        serif in any::<bool>(),
+    ) {
+        check_maximal(&text, width, font_size, serif)?;
+    }
 
     #[test]
     fn pagination_covers_fits_and_resumes(

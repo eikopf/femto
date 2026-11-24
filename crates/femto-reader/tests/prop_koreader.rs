@@ -245,6 +245,55 @@ fn probe() {
     }
 }
 
+fn body(body: &str) -> (tempfile::NamedTempFile, Document) {
+    let file = epub(&[format!(
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>t</title></head><body>{body}</body></html>"
+    )]);
+    let document = Document::open(file.path()).unwrap();
+    (file, document)
+}
+
+fn round_trip(document: &mut Document, block: usize, byte: usize) -> Locator {
+    let at = Locator {
+        chapter: 0,
+        block,
+        byte,
+    };
+    let pointer = document.koreader_position(at).unwrap();
+    document.resolve_koreader_position(&pointer).unwrap()
+}
+
+/// `docs/koreader-sync.md`: the other reader "opens a little earlier and
+/// never later". The newline of a CR LF pair in preformatted text has a place
+/// in the source, yet comes back as the character after it.
+#[test]
+#[ignore = "bug: the newline of CR LF in preformatted text resolves one character later"]
+fn preformatted_crlf_newline_round_trips() {
+    let (_file, mut document) = body("<pre>ab\r\ncd</pre>");
+    let chapter = document.chapter(0).unwrap();
+    let Block::Text(paragraph) = &chapter.blocks[0] else {
+        panic!("text expected");
+    };
+    assert_eq!(paragraph.text, "ab\ncd");
+    for byte in 0..=paragraph.text.len() {
+        assert_eq!(round_trip(&mut document, 0, byte).byte, byte);
+    }
+}
+
+/// The other reader drops a newline that opens a preformatted block; this
+/// reader keeps it, so the block's start comes back one character later.
+#[test]
+#[ignore = "ambiguous: the start of a preformatted block that opens with a newline resolves one character later"]
+fn preformatted_block_start_is_never_later() {
+    let (_file, mut document) = body("<pre>\nab</pre>");
+    let chapter = document.chapter(0).unwrap();
+    let Block::Text(paragraph) = &chapter.blocks[0] else {
+        panic!("text expected");
+    };
+    assert_eq!(paragraph.text, "\nab");
+    assert_eq!(round_trip(&mut document, 0, 0).byte, 0);
+}
+
 fn cases() -> u32 {
     std::env::var("PROP_CASES")
         .ok()

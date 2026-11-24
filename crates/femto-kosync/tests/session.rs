@@ -176,6 +176,25 @@ fn download_commits_current_annotations_and_rejects_stale_failed_and_cancelled_r
     }
 }
 #[test]
+fn a_question_not_put_over_an_open_menu_still_has_an_outcome_to_log() {
+    let (mut reader, mut session, mut ui, factory, ready, _) = setup(&fixture("sample.epub"));
+    ready.store(true, Ordering::SeqCst);
+    reader.record_position(10);
+    let original = reader.position();
+    // Both have moved, so the user would be asked, but is in a menu.
+    ui.open();
+    assert!(session.reconcile(&reader, factory, false));
+    until(|| {
+        session.poll(&mut reader, &mut ui, 20, |_| panic!("nothing to save"));
+        !session.is_busy()
+    });
+    assert_eq!(
+        session.take_outcome().as_deref(),
+        Some("Question left for the next opening")
+    );
+    assert_eq!(reader.position(), original);
+}
+#[test]
 fn changed_source_file_is_rejected_before_network_access() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("book.epub");

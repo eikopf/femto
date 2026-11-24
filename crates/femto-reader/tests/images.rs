@@ -361,3 +361,32 @@ fn an_image_decoded_alone_may_be_larger_unless_it_is_progressive() {
         .is_ok()
     );
 }
+
+/// A decoder skips fill bytes and stray bytes between segments. What it
+/// skips must not hide that the frame it then decodes is progressive.
+#[test]
+fn a_progressive_jpeg_is_recognized_however_its_segments_are_padded() {
+    let whole = fs::read(fixture("large-progressive.jpg")).unwrap();
+    let frame = whole
+        .windows(2)
+        .position(|pair| pair == [0xff, 0xc2])
+        .unwrap();
+    for (label, padding) in [
+        ("fill byte", &[0xff][..]),
+        ("fill bytes", &[0xff, 0xff, 0xff]),
+        ("stray byte", &[0x00]),
+        ("stray bytes", &[0x12, 0x34]),
+        ("restart marker", &[0xff, 0xd0]),
+        ("second start of image", &[0xff, 0xd8]),
+        ("TEM marker", &[0xff, 0x01]),
+    ] {
+        for at in [2, frame] {
+            let mut bytes = whole.clone();
+            bytes.splice(at..at, padding.iter().copied());
+            assert!(
+                image::decode_within(&bytes, image::Limits::ALONE).is_err(),
+                "{label} at byte {at}: decoded as if not progressive"
+            );
+        }
+    }
+}

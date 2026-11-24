@@ -119,24 +119,6 @@ fn buffer(capacity: usize) -> Result<Vec<u8>> {
     Ok(pixels)
 }
 
-/// Whether a JPEG is progressive, which takes memory for every coefficient
-/// of the image at once and not only for its pixels.
-fn progressive(bytes: &[u8]) -> bool {
-    let mut at = 2;
-    while let Some(&[0xff, marker, high, low]) = bytes
-        .get(at..at + 4)
-        .and_then(|header| <&[u8; 4]>::try_from(header).ok())
-    {
-        match marker {
-            0xc2 | 0xc6 | 0xca | 0xce => return true,
-            // Another frame type, or the scan: the frame header has passed.
-            0xc0 | 0xc1 | 0xc3 | 0xc5 | 0xc7 | 0xc9 | 0xcb | 0xcd | 0xcf | 0xda => return false,
-            _ => at += 2 + usize::from(u16::from_be_bytes([high, low])),
-        }
-    }
-    false
-}
-
 fn png_reader(bytes: &[u8], limits: Limits) -> Result<png::Reader<Cursor<&[u8]>>> {
     let mut decoder = png::Decoder::new(Cursor::new(bytes));
     decoder.set_limits(png::Limits {
@@ -175,7 +157,11 @@ fn jpeg_reader(bytes: &[u8], limits: Limits) -> Result<Box<JpegDecoder<ZCursor<&
         width: info.width as u32,
         height: info.height as u32,
     }
-    .within(if progressive(bytes) {
+    // A progressive JPEG takes memory for every coefficient of the image at
+    // once and not only for its pixels. The decoder says which frame it
+    // found: it accepts one frame header and skips bytes between segments,
+    // so a second reading of the segments here could disagree with it.
+    .within(if info.sof.is_progressive() {
         limits.pixels.min(MAX_IMAGE_PIXELS)
     } else {
         limits.pixels

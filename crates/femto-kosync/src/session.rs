@@ -558,4 +558,92 @@ mod tests {
         assert!(step(None, here, None, Ask, false) == is(Step::Push));
         assert!(step(None, here, newer, Ask, false) == is(Step::Ask));
     }
+
+    /// Every combination of a small domain against the table of
+    /// docs/koreader-sync.md, with "moved" worked out from the prose there
+    /// rather than from `step`.
+    #[test]
+    fn every_small_case_follows_the_documented_table() {
+        let places = [
+            Locator::default(),
+            Locator {
+                block: 7,
+                ..Locator::default()
+            },
+        ];
+        let writers = ["reader", "phone", "tablet", ""];
+        let times = [10, 11];
+        let mut checkpoints = vec![None];
+        let mut records = vec![None];
+        for writer in writers {
+            for time in times {
+                records.push(Some((writer, time)));
+                for position in places {
+                    checkpoints.push(Some(Synced {
+                        position,
+                        device_id: writer.into(),
+                        timestamp: time,
+                    }));
+                }
+            }
+        }
+        let mut seen = [0usize; 4];
+        for synced in &checkpoints {
+            for local in places {
+                for remote in &records {
+                    for policy in [SyncConflict::Ask, SyncConflict::Remote, SyncConflict::Local] {
+                        for leaving in [false, true] {
+                            // "The reader has moved if its position differs
+                            // from that one"; never synced counts as moved.
+                            let reader = match synced {
+                                None => true,
+                                Some(synced) => synced.position != local,
+                            };
+                            // "The other side has moved if the server's
+                            // record was written by another device and is
+                            // not that record."
+                            let other = match (remote, synced) {
+                                (None, _) => false,
+                                (Some((writer, _)), _) if *writer == "reader" => false,
+                                (Some(_), None) => true,
+                                (Some((writer, time)), Some(synced)) => {
+                                    !(synced.device_id == *writer && synced.timestamp == *time)
+                                }
+                            };
+                            let expected = match (reader, other, leaving) {
+                                (false, false, _) => 0,
+                                (true, false, _) => 1,
+                                (_, true, true) => 0,
+                                (false, true, false) => 2,
+                                (true, true, false) => match policy {
+                                    SyncConflict::Ask => 3,
+                                    SyncConflict::Remote => 2,
+                                    SyncConflict::Local => 1,
+                                },
+                            };
+                            let actual = match step(
+                                synced.as_ref(),
+                                local,
+                                *remote,
+                                "reader",
+                                policy,
+                                leaving,
+                            ) {
+                                Step::Nothing => 0,
+                                Step::Push => 1,
+                                Step::Take => 2,
+                                Step::Ask => 3,
+                            };
+                            assert_eq!(
+                                actual, expected,
+                                "{synced:?} {local:?} {remote:?} {policy:?} leaving={leaving}"
+                            );
+                            seen[expected] += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(seen.iter().all(|&count| count > 20), "{seen:?}");
+    }
 }

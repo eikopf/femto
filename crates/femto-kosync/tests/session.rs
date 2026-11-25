@@ -155,8 +155,8 @@ fn download_commits_current_annotations_and_rejects_stale_failed_and_cancelled_r
             !session.is_busy()
         });
         if case == "success" {
-            // The position, then the record it now agrees with.
-            assert_eq!(saves, 2);
+            // The position and the record it now agrees with, together.
+            assert_eq!(saves, 1);
             assert_eq!(
                 reader.position(),
                 femto_reader::layout::Locator {
@@ -213,6 +213,43 @@ fn changed_source_file_is_rejected_before_network_access() {
     });
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
+#[test]
+fn a_taken_position_and_its_agreement_reach_storage_in_one_save() {
+    let (mut reader, mut session, mut ui, factory, ready, _) = setup(&fixture("sample.epub"));
+    ready.store(true, Ordering::SeqCst);
+    reader.record_position(10);
+    reader.state.sync_conflict = femto_reader::state::SyncConflict::Remote;
+    assert!(session.reconcile(&reader, factory, false));
+    // Storage keeps the first save and loses whatever follows it.
+    let mut stored = None;
+    until(|| {
+        session.poll(&mut reader, &mut ui, 20, |state| {
+            if stored.is_some() {
+                return Err(io::Error::other("card full").into());
+            }
+            stored = Some(state.clone());
+            Ok(())
+        });
+        !session.is_busy()
+    });
+    assert_eq!(
+        session.take_outcome().as_deref(),
+        Some("Reading position downloaded")
+    );
+    // A reader restarted from it is where the other device was, and knows
+    // that it agrees with that record.
+    let book = stored.unwrap().books.into_values().next().unwrap();
+    assert_eq!(book.position, reader.position());
+    let agreed = book.synced.expect("the agreement saved with the position");
+    assert_eq!(
+        (agreed.position, agreed.device_id.as_str(), agreed.timestamp),
+        (reader.position(), "peer", 123)
+    );
+    assert_eq!(
+        reader.state.books.values().next().unwrap().synced,
+        Some(agreed)
+    );
+}
 
 #[test]
 fn automatic_sync_asks_when_both_moved_follows_the_answer_and_uploads_before_sleep() {
@@ -247,7 +284,7 @@ fn automatic_sync_asks_when_both_moved_follows_the_answer_and_uploads_before_sle
         .event(event, &reader, &mut ui, factory.clone())
         .unwrap();
     let (saves, _) = run(&mut session, &mut reader, &mut ui);
-    assert_eq!(saves, 2);
+    assert_eq!(saves, 1);
     assert_ne!(reader.position(), original);
     let agreed = synced(&reader).unwrap();
     assert_eq!(

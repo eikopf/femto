@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 027b6936e37b06add0a5605dc550864ec8a3860f09be14f12d7edb64a274c796 # shrinks to ops = [Write { name: 7, content: 0, keep_time: false }, Rename { from: 7, to: 0 }, Open { name: 0 }, Scan]
+cc df34ba2675768ba0650439b0acc5c4fc1e73a7b75870c15f2d4ac5fd28efeb29 # shrinks to ops = [Write { name: 7, content: 0, keep_time: false }, Rename { from: 7, to: 2 }, Open { name: 2 }, Scan]

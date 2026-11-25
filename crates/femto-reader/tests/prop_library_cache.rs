@@ -364,7 +364,7 @@ fn run(ops: &[Op], stats: &mut Stats) -> Result<(), TestCaseError> {
                     // which for a text name is before any of it is read as
                     // text: an archive under a text name fails to open and
                     // is in the cache all the same, as a scan would put it.
-                    if trusted.is_none() && NAMES[*name].ends_with(".txt") {
+                    if trusted.is_none() && NAMES[*name].to_ascii_lowercase().ends_with(".txt") {
                         let recorded = (path.clone(), (hex(&bytes), now));
                         match &mut cache {
                             Some(cache) => drop(cache.insert(recorded.0, recorded.1)),

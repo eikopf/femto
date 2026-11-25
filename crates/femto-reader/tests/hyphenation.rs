@@ -435,3 +435,36 @@ fn leading_soft_hyphens_do_not_create_an_empty_or_hyphen_only_line() {
     let last = pages.pages.last().unwrap().lines.last().unwrap();
     assert_eq!(last.end.byte, text.len());
 }
+
+/// Lines of `text` and the fastest of three layouts of it.
+fn layout_time(text: &str) -> (usize, std::time::Duration) {
+    let fonts = fonts();
+    let chapter = Document::from_text("Time", text)
+        .unwrap()
+        .chapter(0)
+        .unwrap();
+    let mut lines = 0;
+    let fastest = (0..3)
+        .map(|_| {
+            let started = std::time::Instant::now();
+            let pages = paginate(&chapter, &fonts, config(240)).unwrap();
+            lines = pages.pages.iter().map(|page| page.lines.len()).sum();
+            started.elapsed()
+        })
+        .min()
+        .unwrap();
+    (lines, fastest)
+}
+
+#[test]
+fn a_run_of_soft_hyphens_costs_about_what_other_break_opportunities_cost() {
+    // Zero-width spaces offer the same breaks without a hyphen to display.
+    let (control_lines, control) = layout_time(&"ab\u{200b}".repeat(1000));
+    let (lines, soft) = layout_time(&"ab\u{ad}".repeat(1000));
+    // The displayed hyphen takes room, so lines hold a little less.
+    assert!((control_lines..=2 * control_lines).contains(&lines));
+    assert!(
+        soft < 20 * control,
+        "{soft:?} with soft hyphens, {control:?} with zero-width spaces"
+    );
+}

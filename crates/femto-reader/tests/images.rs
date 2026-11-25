@@ -111,6 +111,31 @@ fn reduction_preserves_average_and_alpha_composites_on_white() {
     );
 }
 
+/// A box side that limits an image is filled: no pixel is lost to rounding.
+#[test]
+fn a_reduced_image_fills_the_side_of_the_box_that_limits_it() {
+    for (width, height, max_width, max_height, expected) in [
+        (1, 2931, 1, 107, (1, 107)),
+        (2931, 1, 107, 1, (107, 1)),
+        (2931, 2931, 107, 500, (107, 107)),
+        // The other side is rounded down, but not to nothing.
+        (1400, 2100, 480, 800, (480, 720)),
+        (3, 2, 2, 2, (2, 1)),
+        (8192, 1, 100, 100, (100, 1)),
+        // Never enlarged, however large the box.
+        (300, 200, 600, u32::MAX, (300, 200)),
+    ] {
+        let reduced = Size { width, height }
+            .reduced(max_width, max_height)
+            .unwrap();
+        assert_eq!(
+            (reduced.width, reduced.height),
+            expected,
+            "{width}x{height} in {max_width}x{max_height}"
+        );
+    }
+}
+
 #[test]
 fn dither_levels_and_packed_row_boundaries() {
     for levels in [2, 4] {

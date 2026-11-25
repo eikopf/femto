@@ -2533,3 +2533,92 @@ fn go_to_moves_to_a_share_of_the_book_and_back_returns() {
         .unwrap();
     assert_eq!(reader.position(), start);
 }
+
+fn numbered(count: usize) -> Vec<String> {
+    (0..count).map(|index| format!("Row {index}")).collect()
+}
+
+#[test]
+fn tailnet_rows_that_shrink_leave_the_last_entry_selected() {
+    use femto_reader::ui::TailnetEvent;
+    let mut reader = reader();
+    let mut ui = ReaderUi::default();
+    ui.open_tailnet();
+    // Four actions and ten status rows fill three pages of six.
+    ui.set_tailnet_status(&numbered(10));
+    while ui.swipe(&mut reader, true).unwrap() == Effect::Redraw {}
+    ui.set_tailnet_status(&[]);
+
+    let mut expected = ReaderUi::default();
+    expected.open_tailnet();
+    for _ in 0..3 {
+        expected.turn(&mut reader, true).unwrap();
+    }
+    assert!(
+        ui.render(&mut reader, 2).unwrap() == expected.render(&mut reader, 2).unwrap(),
+        "the view is not the one reached through a selection within the entries"
+    );
+    assert_eq!(ui.turn(&mut reader, true).unwrap(), Effect::Unchanged);
+    ui.select(&mut reader).unwrap();
+    assert_eq!(ui.take_tailnet_event(), Some(TailnetEvent::Renew));
+    assert_eq!(ui.turn(&mut reader, false).unwrap(), Effect::Redraw);
+    ui.select(&mut reader).unwrap();
+    assert_eq!(ui.take_tailnet_event(), Some(TailnetEvent::Stop));
+}
+
+#[test]
+fn catalog_rows_that_shrink_leave_the_last_row_selected() {
+    use femto_reader::ui::CatalogEvent;
+    let mut reader = reader();
+    let mut ui = ReaderUi::default();
+    ui.set_catalog_view("Catalog", &numbered(14)).unwrap();
+    while ui.swipe(&mut reader, true).unwrap() == Effect::Redraw {}
+    assert_eq!(ui.catalog_position(), Some(12));
+    ui.set_catalog_rows(&numbered(3)).unwrap();
+    assert_eq!(ui.catalog_position(), Some(2));
+
+    let mut expected = ReaderUi::default();
+    expected.set_catalog_view("Catalog", &numbered(3)).unwrap();
+    expected.set_catalog_position(2);
+    assert!(
+        ui.render(&mut reader, 2).unwrap() == expected.render(&mut reader, 2).unwrap(),
+        "the view is not the one reached through a selection within the entries"
+    );
+    ui.select(&mut reader).unwrap();
+    assert_eq!(ui.take_catalog_event(), Some(CatalogEvent::Activate(2)));
+    ui.set_catalog_rows(&[]).unwrap();
+    assert_eq!(ui.catalog_position(), Some(0));
+}
+
+#[test]
+fn back_from_a_scan_error_that_is_gone_selects_a_remaining_one() {
+    use femto_reader::state::Library;
+    let errors = |count| Library {
+        errors: numbered(count),
+        ..Default::default()
+    };
+    let mut reader = reader();
+    let mut ui = ReaderUi::default();
+    ui.set_library(errors(3));
+    ui.open_library();
+    ui.choose(&mut reader, "Scan errors").unwrap();
+    ui.choose(&mut reader, "Row 2").unwrap();
+    // A rescan finishes while the third error's detail is showing.
+    ui.set_library(errors(1));
+    ui.back(&mut reader).unwrap();
+
+    let mut expected = ReaderUi::default();
+    expected.set_library(errors(1));
+    expected.open_library();
+    expected.choose(&mut reader, "Scan errors").unwrap();
+    assert!(
+        ui.render(&mut reader, 2).unwrap() == expected.render(&mut reader, 2).unwrap(),
+        "the view is not the one reached through a selection within the entries"
+    );
+    assert_eq!(ui.select(&mut reader).unwrap(), Effect::Redraw);
+    expected.choose(&mut reader, "Row 0").unwrap();
+    assert!(
+        ui.render(&mut reader, 2).unwrap() == expected.render(&mut reader, 2).unwrap(),
+        "the view is not the one reached through a selection within the entries"
+    );
+}

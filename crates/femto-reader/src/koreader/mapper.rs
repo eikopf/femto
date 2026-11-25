@@ -376,7 +376,12 @@ pub fn encode(
         |path, node| {
             if node.raw.contains(&raw) || (result.is_none() && raw == node.raw.end) {
                 let mut path = path.clone();
-                path.offset = Some(node.origins.partition_point(|&origin| origin < raw));
+                let offset = node.origins.partition_point(|&origin| origin < raw);
+                // The engine keeps no character for some of the source, such
+                // as the CR of LF CR. That is given as the character before
+                // it, never the one after.
+                let dropped = node.origins.get(offset).is_some_and(|&origin| origin > raw);
+                path.offset = Some(offset - usize::from(dropped && offset > 0));
                 result = Some(path);
             }
             Ok(())

@@ -123,7 +123,9 @@ pub struct Session {
     /// The request in flight was not asked for from the sync menu, and
     /// reports nothing to it.
     quiet: bool,
-    /// The position the user is being asked about, and once chosen.
+    /// The position the user was last asked about, and once chosen. A
+    /// question left unanswered stays here and holds nothing up: only the
+    /// menu that asking opens can answer, and asking again replaces it.
     conflict: Option<Conflict>,
     accepted: Option<Conflict>,
     /// How the last request ended, for a log; the menu shows its own.
@@ -162,7 +164,7 @@ impl Session {
     /// Starts bringing the open book level with the server without being
     /// asked from the menu. False when nothing was started.
     pub fn reconcile(&mut self, reader: &Reader, factory: TransportFactory, leaving: bool) -> bool {
-        if self.is_busy() || self.conflict.is_some() {
+        if self.is_busy() {
             return false;
         }
         let started = self
@@ -428,16 +430,17 @@ impl Session {
                         !moved
                     };
                     if ask {
-                        // Not over a menu the user is in; it is asked when
-                        // the book is next opened.
-                        if same_book && !ui.is_open() {
+                        // Not over a menu the user is in or a page turn on
+                        // its way; it is asked when the book is next opened.
+                        if same_book
+                            && ui.ask_sync_conflict(percent, reader.book_progress_percent())
+                        {
                             self.conflict = Some(Conflict {
                                 book: origin.book,
                                 target,
                                 record,
                                 budget,
                             });
-                            ui.ask_sync_conflict(percent, reader.book_progress_percent());
                             self.outcome = Some("Asked which position to keep".into());
                             changed = true;
                         } else {

@@ -240,8 +240,6 @@ fn automatic_sync_asks_when_both_moved_follows_the_answer_and_uploads_before_sle
     assert_eq!((saves, reader.position()), (0, original));
     assert_eq!(outcome.as_deref(), Some("Asked which position to keep"));
     assert!(ui.is_open() && !ui.is_kosync_open());
-    // No second question is put while the first stands.
-    assert!(!session.reconcile(&reader, factory.clone(), false));
     ui.choose(&mut reader, "Go to 10%").unwrap();
     let event = ui.take_kosync_event().unwrap();
     assert!(!ui.is_open());
@@ -291,4 +289,79 @@ fn automatic_sync_asks_when_both_moved_follows_the_answer_and_uploads_before_sle
     assert!(!ui.is_open());
     assert_ne!(reader.position(), original);
     assert_eq!(synced(&reader).unwrap().device_id, "peer");
+}
+#[test]
+fn a_question_left_unanswered_returns_and_stops_no_other_sync() {
+    let (mut reader, mut session, mut ui, factory, ready, calls) = setup(&fixture("sample.epub"));
+    ready.store(true, Ordering::SeqCst);
+    reader.record_position(10);
+    let original = reader.position();
+    // A book never synced meets another device's record: the user is asked.
+    let mut ask = |reader: &mut Reader, ui: &mut ReaderUi| {
+        assert!(
+            session.reconcile(reader, factory.clone(), false),
+            "comparison refused"
+        );
+        until(|| {
+            session.poll(reader, ui, 20, |_| panic!("a question saves nothing"));
+            !session.is_busy()
+        });
+        assert_eq!(
+            session.take_outcome().as_deref(),
+            Some("Asked which position to keep")
+        );
+        assert!(ui.is_open());
+    };
+    ask(&mut reader, &mut ui);
+    // Leaving the question changes nothing and sends no answer.
+    ui.back(&mut reader).unwrap();
+    assert!(!ui.is_open() && ui.take_kosync_event().is_none());
+    assert_eq!(reader.position(), original);
+    // It returns when the book is next compared.
+    ask(&mut reader, &mut ui);
+    ui.back(&mut reader).unwrap();
+    // Left again, it does not keep another book from uploading before sleep.
+    reader
+        .open_document(Document::open(fixture("navigation.epub")).unwrap())
+        .unwrap();
+    reader.record_position(30);
+    assert!(session.has_unsent(&reader));
+    ready.store(false, Ordering::SeqCst);
+    assert!(
+        session.reconcile(&reader, factory.clone(), true),
+        "upload before sleep refused"
+    );
+    until(|| calls.load(Ordering::SeqCst) == 3);
+    assert!(session.cancel_and_wait(Duration::from_secs(5)));
+}
+#[test]
+fn a_question_due_during_a_pending_page_turn_waits_for_the_next_comparison() {
+    let (mut reader, mut session, mut ui, factory, ready, _) = setup(&fixture("sample.epub"));
+    ready.store(true, Ordering::SeqCst);
+    // A turn into the next chapter is indexed over several polls.
+    for _ in 0..64 {
+        ui.turn(&mut reader, true).unwrap();
+        if ui.is_navigating() {
+            break;
+        }
+    }
+    assert!(ui.is_navigating() && !ui.is_open());
+    let mut compare = |reader: &mut Reader, ui: &mut ReaderUi| {
+        assert!(session.reconcile(reader, factory.clone(), false));
+        until(|| {
+            session.poll(reader, ui, 20, |_| panic!("a question saves nothing"));
+            !session.is_busy()
+        });
+    };
+    // The turn would close the question when it finished: it is not asked.
+    compare(&mut reader, &mut ui);
+    assert!(!ui.is_open());
+    until(|| {
+        ui.poll_navigation(&mut reader);
+        !ui.is_navigating()
+    });
+    assert!(!ui.is_open());
+    // It is asked at the next comparison, with the page at rest.
+    compare(&mut reader, &mut ui);
+    assert!(ui.is_open() && !ui.is_kosync_open());
 }

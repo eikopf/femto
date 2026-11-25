@@ -88,13 +88,23 @@ Accepts trailing whitespace after `application/epub+zip` in the `mimetype` entry
 - Evidence: `crates/femto-reader/tests/library_sweep.rs` run over that library before and after; a unit test for the mimetype in `src/zip.rs`.
 - Upstream: upstreamable.
 
+### 0007-archive-entry-of-its-stated-size
+
+A read gives exactly the number of bytes the central directory states for the entry, or fails. Both DEFLATE loops in `src/zip.rs` (`read_file_with_scratch` and `read_file_to_writer_with_scratch`, which every other read goes through) give inflate no output room past the stated size, and fail when the stream has more to write or ends short of it. A stored entry must state the same compressed and uncompressed size. The failures are a new `ZipErrorKind::SizeMismatch`.
+
+- Why: every limit on a read is checked against the stated sizes (`ZipLimits::max_file_read_size`, the cap of `read_entry_into_with_limit` behind chapters, stylesheets, image dimensions, the cover and `Document::resource`), and nothing held the data to them. A deflated entry was inflated until its stream ended, so a book could state 16 bytes for an entry and have megabytes written into a `Vec` on a device with a few megabytes of memory.
+- Evidence: observed failure. In `crates/femto-reader/tests/archive.rs`, `a_resource_is_never_larger_than_the_cap` builds a book under 64 KiB whose image states 16 bytes and inflates to 8 MiB; before the change `Document::resource`, whose cap is 2 MiB, returned all of it. `an_entry_that_is_not_the_size_it_states_is_refused` covers both read paths, entries that hold more and less than stated, and stored entries. Found by a property test over generated archives. The library sweep (`crates/femto-reader/tests/library_sweep.rs`) was not run with this change, so that no book in circulation misstates a size is assumed, not measured.
+- Upstream: upstreamable. Refusing an entry that unpacks to less than it states is stricter than the limits need; upstream may prefer to refuse only the excess.
+
 ## Dependencies between patches
 
-0001 is independent of the rest. 0002 and 0003 are independent of each other in behaviour. 0004 applies on top of 0002 and 0003 because it touches neighbouring lines. 0006 is independent of the rest. 0005 depends on 0004 for one hunk (a test `match` that lists the new `StyledEventOrRun` variants was placed in 0004 so that each state compiles). The library type-checks after each patch.
+0001 is independent of the rest. 0002 and 0003 are independent of each other in behaviour. 0004 applies on top of 0002 and 0003 because it touches neighbouring lines. 0006 is independent of the rest. 0007 is independent in behaviour and applies on top of 0006. 0005 depends on 0004 for one hunk (a test `match` that lists the new `StyledEventOrRun` variants was placed in 0004 so that each state compiles). The library type-checks after each patch.
 
 ## Verification
 
 Applying 0001 to 0006 in order to the extracted archive reproduces every file under `vendor/epub-stream/src` and `LICENSE` byte for byte. The remaining `diff -r` output is exactly the removed files listed above plus `Cargo.toml`, which was compared structurally (parsed as TOML, dependency tables normalised) with the result described under "Differences that are not patches". `cargo check --lib` passes after each patch with default features. The crate's tests were not run at intermediate states; `scripts/check` runs `cargo test --locked -p epub-stream --lib` on the final state.
+
+0007 was checked against the vendored tree and not against the archive: applied with `patch -p1 -F0` to the files as they were after 0006, it reproduces the files it touches byte for byte.
 
 ## Re-vendoring
 

@@ -87,6 +87,26 @@ const METHOD_DEFLATED: u16 = 8;
 // Re-export the crate's public ZIP error alias for module consumers.
 pub use crate::error::ZipError;
 
+/// The size an entry states it unpacks to. The limits are checked against
+/// it, so a read gives exactly this many bytes or fails. A stored entry is
+/// its own unpacked form and must state one size for both.
+fn stated_size(entry: &CdEntry) -> Result<usize, ZipError> {
+    if entry.method == METHOD_STORED && entry.compressed_size != entry.uncompressed_size {
+        return Err(ZipError::SizeMismatch);
+    }
+    usize::try_from(entry.uncompressed_size).map_err(|_| ZipError::FileTooLarge)
+}
+
+/// Why inflate made no progress: with the stated size written it has more
+/// to write and no room for it; before that the stream is damaged.
+fn stalled(written: usize, stated: usize) -> ZipError {
+    if written == stated {
+        ZipError::SizeMismatch
+    } else {
+        ZipError::DecompressError
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct EocdInfo {
     cd_offset: u64,
@@ -582,8 +602,7 @@ impl<F: Read + Seek> StreamingZip<F> {
                 return Err(ZipError::FileTooLarge);
             }
         }
-        let uncompressed_size =
-            usize::try_from(entry.uncompressed_size).map_err(|_| ZipError::FileTooLarge)?;
+        let uncompressed_size = stated_size(entry)?;
         if uncompressed_size > buf.len() {
             return Err(ZipError::BufferTooSmall);
         }
@@ -599,11 +618,7 @@ impl<F: Read + Seek> StreamingZip<F> {
         match entry.method {
             METHOD_STORED => {
                 // Read stored data directly
-                let size =
-                    usize::try_from(entry.compressed_size).map_err(|_| ZipError::FileTooLarge)?;
-                if size > buf.len() {
-                    return Err(ZipError::BufferTooSmall);
-                }
+                let size = uncompressed_size;
                 self.file
                     .read_exact(&mut buf[..size])
                     .map_err(|_| ZipError::IoError)?;
@@ -640,7 +655,8 @@ impl<F: Read + Seek> StreamingZip<F> {
                     let result = miniz_oxide::inflate::stream::inflate(
                         &mut self.inflate_state,
                         pending,
-                        &mut buf[written..],
+                        // No room past the stated size, whatever the buffer.
+                        &mut buf[written..uncompressed_size],
                         MZFlush::None,
                     );
                     let consumed = result.bytes_consumed;
@@ -657,12 +673,15 @@ impl<F: Read + Seek> StreamingZip<F> {
                         }
                         Ok(MZStatus::Ok) => {
                             if consumed == 0 && produced == 0 {
-                                return Err(ZipError::DecompressError);
+                                return Err(stalled(written, uncompressed_size));
                             }
                         }
                         Ok(MZStatus::NeedDict) => return Err(ZipError::DecompressError),
                         Err(_) => return Err(ZipError::DecompressError),
                     }
+                }
+                if written != uncompressed_size {
+                    return Err(ZipError::SizeMismatch);
                 }
 
                 // Verify CRC32 if available
@@ -716,6 +735,7 @@ impl<F: Read + Seek> StreamingZip<F> {
                 return Err(ZipError::FileTooLarge);
             }
         }
+        let uncompressed_size = stated_size(entry)?;
 
         let data_offset = self.calc_data_offset(entry)?;
         self.file
@@ -724,8 +744,7 @@ impl<F: Read + Seek> StreamingZip<F> {
 
         match entry.method {
             METHOD_STORED => {
-                let mut remaining =
-                    usize::try_from(entry.compressed_size).map_err(|_| ZipError::FileTooLarge)?;
+                let mut remaining = uncompressed_size;
                 let mut hasher = crc32fast::Hasher::new();
                 let mut written = 0usize;
 
@@ -765,10 +784,12 @@ impl<F: Read + Seek> StreamingZip<F> {
                         compressed_remaining -= take;
                     }
 
+                    // No room past the stated size, so no more is written.
+                    let room = core::cmp::min(output_buf.len(), uncompressed_size - written);
                     let result = miniz_oxide::inflate::stream::inflate(
                         &mut self.inflate_state,
                         pending,
-                        output_buf,
+                        &mut output_buf[..room],
                         MZFlush::None,
                     );
                     let consumed = result.bytes_consumed;
@@ -792,12 +813,15 @@ impl<F: Read + Seek> StreamingZip<F> {
                         }
                         Ok(MZStatus::Ok) => {
                             if consumed == 0 && produced == 0 {
-                                return Err(ZipError::DecompressError);
+                                return Err(stalled(written, uncompressed_size));
                             }
                         }
                         Ok(MZStatus::NeedDict) => return Err(ZipError::DecompressError),
                         Err(_) => return Err(ZipError::DecompressError),
                     }
+                }
+                if written != uncompressed_size {
+                    return Err(ZipError::SizeMismatch);
                 }
 
                 if entry.crc32 != 0 && hasher.finalize() != entry.crc32 {

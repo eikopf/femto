@@ -1790,15 +1790,10 @@ impl ReaderUi {
             return self.back(reader);
         }
         let (entries, selected) = self.menu(reader);
-        if self.is_editing() {
+        let index = if self.is_editing() {
             geometry.keyboard()?;
-            let Some(index) = geometry.key_at(x, row) else {
-                return Ok(Effect::Unchanged);
-            };
-            self.selected = index;
-            return self.activate(reader, entries[index].1);
-        }
-        if row == geometry.rows - 1 {
+            geometry.key_at(x, row)
+        } else if row == geometry.rows - 1 {
             let page = selected / geometry.items;
             let next = if x < layout.width / 2 {
                 page.saturating_sub(1)
@@ -1807,21 +1802,26 @@ impl ReaderUi {
             };
             self.selected = next * geometry.items;
             return Ok(Effect::Redraw);
-        }
-        let index = (selected / geometry.items) * geometry.items + row - 1;
-        let Some((_, command)) = entries.get(index) else {
+        } else {
+            Some((selected / geometry.items) * geometry.items + row - 1)
+        };
+        let Some((index, command)) = index.and_then(|index| Some((index, entries.get(index)?.1)))
+        else {
             return Ok(Effect::Unchanged);
         };
         let moved = selected != index;
         self.selected = index;
-        if let Command::Step(setting) = *command {
+        let command = match command {
             // One tap target per value across the row.
-            let position =
-                (u64::from(x) * setting.positions() as u64 / u64::from(layout.width)) as usize;
-            return self.activate(reader, Command::Set(setting, position));
-        }
-        // Show the tapped row even when its action only starts pending work.
-        Ok(match self.activate(reader, *command)? {
+            Command::Step(setting) => Command::Set(
+                setting,
+                (u64::from(x) * setting.positions() as u64 / u64::from(layout.width)) as usize,
+            ),
+            command => command,
+        };
+        // Show the tapped row or key even when its action changes nothing
+        // or only starts pending work.
+        Ok(match self.activate(reader, command)? {
             Effect::Unchanged if moved => Effect::Redraw,
             effect => effect,
         })

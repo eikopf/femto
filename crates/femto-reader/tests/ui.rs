@@ -1032,6 +1032,42 @@ fn search_text_bounds_grapheme_deletion_and_empty_results() {
 }
 
 #[test]
+fn keyboard_tap_that_edits_nothing_still_shows_the_tapped_key() {
+    let search = |reader: &mut Reader| {
+        let mut ui = ReaderUi::default();
+        ui.open_library();
+        ui.tap(reader, 240, 450).unwrap();
+        assert!(ui.is_editing() && ui.query().is_empty());
+        ui
+    };
+    let mut reader = reader();
+    // Delete with something to delete leaves an empty field and its key
+    // highlighted; with nothing to delete it must show the same.
+    let mut expected = search(&mut reader);
+    expected.type_char('x');
+    assert_eq!(expected.tap(&mut reader, 300, 750).unwrap(), Effect::Redraw);
+    let on_delete = expected.render(&mut reader, 2).unwrap();
+
+    let mut ui = search(&mut reader);
+    assert!(ui.render(&mut reader, 2).unwrap() != on_delete);
+    assert_eq!(ui.tap(&mut reader, 300, 750).unwrap(), Effect::Redraw);
+    assert!(ui.render(&mut reader, 2).unwrap() == on_delete);
+    // The same key again moves nothing.
+    assert_eq!(ui.tap(&mut reader, 300, 750).unwrap(), Effect::Unchanged);
+    assert!(ui.render(&mut reader, 2).unwrap() == on_delete);
+
+    // A letter the full field cannot take.
+    for _ in 0..64 {
+        ui.type_char('x');
+    }
+    let full = ui.render(&mut reader, 2).unwrap();
+    assert_eq!(ui.tap(&mut reader, 40, 150).unwrap(), Effect::Redraw);
+    assert_eq!(ui.query().len(), 64);
+    assert!(ui.render(&mut reader, 2).unwrap() != full);
+    assert_eq!(ui.tap(&mut reader, 40, 150).unwrap(), Effect::Unchanged);
+}
+
+#[test]
 fn rescan_publishes_atomically_and_cancel_or_failure_preserves_the_library() {
     use femto_reader::state::Library;
     let dir = tempfile::tempdir().unwrap();

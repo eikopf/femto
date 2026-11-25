@@ -1,0 +1,153 @@
+femto patch for iri-string 0.7.15
+Subject: template: keep the triplets held when the value stops continuing them
+
+Requires 0002.
+
+When the decoder holds the beginning of a character or of a triplet and the
+next write does not continue it (`%C3` followed by `x`), push_encoded()
+consumes nothing, moves what it held to the output buffer and reports it as
+undecodable. DecomposeWriter::write_str() took "nothing consumed" to mean
+"nothing to output", flushed the already empty decoder, and went on with the
+plain text, so the held triplets were lost: `{+v}` with `%C3%C3x` expanded to
+`%C3x`. With a stray `%` at the end of one write and `%` at the start of the
+next, the plain text before the next `%` is empty, which a debug assertion
+rejected.
+
+Output the result of every push, also when nothing was consumed, and accept
+an empty plain prefix.
+
+femto requires a search URL to carry the typed keyword unchanged; a value that
+loses bytes on the way is a different search.
+
+--- a/src/parser/str/maybe_pct_encoded.rs
++++ b/src/parser/str/maybe_pct_encoded.rs
+@@ -142,8 +142,10 @@
+                 self.result = (self.f)(PctEncodedFragments::Char(frag, c));
+                 self.result_continue_or_err()
+             }
+-            PushResult::Undecodable(len_written) => self.output_as_undecodable(len_written),
+-            PushResult::NeedMoreBytes => {
++            PushResult::Undecodable(len_written) if len_written > 0 => {
++                self.output_as_undecodable(len_written)
++            }
++            PushResult::Undecodable(_) | PushResult::NeedMoreBytes => {
+                 // Nothing to write at this time.
+                 Ok(())
+             }
+@@ -160,27 +162,10 @@
+         let mut rest = s;
+         while !rest.is_empty() {
+             let (len_consumed, result) = self.decoder.push_encoded(self.buf, rest);
+-            if len_consumed == 0 {
+-                // `rest` does not start with the percent-encoded triplets.
+-                // Flush the decoder before attempting to decode more data.
+-                if let Some(len_written) = self.decoder.flush(self.buf).map(NonZeroU8::get) {
+-                    self.output_as_undecodable(len_written)?;
+-                    rest = &rest[usize::from(len_written)..];
+-                }
+-
+-                // Write plain string prefix (if found).
+-                let (plain_prefix, suffix) = find_split(rest, b'%').unwrap_or((rest, ""));
+-                debug_assert!(
+-                    !plain_prefix.is_empty(),
+-                    "`len_consumed == 0` indicates non-empty `rest` not starting with `%`"
+-                );
+-                self.result = (self.f)(PctEncodedFragments::NoPctStr(plain_prefix));
+-                self.result_continue_or_err()?;
+-                rest = suffix;
+-                continue;
+-            }
+ 
+-            // Process decoding result.
++            // Process decoding result. This is necessary even when no input
++            // is consumed: the decoder then gives up what it held, which
++            // came from the input consumed before.
+             self.output_push_result(result)?;
+             if matches!(result, PushResult::Undecodable(_)) {
+                 // The triplet that made the sequence undecodable is not a
+@@ -191,6 +176,20 @@
+                     self.output_push_result(result)?;
+                 }
+             }
++
++            if len_consumed == 0 {
++                // `rest` does not continue what the decoder held, and the
++                // decoder is empty now. Write plain string prefix (if found).
++                // The prefix is empty when `rest` starts with `%`, which
++                // the decoder will consume next time.
++                let (plain_prefix, suffix) = find_split(rest, b'%').unwrap_or((rest, ""));
++                if !plain_prefix.is_empty() {
++                    self.result = (self.f)(PctEncodedFragments::NoPctStr(plain_prefix));
++                    self.result_continue_or_err()?;
++                }
++                rest = suffix;
++                continue;
++            }
+             rest = &rest[len_consumed..];
+         }
+         Ok(())
+--- a/tests/template.rs
++++ b/tests/template.rs
+@@ -543,3 +543,62 @@
+         );
+     }
+ }
++
++#[test]
++fn reserved_expansion_keeps_triplets_before_non_triplet() {
++    use core::fmt;
++
++    let mut context = SimpleContext::new();
++    // The second `%C3` starts a character that `x` does not continue.
++    context.insert("lead", "%C3%C3x");
++    context.insert("non_ascii", "%CA%E3\u{00E9}");
++    context.insert("incomplete", "%C3%E3%8x");
++
++    // `&[(template, expected)]`.
++    const CASES: &[(&str, &str)] = &[
++        ("{+lead}", "%C3%C3x"),
++        ("{+lead:2}", "%C3%C3"),
++        ("{+lead:3}", "%C3%C3x"),
++        ("{#lead}", "#%C3%C3x"),
++        ("{+non_ascii}", "%CA%E3%C3%A9"),
++        ("{+incomplete}", "%C3%E3%258x"),
++    ];
++
++    for (template, expected) in CASES {
++        let template = UriTemplateStr::new(template).expect("must be valid template");
++        let expanded = template
++            .expand::<UriSpec, _>(&context)
++            .expect("must not have variable type error");
++        assert_eq!(expanded.to_string(), *expected, "template={template:?}");
++
++        let expanded_dynamic = template
++            .expand_dynamic_to_string::<UriSpec, _>(&mut context.clone())
++            .expect("must not have variable type error");
++        assert_eq!(
++            expanded_dynamic, *expected,
++            "dynamic, template={template:?}"
++        );
++    }
++
++    // A stray `%` at the end of one write, and a triplet in the next.
++    #[derive(Clone)]
++    struct Fragmented;
++    impl fmt::Display for Fragmented {
++        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++            f.write_str("a%")?;
++            f.write_str("%41")?;
++            f.write_str("%C3")?;
++            f.write_str("x")
++        }
++    }
++    impl Context for Fragmented {
++        fn visit<V: Visitor>(&self, visitor: V) -> V::Result {
++            visitor.visit_string(Fragmented)
++        }
++    }
++    let template = UriTemplateStr::new("{+x}").expect("must be valid template");
++    let expanded = template
++        .expand::<UriSpec, _>(&Fragmented)
++        .expect("must not have variable type error");
++    assert_eq!(expanded.to_string(), "a%25%41%C3x");
++}

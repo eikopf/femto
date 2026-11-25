@@ -186,7 +186,9 @@ fn body(
     }
     let mut total = 0;
     if head.chunked {
-        for _ in 0..16_384 {
+        // Chunks of data; the empty chunk that ends the body is not one.
+        let mut chunks = 0;
+        loop {
             check(wait, cancelled)?;
             let chunk = line(reader, 256)?;
             let httparse::Status::Complete((_, size)) =
@@ -206,7 +208,8 @@ fn body(
                 return Ok(total);
             }
             let size = usize::try_from(size).map_err(|_| invalid())?;
-            if size > limit - total {
+            chunks += 1;
+            if chunks > 16_384 || size > limit - total {
                 return Err(invalid());
             }
             copy_exact(reader, output, size, wait, cancelled)?;
@@ -217,7 +220,6 @@ fn body(
                 return Err(invalid());
             }
         }
-        Err(invalid())
     } else if let Some(length) = head.length {
         copy_exact(reader, output, length, wait, cancelled)?;
         Ok(length)

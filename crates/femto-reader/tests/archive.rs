@@ -224,3 +224,73 @@ fn a_name_finds_the_entry_of_exactly_that_name() {
     }
     assert!(zip.get_entry("b").is_none());
 }
+
+/// DEFLATE without compression (RFC 1951, section 3.2.4): a block for each
+/// part, the last of them marked final.
+fn deflated(parts: &[&[u8]]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (index, part) in parts.iter().enumerate() {
+        out.push(u8::from(index + 1 == parts.len()));
+        out.extend((part.len() as u16).to_le_bytes());
+        out.extend((!(part.len() as u16)).to_le_bytes());
+        out.extend(*part);
+    }
+    out
+}
+
+/// A buffer of exactly the size an entry states is large enough, also when
+/// the stream has bytes left once the buffer is full: an empty file written
+/// with DEFLATE, as Python's `zipfile` writes it, is nothing but its end
+/// marker, and an end marker may fall in the read after the last data.
+#[test]
+fn an_entry_reads_into_a_buffer_of_exactly_its_size() {
+    let text: Vec<u8> = (0..8187).map(|i| b'a' + (i % 26) as u8).collect();
+    // The reader takes the archive 8 KiB at a time. The first block and its
+    // five-byte header fill one read, and the empty final block is the next.
+    let entries = [
+        stored("stored", b"as it is"),
+        Entry {
+            name: "empty",
+            method: 8,
+            packed: deflated(&[b""]),
+            size: 0,
+        },
+        Entry {
+            name: "one read",
+            method: 8,
+            packed: deflated(&[b"in one block"]),
+            size: 12,
+        },
+        Entry {
+            name: "two reads",
+            method: 8,
+            packed: deflated(&[&text, b""]),
+            size: text.len(),
+        },
+    ];
+    let expected: [&[u8]; 4] = [b"as it is", b"", b"in one block", &text];
+    let mut zip = open(&entries);
+    let mut refused = Vec::new();
+    for (entry, expected) in entries.iter().zip(expected) {
+        let listed = zip.get_entry(entry.name).unwrap().clone();
+        let mut buffer = vec![0xaa; expected.len()];
+        match zip.read_file(&listed, &mut buffer) {
+            Ok(count) => assert_eq!(&buffer[..count], expected, "{}", entry.name),
+            Err(error) => refused.push((entry.name, error)),
+        }
+    }
+    assert!(refused.is_empty(), "{refused:?}");
+}
+
+/// An entry that holds more than it states is refused and not cut short.
+#[test]
+fn an_entry_larger_than_the_buffer_it_asked_for_is_refused() {
+    let mut zip = open(&[Entry {
+        name: "more",
+        method: 8,
+        packed: deflated(&[b"more than four bytes"]),
+        size: 4,
+    }]);
+    let listed = zip.get_entry("more").unwrap().clone();
+    assert!(zip.read_file(&listed, &mut [0; 4]).is_err());
+}

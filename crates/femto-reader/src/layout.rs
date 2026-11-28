@@ -1389,33 +1389,12 @@ fn estimated_fit(p: &Paragraph, start: usize, width: f32, fonts: &Fonts, size: f
     p.text.len()
 }
 
-/// A lower bound on the shaped advance of `range`, or `None` when unshaped
-/// advances say nothing reliable: several spans, scaled text, tabs, or
-/// characters the selected face lacks. Kerning and ligatures only narrow
-/// text slightly, which the allowance covers.
-fn advance_floor(p: &Paragraph, range: Range<usize>, fonts: &Fonts, size: f32) -> Option<f32> {
-    let [span] = p.spans.as_slice() else {
-        return None;
-    };
-    if span.style.scale != 1.0 {
-        return None;
-    }
-    let face = fonts.select(span.style).1.face();
-    let mut units = 0u32;
-    for c in p.text[range].trim_end_matches([' ', '\r', '\n']).chars() {
-        if c == '\u{ad}' {
-            continue;
-        }
-        let glyph = face.glyph_index(c).filter(|_| c != '\t')?;
-        units += u32::from(face.glyph_hor_advance(glyph)?);
-    }
-    Some(0.97 * units as f32 * size / face.units_per_em() as f32)
-}
-
 /// Selects the last break opportunity that fits, as a scan over every
 /// opportunity in order would. The scan starts near an estimate instead of at
 /// the first opportunity, which assumes that a prefix of a fitting line without
-/// a discretionary hyphen also fits.
+/// a discretionary hyphen also fits. Only shaping says what fits: joined
+/// letters and kerned pairs are narrower than their unshaped advances by any
+/// amount, so a line is shaped once more to see that the next word overflows.
 fn break_line(
     p: &Paragraph,
     shaping: &Shaping,
@@ -1465,18 +1444,6 @@ fn break_line(
         }
         if overflow.is_none() {
             for &end in &candidates[first + 1..] {
-                // Most lines end here: the next word plainly does not fit,
-                // which unshaped advances show without shaping the line again.
-                // A displayed hyphen is not part of the longer line's width.
-                if let Some((fitted, line)) = &best
-                    && !line.hyphenated
-                    && !p.text[..end].ends_with('\u{ad}')
-                    && advance_floor(p, *fitted..end, fonts, size)
-                        .is_some_and(|extra| line.width + extra > width)
-                {
-                    overflow = Some(end);
-                    break;
-                }
                 let line = shape(p, shaping, start..end, fonts, size)?;
                 if line.width <= width {
                     best = Some((end, line));
@@ -1495,12 +1462,6 @@ fn break_line(
         }
         if let Some(end) = overflow {
             let after = best.as_ref().map_or(start, |(end, _)| *end);
-            // Width already taken, unless it includes a displayed hyphen.
-            let fitted = match &best {
-                Some((_, line)) if line.hyphenated => None,
-                Some((_, line)) => Some(line.width),
-                None => Some(0.0),
-            };
             let splits = &hyphens[hyphens.partition_point(|&n| n <= after)..];
             let splits = &splits[..splits.partition_point(|&n| n < end)];
             // The longest hyphenated prefix that fits wins, so try long ones first.
@@ -1509,12 +1470,6 @@ fn break_line(
                 if shaping.bidi.levels[start..split]
                     .iter()
                     .any(|level| level.is_rtl())
-                {
-                    continue;
-                }
-                if fitted
-                    .zip(advance_floor(p, after..split, fonts, size))
-                    .is_some_and(|(fitted, extra)| fitted + extra > width)
                 {
                     continue;
                 }
